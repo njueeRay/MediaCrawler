@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 class XHSDataFormatter:
     def __init__(self):
-        self.field_mapping = {
+        # 笔记数据字段映射
+        self.note_field_mapping = {
             "note_id": "笔记ID",
             "title": "标题", 
             "desc": "内容摘要",
@@ -32,9 +33,40 @@ class XHSDataFormatter:
             "note_url": "笔记链接",
             "last_modify_ts": "爬取时间"
         }
+        
+        # 评论数据字段映射
+        self.comment_field_mapping = {
+            "comment_id": "评论ID",
+            "note_id": "所属笔记ID",
+            "content": "评论内容",
+            "create_time": "评论时间",
+            "user_id": "用户ID",
+            "nickname": "用户昵称",
+            "like_count": "点赞数",
+            "sub_comment_count": "子评论数",
+            "ip_location": "地理位置",
+            "parent_comment_id": "父评论ID",
+            "last_modify_ts": "爬取时间"
+        }
     
     def format_single_record(self, raw_data: Dict) -> Dict:
-        """格式化单条记录"""
+        """格式化单条记录 - 自动识别数据类型"""
+        try:
+            # 判断数据类型：有 comment_id 的是评论数据，有 note_id 但没有 comment_id 的是笔记数据
+            if 'comment_id' in raw_data:
+                return self.format_comment_record(raw_data)
+            elif 'note_id' in raw_data:
+                return self.format_note_record(raw_data)
+            else:
+                logger.warning(f"未知数据类型，原始数据: {raw_data}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"格式化记录失败: {e}, 原始数据: {raw_data}")
+            return None
+    
+    def format_note_record(self, raw_data: Dict) -> Dict:
+        """格式化笔记记录"""
         try:
             # 处理时间戳
             publish_time = self.timestamp_to_date(raw_data.get('time'))
@@ -63,11 +95,10 @@ class XHSDataFormatter:
                     "地理位置": raw_data.get('ip_location', ''),
                     "标签": tags,
                     "搜索关键词": raw_data.get('source_keyword', ''),
-                    "笔记链接": [{
-                        "type": "url",
-                        "text": "查看原文",
-                        "link": raw_data.get('note_url', '')
-                    }] if raw_data.get('note_url') else [],
+                    "笔记链接": {
+                        "link": raw_data.get('note_url', ''),
+                        "text": "查看原文"
+                    } if raw_data.get('note_url') else None,
                     "热度评分": heat_score,
                     "爬取时间": crawl_time
                 }
@@ -76,7 +107,58 @@ class XHSDataFormatter:
             return feishu_record
             
         except Exception as e:
-            logger.error(f"格式化记录失败: {e}, 原始数据: {raw_data}")
+            logger.error(f"格式化笔记记录失败: {e}, 原始数据: {raw_data}")
+            return None
+    
+    def format_comment_record(self, raw_data: Dict) -> Dict:
+        """格式化评论记录"""
+        try:
+            # 处理时间戳
+            comment_time = self.timestamp_to_date(raw_data.get('create_time'))
+            crawl_time = self.timestamp_to_date(raw_data.get('last_modify_ts'))
+            
+            # 安全获取数值字段
+            like_count = 0
+            sub_comment_count = 0
+            parent_comment_id = 0
+            
+            try:
+                like_count = int(raw_data.get('like_count', 0)) if raw_data.get('like_count') else 0
+            except (ValueError, TypeError):
+                like_count = 0
+                
+            try:
+                sub_comment_count = int(raw_data.get('sub_comment_count', 0)) if raw_data.get('sub_comment_count') else 0
+            except (ValueError, TypeError):
+                sub_comment_count = 0
+                
+            try:
+                parent_comment_id = int(raw_data.get('parent_comment_id', 0)) if raw_data.get('parent_comment_id') else 0
+            except (ValueError, TypeError):
+                parent_comment_id = 0
+            
+            # 构建飞书记录格式
+            feishu_record = {
+                "fields": {
+                    "评论ID": raw_data.get('comment_id', ''),
+                    "所属笔记ID": raw_data.get('note_id', ''),
+                    "评论内容": self.clean_text(raw_data.get('content', ''))[:1000],  # 限制长度
+                    "评论时间": comment_time,
+                    "用户ID": raw_data.get('user_id', ''),
+                    "用户昵称": raw_data.get('nickname', ''),
+                    "点赞数": like_count,
+                    "子评论数": sub_comment_count,
+                    "地理位置": raw_data.get('ip_location', '') or '',
+                    "父评论ID": str(parent_comment_id) if parent_comment_id > 0 else '',
+                    "是否为回复": "是" if parent_comment_id > 0 else "否",
+                    "爬取时间": crawl_time
+                }
+            }
+            
+            return feishu_record
+            
+        except Exception as e:
+            logger.error(f"格式化评论记录失败: {e}, 原始数据: {raw_data}")
             return None
     
     def load_from_csv(self, csv_file_path: str) -> List[Dict]:
@@ -196,26 +278,69 @@ class XHSDataFormatter:
             return 0.0
     
     @staticmethod
-    def get_table_fields() -> List[Dict]:
-        """获取飞书表格字段定义"""
-        return [
-            {"field_name": "笔记ID", "type": 1},  # 单行文本
-            {"field_name": "标题", "type": 1},
-            {"field_name": "内容摘要", "type": 2},  # 多行文本
-            {"field_name": "类型", "type": 3, "property": {"options": [
-                {"name": "图文"}, {"name": "视频"}
-            ]}},  # 单选
-            {"field_name": "发布时间", "type": 5},  # 日期
-            {"field_name": "用户ID", "type": 1},
-            {"field_name": "用户昵称", "type": 1},
-            {"field_name": "点赞数", "type": 2},  # 数字
-            {"field_name": "收藏数", "type": 2},
-            {"field_name": "评论数", "type": 2},
-            {"field_name": "分享数", "type": 2},
-            {"field_name": "地理位置", "type": 1},
-            {"field_name": "标签", "type": 4},  # 多选
-            {"field_name": "搜索关键词", "type": 1},
-            {"field_name": "笔记链接", "type": 15},  # 超链接
-            {"field_name": "热度评分", "type": 2},
-            {"field_name": "爬取时间", "type": 5}
-        ]
+    def get_table_fields(data_type: str = "note") -> List[Dict]:
+        """
+        获取飞书表格字段定义
+        
+        Args:
+            data_type: 数据类型，"note" 为笔记数据，"comment" 为评论数据
+        """
+        if data_type == "comment":
+            return [
+                {"field_name": "评论ID", "type": 1},  # 单行文本
+                {"field_name": "所属笔记ID", "type": 1},  # 单行文本
+                {"field_name": "评论内容", "type": 1},  # 单行文本
+                {"field_name": "评论时间", "type": 5},  # 日期时间
+                {"field_name": "用户ID", "type": 1},  # 单行文本
+                {"field_name": "用户昵称", "type": 1},  # 单行文本
+                {"field_name": "点赞数", "type": 2},  # 数字
+                {"field_name": "子评论数", "type": 2},  # 数字
+                {"field_name": "地理位置", "type": 1},  # 单行文本
+                {"field_name": "父评论ID", "type": 1},  # 单行文本
+                {"field_name": "是否为回复", "type": 3, "property": {"options": [
+                    {"name": "是"}, {"name": "否"}
+                ]}},  # 单选
+                {"field_name": "爬取时间", "type": 5}  # 日期时间
+            ]
+        else:  # note 数据
+            return [
+                {"field_name": "笔记ID", "type": 1},  # 单行文本
+                {"field_name": "标题", "type": 1},  # 单行文本
+                {"field_name": "内容摘要", "type": 1},  # 单行文本
+                {"field_name": "类型", "type": 3, "property": {"options": [
+                    {"name": "图文"}, {"name": "视频"}
+                ]}},  # 单选
+                {"field_name": "发布时间", "type": 5},  # 日期时间
+                {"field_name": "用户ID", "type": 1},  # 单行文本
+                {"field_name": "用户昵称", "type": 1},  # 单行文本
+                {"field_name": "点赞数", "type": 2},  # 数字
+                {"field_name": "收藏数", "type": 2},  # 数字
+                {"field_name": "评论数", "type": 2},  # 数字
+                {"field_name": "分享数", "type": 2},  # 数字
+                {"field_name": "地理位置", "type": 1},  # 单行文本
+                {"field_name": "标签", "type": 4},  # 多选标签
+                {"field_name": "搜索关键词", "type": 1},  # 单行文本
+                {"field_name": "笔记链接", "type": 15},  # 超链接
+                {"field_name": "热度评分", "type": 2},  # 数字
+                {"field_name": "爬取时间", "type": 5}  # 日期时间
+            ]
+    
+    @staticmethod
+    def detect_data_type(data_list: List[Dict]) -> str:
+        """
+        检测数据类型
+        
+        Args:
+            data_list: 数据列表
+            
+        Returns:
+            数据类型: "note" 或 "comment"
+        """
+        if not data_list:
+            return "note"  # 默认为笔记数据
+            
+        first_record = data_list[0]
+        if 'comment_id' in first_record:
+            return "comment"
+        else:
+            return "note"
