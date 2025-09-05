@@ -126,6 +126,8 @@ class XHSDataFormatter:
         except Exception as e:
             logger.error(f"读取JSON文件失败: {e}")
             return []
+    
+    def format_batch_records(self, raw_data_list: List[Dict]) -> List[Dict]:
         """批量格式化记录"""
         formatted_records = []
         

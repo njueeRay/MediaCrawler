@@ -16,13 +16,14 @@ logger = logging.getLogger(__name__)
 try:
     import lark_oapi as lark
     from lark_oapi.api.bitable.v1 import (
-        CreateTableRequest,
+        CreateAppTableRequest,
+        CreateAppTableRequestBody,
         ReqTable,
-        ReqField,
-        BatchCreateTableRecordRequest,
-        BatchCreateTableRecordReqBody,
-        ReqRecord,
-        ListTableRecordRequest,
+        AppTableField,
+        BatchCreateAppTableRecordRequest,
+        BatchCreateAppTableRecordRequestBody,
+        AppTableRecord,
+        ListAppTableRecordRequest,
         CreateAppRequest,
         ReqApp
     )
