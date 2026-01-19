@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/bilibili/core.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -11,7 +20,7 @@
 # -*- coding: utf-8 -*-
 # @Author  : relakkes@gmail.com
 # @Time    : 2023/12/2 18:44
-# @Desc    : B站爬虫
+# @Desc    : Bilibili Crawler
 
 import asyncio
 import os
@@ -41,6 +50,7 @@ from var import crawler_type_var, source_keyword_var
 from .client import BilibiliClient
 from .exception import DataFetchError
 from .field import SearchOrderType
+from .help import parse_video_info_from_url, parse_creator_info_from_url
 from .login import BilibiliLogin
 
 
@@ -54,18 +64,19 @@ class BilibiliCrawler(AbstractCrawler):
         self.index_url = "https://www.bilibili.com"
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
+        self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self):
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
-            ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
-            ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+            self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
+            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
 
         async with async_playwright() as playwright:
-            # 根据配置选择启动模式
+            # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
-                utils.logger.info("[BilibiliCrawler] 使用CDP模式启动浏览器")
+                utils.logger.info("[BilibiliCrawler] Launching browser using CDP mode")
                 self.browser_context = await self.launch_browser_with_cdp(
                     playwright,
                     playwright_proxy_format,
@@ -73,12 +84,13 @@ class BilibiliCrawler(AbstractCrawler):
                     headless=config.CDP_HEADLESS,
                 )
             else:
-                utils.logger.info("[BilibiliCrawler] 使用标准模式启动浏览器")
+                utils.logger.info("[BilibiliCrawler] Launching browser using standard mode")
                 # Launch a browser context.
                 chromium = playwright.chromium
                 self.browser_context = await self.launch_browser(chromium, None, self.user_agent, headless=config.HEADLESS)
-            # stealth.min.js is a js script to prevent the website from detecting the crawler.
-            await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                # stealth.min.js is a js script to prevent the website from detecting the crawler.
+                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url)
 
@@ -103,8 +115,14 @@ class BilibiliCrawler(AbstractCrawler):
                 await self.get_specified_videos(config.BILI_SPECIFIED_ID_LIST)
             elif config.CRAWLER_TYPE == "creator":
                 if config.CREATOR_MODE:
-                    for creator_id in config.BILI_CREATOR_ID_LIST:
-                        await self.get_creator_videos(int(creator_id))
+                    for creator_url in config.BILI_CREATOR_ID_LIST:
+                        try:
+                            creator_info = parse_creator_info_from_url(creator_url)
+                            utils.logger.info(f"[BilibiliCrawler.start] Parsed creator ID: {creator_info.creator_id} from {creator_url}")
+                            await self.get_creator_videos(int(creator_info.creator_id))
+                        except ValueError as e:
+                            utils.logger.error(f"[BilibiliCrawler.start] Failed to parse creator URL: {e}")
+                            continue
                 else:
                     await self.get_all_creator_details(config.BILI_CREATOR_ID_LIST)
             else:
@@ -131,31 +149,31 @@ class BilibiliCrawler(AbstractCrawler):
         end: str = config.END_DAY,
     ) -> Tuple[str, str]:
         """
-        获取 bilibili 作品发布日期起始时间戳 pubtime_begin_s 与发布日期结束时间戳 pubtime_end_s
+        Get bilibili publish start timestamp pubtime_begin_s and publish end timestamp pubtime_end_s
         ---
-        :param start: 发布日期起始时间，YYYY-MM-DD
-        :param end: 发布日期结束时间，YYYY-MM-DD
+        :param start: Publish date start time, YYYY-MM-DD
+        :param end: Publish date end time, YYYY-MM-DD
 
         Note
         ---
-        - 搜索的时间范围为 start 至 end，包含 start 和 end
-        - 若要搜索同一天的内容，为了包含 start 当天的搜索内容，则 pubtime_end_s 的值应该为 pubtime_begin_s 的值加上一天再减去一秒，即 start 当天的最后一秒
-            - 如仅搜索 2024-01-05 的内容，pubtime_begin_s = 1704384000，pubtime_end_s = 1704470399
-              转换为可读的 datetime 对象：pubtime_begin_s = datetime.datetime(2024, 1, 5, 0, 0)，pubtime_end_s = datetime.datetime(2024, 1, 5, 23, 59, 59)
-        - 若要搜索 start 至 end 的内容，为了包含 end 当天的搜索内容，则 pubtime_end_s 的值应该为 pubtime_end_s 的值加上一天再减去一秒，即 end 当天的最后一秒
-            - 如搜索 2024-01-05 - 2024-01-06 的内容，pubtime_begin_s = 1704384000，pubtime_end_s = 1704556799
-              转换为可读的 datetime 对象：pubtime_begin_s = datetime.datetime(2024, 1, 5, 0, 0)，pubtime_end_s = datetime.datetime(2024, 1, 6, 23, 59, 59)
+        - Search time range is from start to end, including both start and end
+        - To search content from the same day, to include search content from that day, pubtime_end_s should be pubtime_begin_s plus one day minus one second, i.e., the last second of start day
+            - For example, searching only 2024-01-05 content, pubtime_begin_s = 1704384000, pubtime_end_s = 1704470399
+              Converted to readable datetime objects: pubtime_begin_s = datetime.datetime(2024, 1, 5, 0, 0), pubtime_end_s = datetime.datetime(2024, 1, 5, 23, 59, 59)
+        - To search content from start to end, to include search content from end day, pubtime_end_s should be pubtime_end_s plus one day minus one second, i.e., the last second of end day
+            - For example, searching 2024-01-05 - 2024-01-06 content, pubtime_begin_s = 1704384000, pubtime_end_s = 1704556799
+              Converted to readable datetime objects: pubtime_begin_s = datetime.datetime(2024, 1, 5, 0, 0), pubtime_end_s = datetime.datetime(2024, 1, 6, 23, 59, 59)
         """
-        # 转换 start 与 end 为 datetime 对象
+        # Convert start and end to datetime objects
         start_day: datetime = datetime.strptime(start, "%Y-%m-%d")
         end_day: datetime = datetime.strptime(end, "%Y-%m-%d")
         if start_day > end_day:
             raise ValueError("Wrong time range, please check your start and end argument, to ensure that the start cannot exceed end")
-        elif start_day == end_day:  # 搜索同一天的内容
-            end_day = (start_day + timedelta(days=1) - timedelta(seconds=1))  # 则将 end_day 设置为 start_day + 1 day - 1 second
-        else:  # 搜索 start 至 end
-            end_day = (end_day + timedelta(days=1) - timedelta(seconds=1))  # 则将 end_day 设置为 end_day + 1 day - 1 second
-        # 将其重新转换为时间戳
+        elif start_day == end_day:  # Searching content from the same day
+            end_day = (start_day + timedelta(days=1) - timedelta(seconds=1))  # Set end_day to start_day + 1 day - 1 second
+        else:  # Searching from start to end
+            end_day = (end_day + timedelta(days=1) - timedelta(seconds=1))  # Set end_day to end_day + 1 day - 1 second
+        # Convert back to timestamps
         return str(int(start_day.timestamp())), str(int(end_day.timestamp()))
 
     async def search_by_keywords(self):
@@ -185,8 +203,8 @@ class BilibiliCrawler(AbstractCrawler):
                     page=page,
                     page_size=bili_limit_count,
                     order=SearchOrderType.DEFAULT,
-                    pubtime_begin_s=0,  # 作品发布日期起始时间戳
-                    pubtime_end_s=0,  # 作品发布日期结束日期时间戳
+                    pubtime_begin_s=0,  # Publish date start timestamp
+                    pubtime_end_s=0,  # Publish date end timestamp
                 )
                 video_list: List[Dict] = videos_res.get("result")
 
@@ -208,11 +226,11 @@ class BilibiliCrawler(AbstractCrawler):
                         await bilibili_store.update_up_info(video_item)
                         await self.get_bilibili_video(video_item, semaphore)
                 page += 1
-                
+
                 # Sleep after page navigation
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-                
+
                 await self.batch_get_video_comments(video_id_list)
 
     async def search_by_keywords_in_time_range(self, daily_limit: bool):
@@ -289,11 +307,11 @@ class BilibiliCrawler(AbstractCrawler):
                                 await self.get_bilibili_video(video_item, semaphore)
 
                         page += 1
-                        
+
                         # Sleep after page navigation
                         await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                         utils.logger.info(f"[BilibiliCrawler.search_by_keywords_in_time_range] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-                        
+
                         await self.batch_get_video_comments(video_id_list)
 
                     except Exception as e:
@@ -362,11 +380,23 @@ class BilibiliCrawler(AbstractCrawler):
             utils.logger.info(f"[BilibiliCrawler.get_creator_videos] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {pn}")
             pn += 1
 
-    async def get_specified_videos(self, bvids_list: List[str]):
+    async def get_specified_videos(self, video_url_list: List[str]):
         """
-        get specified videos info
+        get specified videos info from URLs or BV IDs
+        :param video_url_list: List of video URLs or BV IDs
         :return:
         """
+        utils.logger.info("[BilibiliCrawler.get_specified_videos] Parsing video URLs...")
+        bvids_list = []
+        for video_url in video_url_list:
+            try:
+                video_info = parse_video_info_from_url(video_url)
+                bvids_list.append(video_info.video_id)
+                utils.logger.info(f"[BilibiliCrawler.get_specified_videos] Parsed video ID: {video_info.video_id} from {video_url}")
+            except ValueError as e:
+                utils.logger.error(f"[BilibiliCrawler.get_specified_videos] Failed to parse video URL: {e}")
+                continue
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list = [self.get_video_info_task(aid=0, bvid=video_id, semaphore=semaphore) for video_id in bvids_list]
         video_details = await asyncio.gather(*task_list)
@@ -393,11 +423,11 @@ class BilibiliCrawler(AbstractCrawler):
         async with semaphore:
             try:
                 result = await self.bili_client.get_video_info(aid=aid, bvid=bvid)
-                
+
                 # Sleep after fetching video details
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[BilibiliCrawler.get_video_info_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video details {bvid or aid}")
-                
+
                 return result
             except DataFetchError as ex:
                 utils.logger.error(f"[BilibiliCrawler.get_video_info_task] Get video detail error: {ex}")
@@ -444,6 +474,7 @@ class BilibiliCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
+            proxy_ip_pool=self.ip_proxy_pool,  # 传递代理池用于自动刷新
         )
         return bilibili_client_obj
 
@@ -477,11 +508,12 @@ class BilibiliCrawler(AbstractCrawler):
                     "height": 1080
                 },
                 user_agent=user_agent,
+                channel="chrome",  # Use system's stable Chrome version
             )
             return browser_context
         else:
             # type: ignore
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")
             browser_context = await browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=user_agent)
             return browser_context
 
@@ -493,7 +525,7 @@ class BilibiliCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """
-        使用CDP模式启动浏览器
+        Launch browser using CDP mode
         """
         try:
             self.cdp_manager = CDPBrowserManager()
@@ -504,22 +536,22 @@ class BilibiliCrawler(AbstractCrawler):
                 headless=headless,
             )
 
-            # 显示浏览器信息
+            # Display browser information
             browser_info = await self.cdp_manager.get_browser_info()
-            utils.logger.info(f"[BilibiliCrawler] CDP浏览器信息: {browser_info}")
+            utils.logger.info(f"[BilibiliCrawler] CDP browser info: {browser_info}")
 
             return browser_context
 
         except Exception as e:
-            utils.logger.error(f"[BilibiliCrawler] CDP模式启动失败，回退到标准模式: {e}")
-            # 回退到标准模式
+            utils.logger.error(f"[BilibiliCrawler] CDP mode launch failed, fallback to standard mode: {e}")
+            # Fallback to standard mode
             chromium = playwright.chromium
             return await self.launch_browser(chromium, playwright_proxy, user_agent, headless)
 
     async def close(self):
         """Close browser context"""
         try:
-            # 如果使用CDP模式，需要特殊处理
+            # If using CDP mode, special handling is required
             if self.cdp_manager:
                 await self.cdp_manager.cleanup()
                 self.cdp_manager = None
@@ -568,18 +600,30 @@ class BilibiliCrawler(AbstractCrawler):
         extension_file_name = f"video.mp4"
         await bilibili_store.store_video(aid, content, extension_file_name)
 
-    async def get_all_creator_details(self, creator_id_list: List[int]):
+    async def get_all_creator_details(self, creator_url_list: List[str]):
         """
-        creator_id_list: get details for creator from creator_id_list
+        creator_url_list: get details for creator from creator URL list
         """
-        utils.logger.info(f"[BilibiliCrawler.get_creator_details] Crawling the detalis of creator")
-        utils.logger.info(f"[BilibiliCrawler.get_creator_details] creator ids:{creator_id_list}")
+        utils.logger.info(f"[BilibiliCrawler.get_all_creator_details] Crawling the details of creators")
+        utils.logger.info(f"[BilibiliCrawler.get_all_creator_details] Parsing creator URLs...")
+
+        creator_id_list = []
+        for creator_url in creator_url_list:
+            try:
+                creator_info = parse_creator_info_from_url(creator_url)
+                creator_id_list.append(int(creator_info.creator_id))
+                utils.logger.info(f"[BilibiliCrawler.get_all_creator_details] Parsed creator ID: {creator_info.creator_id} from {creator_url}")
+            except ValueError as e:
+                utils.logger.error(f"[BilibiliCrawler.get_all_creator_details] Failed to parse creator URL: {e}")
+                continue
+
+        utils.logger.info(f"[BilibiliCrawler.get_all_creator_details] creator ids:{creator_id_list}")
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         try:
             for creator_id in creator_id_list:
-                task = asyncio.create_task(self.get_creator_details(creator_id, semaphore), name=creator_id)
+                task = asyncio.create_task(self.get_creator_details(creator_id, semaphore), name=str(creator_id))
                 task_list.append(task)
         except Exception as e:
             utils.logger.warning(f"[BilibiliCrawler.get_all_creator_details] error in the task list. The creator will not be included. {e}")

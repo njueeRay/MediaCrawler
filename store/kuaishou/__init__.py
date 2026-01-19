@@ -1,12 +1,21 @@
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：  
-# 1. 不得用于任何商业用途。  
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。  
-# 3. 不得进行大规模爬取或对平台造成运营干扰。  
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。   
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/store/kuaishou/__init__.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
+# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
+# 1. 不得用于任何商业用途。
+# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
+# 3. 不得进行大规模爬取或对平台造成运营干扰。
+# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
 # 5. 不得用于任何非法或不当的用途。
-#   
-# 详细许可条款请参阅项目根目录下的LICENSE文件。  
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。  
+#
+# 详细许可条款请参阅项目根目录下的LICENSE文件。
+# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 
 # -*- coding: utf-8 -*-
@@ -18,15 +27,18 @@ from typing import List
 import config
 from var import source_keyword_var
 
-from .kuaishou_store_impl import *
+from ._store_impl import *
 
 
 class KuaishouStoreFactory:
     STORES = {
         "csv": KuaishouCsvStoreImplement,
         "db": KuaishouDbStoreImplement,
+        "postgres": KuaishouDbStoreImplement,
         "json": KuaishouJsonStoreImplement,
-        "sqlite": KuaishouSqliteStoreImplement
+        "sqlite": KuaishouSqliteStoreImplement,
+        "mongodb": KuaishouMongoStoreImplement,
+        "excel": KuaishouExcelStoreImplement,
     }
 
     @staticmethod
@@ -34,7 +46,7 @@ class KuaishouStoreFactory:
         store_class = KuaishouStoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
             raise ValueError(
-                "[KuaishouStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite ...")
+                "[KuaishouStoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
         return store_class()
 
 
@@ -75,16 +87,22 @@ async def batch_update_ks_video_comments(video_id: str, comments: List[Dict]):
 
 
 async def update_ks_video_comment(video_id: str, comment_item: Dict):
-    comment_id = comment_item.get("commentId")
+    # V2 API uses snake_case field names and comment_id is int type
+    # Old GraphQL API used camelCase field names
+    # Support both formats for backward compatibility
+    comment_id = comment_item.get("comment_id") or comment_item.get("commentId")
     save_comment_item = {
-        "comment_id": comment_id,
+        "comment_id": str(comment_id) if comment_id else None,  # Convert to string for storage
         "create_time": comment_item.get("timestamp"),
         "video_id": video_id,
         "content": comment_item.get("content"),
-        "user_id": comment_item.get("authorId"),
-        "nickname": comment_item.get("authorName"),
+        # V2: author_id, Old: authorId
+        "user_id": comment_item.get("author_id") or comment_item.get("authorId"),
+        # V2: author_name, Old: authorName
+        "nickname": comment_item.get("author_name") or comment_item.get("authorName"),
         "avatar": comment_item.get("headurl"),
-        "sub_comment_count": str(comment_item.get("subCommentCount", 0)),
+        # V2: commentCount, Old: subCommentCount
+        "sub_comment_count": str(comment_item.get("commentCount") or comment_item.get("subCommentCount", 0)),
         "last_modify_ts": utils.get_current_timestamp(),
     }
     utils.logger.info(
@@ -98,7 +116,7 @@ async def save_creator(user_id: str, creator: Dict):
     local_db_item = {
         'user_id': user_id,
         'nickname': profile.get('user_name'),
-        'gender': '女' if profile.get('gender') == "F" else '男',
+        'gender': 'Female' if profile.get('gender') == "F" else 'Male',
         'avatar': profile.get('headurl'),
         'desc': profile.get('user_text'),
         'ip_location': "",

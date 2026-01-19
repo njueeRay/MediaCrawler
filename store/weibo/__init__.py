@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/store/weibo/__init__.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -19,22 +28,25 @@ from typing import List
 from var import source_keyword_var
 
 from .weibo_store_media import *
-from .weibo_store_impl import *
+from ._store_impl import *
 
 
 class WeibostoreFactory:
     STORES = {
         "csv": WeiboCsvStoreImplement,
         "db": WeiboDbStoreImplement,
+        "postgres": WeiboDbStoreImplement,
         "json": WeiboJsonStoreImplement,
         "sqlite": WeiboSqliteStoreImplement,
+        "mongodb": WeiboMongoStoreImplement,
+        "excel": WeiboExcelStoreImplement,
     }
 
     @staticmethod
     def create_store() -> AbstractStore:
         store_class = WeibostoreFactory.STORES.get(config.SAVE_DATA_OPTION)
         if not store_class:
-            raise ValueError("[WeibotoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite ...")
+            raise ValueError("[WeibotoreFactory.create_store] Invalid save option only supported csv or db or json or sqlite or mongodb or excel ...")
         return store_class()
 
 
@@ -177,7 +189,7 @@ async def save_creator(user_id: str, user_info: Dict):
     local_db_item = {
         'user_id': user_id,
         'nickname': user_info.get('screen_name'),
-        'gender': '女' if user_info.get('gender') == "f" else '男',
+        'gender': 'Female' if user_info.get('gender') == "f" else 'Male',
         'avatar': user_info.get('avatar_hd'),
         'desc': user_info.get('description'),
         'ip_location': user_info.get("source", "").replace("来自", ""),

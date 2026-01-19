@@ -1,12 +1,21 @@
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：  
-# 1. 不得用于任何商业用途。  
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。  
-# 3. 不得进行大规模爬取或对平台造成运营干扰。  
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。   
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/xhs/help.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
+# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
+# 1. 不得用于任何商业用途。
+# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
+# 3. 不得进行大规模爬取或对平台造成运营干扰。
+# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
 # 5. 不得用于任何非法或不当的用途。
-#   
-# 详细许可条款请参阅项目根目录下的LICENSE文件。  
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。  
+#
+# 详细许可条款请参阅项目根目录下的LICENSE文件。
+# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 
 import ctypes
@@ -15,7 +24,7 @@ import random
 import time
 import urllib.parse
 
-from model.m_xiaohongshu import NoteUrlInfo
+from model.m_xiaohongshu import NoteUrlInfo, CreatorUrlInfo
 from tools.crawler_util import extract_url_params_to_dict
 
 
@@ -27,16 +36,17 @@ def sign(a1="", b1="", x_s="", x_t=""):
         "s0": 3,  # getPlatformCode
         "s1": "",
         "x0": "1",  # localStorage.getItem("b1b1")
-        "x1": "3.7.8-2",  # version
+        "x1": "4.2.2",  # version
         "x2": "Mac OS",
         "x3": "xhs-pc-web",
-        "x4": "4.27.2",
+        "x4": "4.74.0",
         "x5": a1,  # cookie of a1
         "x6": x_t,
         "x7": x_s,
         "x8": b1,  # localStorage.getItem("b1")
         "x9": mrc(x_t + x_s + b1),
         "x10": 154,  # getSigCount
+        "x11": "normal"
     }
     encode_str = encodeUtf8(json.dumps(common, separators=(',', ':')))
     x_s_common = b64Encode(encode_str)
@@ -287,13 +297,13 @@ def get_img_urls_by_trace_id(trace_id: str, format_type: str = "png"):
 
 
 def get_trace_id(img_url: str):
-    # 浏览器端上传的图片多了 /spectrum/ 这个路径
+    # Browser-uploaded images have an additional /spectrum/ path
     return f"spectrum/{img_url.split('/')[-1]}" if img_url.find("spectrum") != -1 else img_url.split("/")[-1]
 
 
 def parse_note_info_from_note_url(url: str) -> NoteUrlInfo:
     """
-    从小红书笔记url中解析出笔记信息
+    Parse note information from Xiaohongshu note URL
     Args:
         url: "https://www.xiaohongshu.com/explore/66fad51c000000001b0224b8?xsec_token=AB3rO-QopW5sgrJ41GwN01WCXh6yWPxjSoFI9D5JIMgKw=&xsec_source=pc_search"
     Returns:
@@ -306,11 +316,55 @@ def parse_note_info_from_note_url(url: str) -> NoteUrlInfo:
     return NoteUrlInfo(note_id=note_id, xsec_token=xsec_token, xsec_source=xsec_source)
 
 
+def parse_creator_info_from_url(url: str) -> CreatorUrlInfo:
+    """
+    Parse creator information from Xiaohongshu creator homepage URL
+    Supports the following formats:
+    1. Full URL: "https://www.xiaohongshu.com/user/profile/5eb8e1d400000000010075ae?xsec_token=AB1nWBKCo1vE2HEkfoJUOi5B6BE5n7wVrbdpHoWIj5xHw=&xsec_source=pc_feed"
+    2. Pure ID: "5eb8e1d400000000010075ae"
+
+    Args:
+        url: Creator homepage URL or user_id
+    Returns:
+        CreatorUrlInfo: Object containing user_id, xsec_token, xsec_source
+    """
+    # If it's a pure ID format (24 hexadecimal characters), return directly
+    if len(url) == 24 and all(c in "0123456789abcdef" for c in url):
+        return CreatorUrlInfo(user_id=url, xsec_token="", xsec_source="")
+
+    # Extract user_id from URL: /user/profile/xxx
+    import re
+    user_pattern = r'/user/profile/([^/?]+)'
+    match = re.search(user_pattern, url)
+    if match:
+        user_id = match.group(1)
+        # Extract xsec_token and xsec_source parameters
+        params = extract_url_params_to_dict(url)
+        xsec_token = params.get("xsec_token", "")
+        xsec_source = params.get("xsec_source", "")
+        return CreatorUrlInfo(user_id=user_id, xsec_token=xsec_token, xsec_source=xsec_source)
+
+    raise ValueError(f"Unable to parse creator info from URL: {url}")
+
+
 if __name__ == '__main__':
     _img_url = "https://sns-img-bd.xhscdn.com/7a3abfaf-90c1-a828-5de7-022c80b92aa3"
-    # 获取一个图片地址在多个cdn下的url地址
+    # Get image URL addresses under multiple CDNs for a single image
     # final_img_urls = get_img_urls_by_trace_id(get_trace_id(_img_url))
     final_img_url = get_img_url_by_trace_id(get_trace_id(_img_url))
     print(final_img_url)
 
-
+    # Test creator URL parsing
+    print("\n=== Creator URL Parsing Test ===")
+    test_creator_urls = [
+        "https://www.xiaohongshu.com/user/profile/5eb8e1d400000000010075ae?xsec_token=AB1nWBKCo1vE2HEkfoJUOi5B6BE5n7wVrbdpHoWIj5xHw=&xsec_source=pc_feed",
+        "5eb8e1d400000000010075ae",
+    ]
+    for url in test_creator_urls:
+        try:
+            result = parse_creator_info_from_url(url)
+            print(f"✓ URL: {url[:80]}...")
+            print(f"  Result: {result}\n")
+        except Exception as e:
+            print(f"✗ URL: {url}")
+            print(f"  Error: {e}\n")

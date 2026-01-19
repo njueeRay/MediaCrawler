@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/douyin/core.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -33,6 +42,7 @@ from var import crawler_type_var, source_keyword_var
 from .client import DouYinClient
 from .exception import DataFetchError
 from .field import PublishTimeType
+from .help import parse_video_info_from_url, parse_creator_info_from_url
 from .login import DouYinLogin
 
 
@@ -45,12 +55,13 @@ class DouYinCrawler(AbstractCrawler):
     def __init__(self) -> None:
         self.index_url = "https://www.douyin.com"
         self.cdp_manager = None
+        self.ip_proxy_pool = None  # 代理IP池，用于代理自动刷新
 
     async def start(self) -> None:
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
-            ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
-            ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+            self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
+            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
 
         async with async_playwright() as playwright:
@@ -73,8 +84,9 @@ class DouYinCrawler(AbstractCrawler):
                     user_agent=None,
                     headless=config.HEADLESS,
                 )
-            # stealth.min.js is a js script to prevent the website from detecting the crawler.
-            await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                # stealth.min.js is a js script to prevent the website from detecting the crawler.
+                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url)
 
@@ -139,30 +151,59 @@ class DouYinCrawler(AbstractCrawler):
                     utils.logger.error(f"[DouYinCrawler.search] search douyin keyword: {keyword} failed，账号也许被风控了。")
                     break
                 dy_search_id = posts_res.get("extra", {}).get("logid", "")
+                page_aweme_list = []
                 for post_item in posts_res.get("data"):
                     try:
                         aweme_info: Dict = (post_item.get("aweme_info") or post_item.get("aweme_mix_info", {}).get("mix_items")[0])
                     except TypeError:
                         continue
                     aweme_list.append(aweme_info.get("aweme_id", ""))
+                    page_aweme_list.append(aweme_info.get("aweme_id", ""))
                     await douyin_store.update_douyin_aweme(aweme_item=aweme_info)
                     await self.get_aweme_media(aweme_item=aweme_info)
+                
+                # Batch get note comments for the current page
+                await self.batch_get_note_comments(page_aweme_list)
+
                 # Sleep after each page navigation
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
-            await self.batch_get_note_comments(aweme_list)
 
     async def get_specified_awemes(self):
-        """Get the information and comments of the specified post"""
+        """Get the information and comments of the specified post from URLs or IDs"""
+        utils.logger.info("[DouYinCrawler.get_specified_awemes] Parsing video URLs...")
+        aweme_id_list = []
+        for video_url in config.DY_SPECIFIED_ID_LIST:
+            try:
+                video_info = parse_video_info_from_url(video_url)
+
+                # 处理短链接
+                if video_info.url_type == "short":
+                    utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Resolving short link: {video_url}")
+                    resolved_url = await self.dy_client.resolve_short_url(video_url)
+                    if resolved_url:
+                        # 从解析后的URL中提取视频ID
+                        video_info = parse_video_info_from_url(resolved_url)
+                        utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Short link resolved to aweme ID: {video_info.aweme_id}")
+                    else:
+                        utils.logger.error(f"[DouYinCrawler.get_specified_awemes] Failed to resolve short link: {video_url}")
+                        continue
+
+                aweme_id_list.append(video_info.aweme_id)
+                utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Parsed aweme ID: {video_info.aweme_id} from {video_url}")
+            except ValueError as e:
+                utils.logger.error(f"[DouYinCrawler.get_specified_awemes] Failed to parse video URL: {e}")
+                continue
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [self.get_aweme_detail(aweme_id=aweme_id, semaphore=semaphore) for aweme_id in config.DY_SPECIFIED_ID_LIST]
+        task_list = [self.get_aweme_detail(aweme_id=aweme_id, semaphore=semaphore) for aweme_id in aweme_id_list]
         aweme_details = await asyncio.gather(*task_list)
         for aweme_detail in aweme_details:
             if aweme_detail is not None:
                 await douyin_store.update_douyin_aweme(aweme_item=aweme_detail)
                 await self.get_aweme_media(aweme_item=aweme_detail)
-        await self.batch_get_note_comments(config.DY_SPECIFIED_ID_LIST)
+        await self.batch_get_note_comments(aweme_id_list)
 
     async def get_aweme_detail(self, aweme_id: str, semaphore: asyncio.Semaphore) -> Any:
         """Get note detail"""
@@ -218,10 +259,20 @@ class DouYinCrawler(AbstractCrawler):
 
     async def get_creators_and_videos(self) -> None:
         """
-        Get the information and videos of the specified creator
+        Get the information and videos of the specified creator from URLs or IDs
         """
         utils.logger.info("[DouYinCrawler.get_creators_and_videos] Begin get douyin creators")
-        for user_id in config.DY_CREATOR_ID_LIST:
+        utils.logger.info("[DouYinCrawler.get_creators_and_videos] Parsing creator URLs...")
+
+        for creator_url in config.DY_CREATOR_ID_LIST:
+            try:
+                creator_info_parsed = parse_creator_info_from_url(creator_url)
+                user_id = creator_info_parsed.sec_user_id
+                utils.logger.info(f"[DouYinCrawler.get_creators_and_videos] Parsed sec_user_id: {user_id} from {creator_url}")
+            except ValueError as e:
+                utils.logger.error(f"[DouYinCrawler.get_creators_and_videos] Failed to parse creator URL: {e}")
+                continue
+
             creator_info: Dict = await self.dy_client.get_user_info(user_id)
             if creator_info:
                 await douyin_store.save_creator(user_id, creator=creator_info)
@@ -260,6 +311,7 @@ class DouYinCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
+            proxy_ip_pool=self.ip_proxy_pool,  # 传递代理池用于自动刷新
         )
         return douyin_client
 
@@ -357,7 +409,7 @@ class DouYinCrawler(AbstractCrawler):
     async def get_aweme_images(self, aweme_item: Dict):
         """
         get aweme images. please use get_aweme_media
-        
+
         Args:
             aweme_item (Dict): 抖音作品详情
         """

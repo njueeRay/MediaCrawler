@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/store/weibo/weibo_store_media.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -11,7 +20,7 @@
 # -*- coding: utf-8 -*-
 # @Author  : Erm
 # @Time    : 2024/4/9 17:35
-# @Desc    : 微博媒体保存
+# @Desc    : Weibo media storage
 import pathlib
 from typing import Dict
 
@@ -27,7 +36,7 @@ class WeiboStoreImage(AbstractStoreImage):
     async def store_image(self, image_content_item: Dict):
         """
         store content
-        
+
         Args:
             image_content_item:
 
@@ -39,7 +48,7 @@ class WeiboStoreImage(AbstractStoreImage):
     def make_save_file_name(self, picid: str, extension_file_name: str) -> str:
         """
         make save file name by store type
-        
+
         Args:
             picid: image id
             extension_file_name: video filename with extension
@@ -52,7 +61,7 @@ class WeiboStoreImage(AbstractStoreImage):
     async def save_image(self, picid: str, pic_content: str, extension_file_name="jpg"):
         """
         save image to local
-        
+
         Args:
             picid: image id
             pic_content: image content

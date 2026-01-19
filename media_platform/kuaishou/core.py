@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/kuaishou/core.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -26,6 +35,7 @@ from playwright.async_api import (
 
 import config
 from base.base_crawler import AbstractCrawler
+from model.m_kuaishou import VideoUrlInfo, CreatorUrlInfo
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import kuaishou as kuaishou_store
 from tools import utils
@@ -34,6 +44,7 @@ from var import comment_tasks_var, crawler_type_var, source_keyword_var
 
 from .client import KuaiShouClient
 from .exception import DataFetchError
+from .help import parse_video_info_from_url, parse_creator_info_from_url
 from .login import KuaishouLogin
 
 
@@ -47,22 +58,23 @@ class KuaishouCrawler(AbstractCrawler):
         self.index_url = "https://www.kuaishou.com"
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
+        self.ip_proxy_pool = None  # Proxy IP pool, used for automatic proxy refresh
 
     async def start(self):
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
-            ip_proxy_pool = await create_ip_pool(
+            self.ip_proxy_pool = await create_ip_pool(
                 config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
             )
-            ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(
                 ip_proxy_info
             )
 
         async with async_playwright() as playwright:
-            # 根据配置选择启动模式
+            # Select startup mode based on configuration
             if config.ENABLE_CDP_MODE:
-                utils.logger.info("[KuaishouCrawler] 使用CDP模式启动浏览器")
+                utils.logger.info("[KuaishouCrawler] Launching browser using CDP mode")
                 self.browser_context = await self.launch_browser_with_cdp(
                     playwright,
                     playwright_proxy_format,
@@ -70,14 +82,16 @@ class KuaishouCrawler(AbstractCrawler):
                     headless=config.CDP_HEADLESS,
                 )
             else:
-                utils.logger.info("[KuaishouCrawler] 使用标准模式启动浏览器")
+                utils.logger.info("[KuaishouCrawler] Launching browser using standard mode")
                 # Launch a browser context.
                 chromium = playwright.chromium
                 self.browser_context = await self.launch_browser(
                     chromium, None, self.user_agent, headless=config.HEADLESS
                 )
-            # stealth.min.js is a js script to prevent the website from detecting the crawler.
-            await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                # stealth.min.js is a js script to prevent the website from detecting the crawler.
+                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+
+
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(f"{self.index_url}?isHome=1")
 
@@ -159,25 +173,36 @@ class KuaishouCrawler(AbstractCrawler):
 
                 # batch fetch video comments
                 page += 1
-                
+
                 # Sleep after page navigation
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-                
+
                 await self.batch_get_video_comments(video_id_list)
 
     async def get_specified_videos(self):
         """Get the information and comments of the specified post"""
+        utils.logger.info("[KuaishouCrawler.get_specified_videos] Parsing video URLs...")
+        video_ids = []
+        for video_url in config.KS_SPECIFIED_ID_LIST:
+            try:
+                video_info = parse_video_info_from_url(video_url)
+                video_ids.append(video_info.video_id)
+                utils.logger.info(f"Parsed video ID: {video_info.video_id} from {video_url}")
+            except ValueError as e:
+                utils.logger.error(f"Failed to parse video URL: {e}")
+                continue
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list = [
             self.get_video_info_task(video_id=video_id, semaphore=semaphore)
-            for video_id in config.KS_SPECIFIED_ID_LIST
+            for video_id in video_ids
         ]
         video_details = await asyncio.gather(*task_list)
         for video_detail in video_details:
             if video_detail is not None:
                 await kuaishou_store.update_kuaishou_video(video_detail)
-        await self.batch_get_video_comments(config.KS_SPECIFIED_ID_LIST)
+        await self.batch_get_video_comments(video_ids)
 
     async def get_video_info_task(
         self, video_id: str, semaphore: asyncio.Semaphore
@@ -186,11 +211,11 @@ class KuaishouCrawler(AbstractCrawler):
         async with semaphore:
             try:
                 result = await self.ks_client.get_video_info(video_id)
-                
+
                 # Sleep after fetching video details
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.get_video_info_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video details {video_id}")
-                
+
                 utils.logger.info(
                     f"[KuaishouCrawler.get_video_info_task] Get video_id:{video_id} info result: {result} ..."
                 )
@@ -244,11 +269,11 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.info(
                     f"[KuaishouCrawler.get_comments] begin get video_id: {video_id} comments ..."
                 )
-                
+
                 # Sleep before fetching comments
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for video {video_id}")
-                
+
                 await self.ks_client.get_video_all_comments(
                     photo_id=video_id,
                     crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
@@ -293,6 +318,7 @@ class KuaishouCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
+            proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
         )
         return ks_client_obj
 
@@ -318,10 +344,11 @@ class KuaishouCrawler(AbstractCrawler):
                 proxy=playwright_proxy,  # type: ignore
                 viewport={"width": 1920, "height": 1080},
                 user_agent=user_agent,
+                channel="chrome",  # Use system's stable Chrome version
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, user_agent=user_agent
             )
@@ -335,7 +362,7 @@ class KuaishouCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """
-        使用CDP模式启动浏览器
+        Launch browser using CDP mode
         """
         try:
             self.cdp_manager = CDPBrowserManager()
@@ -346,17 +373,17 @@ class KuaishouCrawler(AbstractCrawler):
                 headless=headless,
             )
 
-            # 显示浏览器信息
+            # Display browser information
             browser_info = await self.cdp_manager.get_browser_info()
-            utils.logger.info(f"[KuaishouCrawler] CDP浏览器信息: {browser_info}")
+            utils.logger.info(f"[KuaishouCrawler] CDP browser info: {browser_info}")
 
             return browser_context
 
         except Exception as e:
             utils.logger.error(
-                f"[KuaishouCrawler] CDP模式启动失败，回退到标准模式: {e}"
+                f"[KuaishouCrawler] CDP mode launch failed, fallback to standard mode: {e}"
             )
-            # 回退到标准模式
+            # Fallback to standard mode
             chromium = playwright.chromium
             return await self.launch_browser(
                 chromium, playwright_proxy, user_agent, headless
@@ -367,16 +394,25 @@ class KuaishouCrawler(AbstractCrawler):
         utils.logger.info(
             "[KuaiShouCrawler.get_creators_and_videos] Begin get kuaishou creators"
         )
-        for user_id in config.KS_CREATOR_ID_LIST:
-            # get creator detail info from web html content
-            createor_info: Dict = await self.ks_client.get_creator_info(user_id=user_id)
-            if createor_info:
-                await kuaishou_store.save_creator(user_id, creator=createor_info)
+        for creator_url in config.KS_CREATOR_ID_LIST:
+            try:
+                # Parse creator URL to get user_id
+                creator_info: CreatorUrlInfo = parse_creator_info_from_url(creator_url)
+                utils.logger.info(f"[KuaiShouCrawler.get_creators_and_videos] Parse creator URL info: {creator_info}")
+                user_id = creator_info.user_id
+
+                # get creator detail info from web html content
+                createor_info: Dict = await self.ks_client.get_creator_info(user_id=user_id)
+                if createor_info:
+                    await kuaishou_store.save_creator(user_id, creator=createor_info)
+            except ValueError as e:
+                utils.logger.error(f"[KuaiShouCrawler.get_creators_and_videos] Failed to parse creator URL: {e}")
+                continue
 
             # Get all video information of the creator
             all_video_list = await self.ks_client.get_all_videos_by_creator(
                 user_id=user_id,
-                crawl_interval=random.random(),
+                crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                 callback=self.fetch_creator_video_detail,
             )
 
@@ -402,7 +438,7 @@ class KuaishouCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
-        # 如果使用CDP模式，需要特殊处理
+        # If using CDP mode, need special handling
         if self.cdp_manager:
             await self.cdp_manager.cleanup()
             self.cdp_manager = None

@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/kuaishou/client.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -12,7 +21,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -20,13 +29,17 @@ from playwright.async_api import BrowserContext, Page
 
 import config
 from base.base_crawler import AbstractApiClient
+from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
+
+if TYPE_CHECKING:
+    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import DataFetchError
 from .graphql import KuaiShouGraphQL
 
 
-class KuaiShouClient(AbstractApiClient):
+class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
     def __init__(
         self,
         timeout=10,
@@ -35,16 +48,23 @@ class KuaiShouClient(AbstractApiClient):
         headers: Dict[str, str],
         playwright_page: Page,
         cookie_dict: Dict[str, str],
+        proxy_ip_pool: Optional["ProxyIpPool"] = None,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.headers = headers
         self._host = "https://www.kuaishou.com/graphql"
+        self._rest_host = "https://www.kuaishou.com"
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
         self.graphql = KuaiShouGraphQL()
+        # Initialize proxy pool (from ProxyRefreshMixin)
+        self.init_proxy_pool(proxy_ip_pool)
 
     async def request(self, method, url, **kwargs) -> Any:
+        # Check if proxy is expired before each request
+        await self._refresh_proxy_if_expired()
+
         async with httpx.AsyncClient(proxy=self.proxy) as client:
             response = await client.request(method, url, timeout=self.timeout, **kwargs)
         data: Dict = response.json()
@@ -66,6 +86,29 @@ class KuaiShouClient(AbstractApiClient):
         return await self.request(
             method="POST", url=f"{self._host}{uri}", data=json_str, headers=self.headers
         )
+
+    async def request_rest_v2(self, uri: str, data: dict) -> Dict:
+        """
+        Make REST API V2 request (for comment endpoints)
+        :param uri: API endpoint path
+        :param data: request body
+        :return: response data
+        """
+        await self._refresh_proxy_if_expired()
+
+        json_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+        async with httpx.AsyncClient(proxy=self.proxy) as client:
+            response = await client.request(
+                method="POST",
+                url=f"{self._rest_host}{uri}",
+                data=json_str,
+                timeout=self.timeout,
+                headers=self.headers,
+            )
+        result: Dict = response.json()
+        if result.get("result") != 1:
+            raise DataFetchError(f"REST API V2 error: {result}")
+        return result
 
     async def pong(self) -> bool:
         """get a note to check if login state is ok"""
@@ -130,36 +173,32 @@ class KuaiShouClient(AbstractApiClient):
         return await self.post("", post_data)
 
     async def get_video_comments(self, photo_id: str, pcursor: str = "") -> Dict:
-        """get video comments
-        :param photo_id: photo id you want to fetch
-        :param pcursor: last you get pcursor, defaults to ""
-        :return:
+        """Get video first-level comments using REST API V2
+        :param photo_id: video id you want to fetch
+        :param pcursor: pagination cursor, defaults to ""
+        :return: dict with rootCommentsV2, pcursorV2, commentCountV2
         """
         post_data = {
-            "operationName": "commentListQuery",
-            "variables": {"photoId": photo_id, "pcursor": pcursor},
-            "query": self.graphql.get("comment_list"),
+            "photoId": photo_id,
+            "pcursor": pcursor,
         }
-        return await self.post("", post_data)
+        return await self.request_rest_v2("/rest/v/photo/comment/list", post_data)
 
     async def get_video_sub_comments(
-        self, photo_id: str, rootCommentId: str, pcursor: str = ""
+        self, photo_id: str, root_comment_id: int, pcursor: str = ""
     ) -> Dict:
-        """get video sub comments
-        :param photo_id: photo id you want to fetch
-        :param pcursor: last you get pcursor, defaults to ""
-        :return:
+        """Get video second-level comments using REST API V2
+        :param photo_id: video id you want to fetch
+        :param root_comment_id: parent comment id (must be int type)
+        :param pcursor: pagination cursor, defaults to ""
+        :return: dict with subCommentsV2, pcursorV2
         """
         post_data = {
-            "operationName": "visionSubCommentList",
-            "variables": {
-                "photoId": photo_id,
-                "pcursor": pcursor,
-                "rootCommentId": rootCommentId,
-            },
-            "query": self.graphql.get("vision_sub_comment_list"),
+            "photoId": photo_id,
+            "pcursor": pcursor,
+            "rootCommentId": root_comment_id,  # Must be int type for V2 API
         }
-        return await self.post("", post_data)
+        return await self.request_rest_v2("/rest/v/photo/comment/sublist", post_data)
 
     async def get_creator_profile(self, userId: str) -> Dict:
         post_data = {
@@ -185,12 +224,12 @@ class KuaiShouClient(AbstractApiClient):
         max_count: int = 10,
     ):
         """
-        get video all comments include sub comments
-        :param photo_id:
-        :param crawl_interval:
-        :param callback:
-        :param max_count:
-        :return:
+        Get video all comments including sub comments (V2 REST API)
+        :param photo_id: video id
+        :param crawl_interval: delay between requests (seconds)
+        :param callback: callback function for processing comments
+        :param max_count: max number of comments to fetch
+        :return: list of all comments
         """
 
         result = []
@@ -198,12 +237,12 @@ class KuaiShouClient(AbstractApiClient):
 
         while pcursor != "no_more" and len(result) < max_count:
             comments_res = await self.get_video_comments(photo_id, pcursor)
-            vision_commen_list = comments_res.get("visionCommentList", {})
-            pcursor = vision_commen_list.get("pcursor", "")
-            comments = vision_commen_list.get("rootComments", [])
+            # V2 API returns data at top level, not nested in visionCommentList
+            pcursor = comments_res.get("pcursorV2", "no_more")
+            comments = comments_res.get("rootCommentsV2", [])
             if len(result) + len(comments) > max_count:
                 comments = comments[: max_count - len(result)]
-            if callback:  # 如果有回调函数，就执行回调函数
+            if callback:  # If there is a callback function, execute the callback function
                 await callback(photo_id, comments)
             result.extend(comments)
             await asyncio.sleep(crawl_interval)
@@ -221,14 +260,14 @@ class KuaiShouClient(AbstractApiClient):
         callback: Optional[Callable] = None,
     ) -> List[Dict]:
         """
-        获取指定一级评论下的所有二级评论, 该方法会一直查找一级评论下的所有二级评论信息
+        Get all second-level comments under specified first-level comments (V2 REST API)
         Args:
-            comments: 评论列表
-            photo_id: 视频id
-            crawl_interval: 爬取一次评论的延迟单位（秒）
-            callback: 一次评论爬取结束后
+            comments: Comment list
+            photo_id: Video ID
+            crawl_interval: Delay unit for crawling comments once (seconds)
+            callback: Callback after one comment crawl ends
         Returns:
-
+            List of sub comments
         """
         if not config.ENABLE_GET_SUB_COMMENTS:
             utils.logger.info(
@@ -238,35 +277,36 @@ class KuaiShouClient(AbstractApiClient):
 
         result = []
         for comment in comments:
-            sub_comments = comment.get("subComments")
-            if sub_comments and callback:
-                await callback(photo_id, sub_comments)
-
-            sub_comment_pcursor = comment.get("subCommentsPcursor")
-            if sub_comment_pcursor == "no_more":
+            # V2 API uses hasSubComments (boolean) instead of subCommentsPcursor (string)
+            has_sub_comments = comment.get("hasSubComments", False)
+            if not has_sub_comments:
                 continue
 
-            root_comment_id = comment.get("commentId")
+            # V2 API uses comment_id (int) instead of commentId (string)
+            root_comment_id = comment.get("comment_id")
+            if not root_comment_id:
+                continue
+
             sub_comment_pcursor = ""
 
             while sub_comment_pcursor != "no_more":
                 comments_res = await self.get_video_sub_comments(
                     photo_id, root_comment_id, sub_comment_pcursor
                 )
-                vision_sub_comment_list = comments_res.get("visionSubCommentList", {})
-                sub_comment_pcursor = vision_sub_comment_list.get("pcursor", "no_more")
+                # V2 API returns data at top level
+                sub_comment_pcursor = comments_res.get("pcursorV2", "no_more")
+                sub_comments = comments_res.get("subCommentsV2", [])
 
-                comments = vision_sub_comment_list.get("subComments", {})
-                if callback:
-                    await callback(photo_id, comments)
+                if callback and sub_comments:
+                    await callback(photo_id, sub_comments)
                 await asyncio.sleep(crawl_interval)
-                result.extend(comments)
+                result.extend(sub_comments)
         return result
 
     async def get_creator_info(self, user_id: str) -> Dict:
         """
         eg: https://www.kuaishou.com/profile/3x4jtnbfter525a
-        快手用户主页
+        Kuaishou user homepage
         """
 
         visionProfile = await self.get_creator_profile(user_id)
@@ -279,11 +319,11 @@ class KuaiShouClient(AbstractApiClient):
         callback: Optional[Callable] = None,
     ) -> List[Dict]:
         """
-        获取指定用户下的所有发过的帖子，该方法会一直查找一个用户下的所有帖子信息
+        Get all posts published by the specified user, this method will continue to find all post information under a user
         Args:
-            user_id: 用户ID
-            crawl_interval: 爬取一次的延迟单位（秒）
-            callback: 一次分页爬取结束后的更新回调函数
+            user_id: User ID
+            crawl_interval: Delay unit for crawling once (seconds)
+            callback: Update callback function after one page crawl ends
         Returns:
 
         """

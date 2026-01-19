@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/config/weibo_config.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -12,7 +21,7 @@
 # 微博平台配置
 
 # 搜索类型，具体的枚举值在media_platform/weibo/field.py中
-WEIBO_SEARCH_TYPE = "popular"
+WEIBO_SEARCH_TYPE = "default"
 
 # 指定微博ID列表
 WEIBO_SPECIFIED_ID_LIST = [
@@ -22,6 +31,10 @@ WEIBO_SPECIFIED_ID_LIST = [
 
 # 指定微博用户ID列表
 WEIBO_CREATOR_ID_LIST = [
-    "5533390220",
+    "5756404150",
     # ........................
 ]
+
+# 是否开启微博爬取全文的功能，默认开启
+# 如果开启的话会增加被风控的概率，相当于一个关键词搜索请求会再遍历所有帖子的时候，再请求一次帖子详情
+ENABLE_WEIBO_FULL_TEXT = True

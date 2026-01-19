@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/zhihu/core.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -52,6 +61,7 @@ class ZhihuCrawler(AbstractCrawler):
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         self._extractor = ZhihuExtractor()
         self.cdp_manager = None
+        self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self) -> None:
         """
@@ -61,18 +71,18 @@ class ZhihuCrawler(AbstractCrawler):
         """
         playwright_proxy_format, httpx_proxy_format = None, None
         if config.ENABLE_IP_PROXY:
-            ip_proxy_pool = await create_ip_pool(
+            self.ip_proxy_pool = await create_ip_pool(
                 config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
             )
-            ip_proxy_info: IpInfoModel = await ip_proxy_pool.get_proxy()
+            ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(
                 ip_proxy_info
             )
 
         async with async_playwright() as playwright:
-            # 根据配置选择启动模式
+            # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
-                utils.logger.info("[ZhihuCrawler] 使用CDP模式启动浏览器")
+                utils.logger.info("[ZhihuCrawler] Launching browser in CDP mode")
                 self.browser_context = await self.launch_browser_with_cdp(
                     playwright,
                     playwright_proxy_format,
@@ -80,14 +90,14 @@ class ZhihuCrawler(AbstractCrawler):
                     headless=config.CDP_HEADLESS,
                 )
             else:
-                utils.logger.info("[ZhihuCrawler] 使用标准模式启动浏览器")
+                utils.logger.info("[ZhihuCrawler] Launching browser in standard mode")
                 # Launch a browser context.
                 chromium = playwright.chromium
                 self.browser_context = await self.launch_browser(
                     chromium, None, self.user_agent, headless=config.HEADLESS
                 )
-            # stealth.min.js is a js script to prevent the website from detecting the crawler.
-            await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                # stealth.min.js is a js script to prevent the website from detecting the crawler.
+                await self.browser_context.add_init_script(path="libs/stealth.min.js")
 
             self.context_page = await self.browser_context.new_page()
             await self.context_page.goto(self.index_url, wait_until="domcontentloaded")
@@ -107,9 +117,9 @@ class ZhihuCrawler(AbstractCrawler):
                     browser_context=self.browser_context
                 )
 
-            # 知乎的搜索接口需要打开搜索页面之后cookies才能访问API，单独的首页不行
+            # Zhihu's search API requires opening the search page first to access cookies, homepage alone won't work
             utils.logger.info(
-                "[ZhihuCrawler.start] Zhihu跳转到搜索页面获取搜索页面的Cookies，该过程需要5秒左右"
+                "[ZhihuCrawler.start] Zhihu navigating to search page to get search page cookies, this process takes about 5 seconds"
             )
             await self.context_page.goto(
                 f"{self.index_url}/search?q=python&search_source=Guess&utm_content=search_hot&type=content"
@@ -173,7 +183,7 @@ class ZhihuCrawler(AbstractCrawler):
                     # Sleep after page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[ZhihuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-                    
+
                     page += 1
                     for content in content_list:
                         await zhihu_store.update_zhihu_content(content)
@@ -223,11 +233,11 @@ class ZhihuCrawler(AbstractCrawler):
             utils.logger.info(
                 f"[ZhihuCrawler.get_comments] Begin get note id comments {content_item.content_id}"
             )
-            
+
             # Sleep before fetching comments
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
             utils.logger.info(f"[ZhihuCrawler.get_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for content {content_item.content_id}")
-            
+
             await self.zhihu_client.get_note_all_comments(
                 content=content_item,
                 crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
@@ -263,7 +273,7 @@ class ZhihuCrawler(AbstractCrawler):
             )
             await zhihu_store.save_creator(creator=createor_info)
 
-            # 默认只提取回答信息，如果需要文章和视频，把下面的注释打开即可
+            # By default, only answer information is extracted, uncomment below if articles and videos are needed
 
             # Get all anwser information of the creator
             all_content_list = await self.zhihu_client.get_all_anwser_by_creator(
@@ -305,7 +315,7 @@ class ZhihuCrawler(AbstractCrawler):
             utils.logger.info(
                 f"[ZhihuCrawler.get_specified_notes] Begin get specified note {full_note_url}"
             )
-            # judge note type
+            # Judge note type
             note_type: str = judge_zhihu_url(full_note_url)
             if note_type == constant.ANSWER_NAME:
                 question_id = full_note_url.split("/")[-3]
@@ -314,11 +324,11 @@ class ZhihuCrawler(AbstractCrawler):
                     f"[ZhihuCrawler.get_specified_notes] Get answer info, question_id: {question_id}, answer_id: {answer_id}"
                 )
                 result = await self.zhihu_client.get_answer_info(question_id, answer_id)
-                
+
                 # Sleep after fetching answer details
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching answer details {answer_id}")
-                
+
                 return result
 
             elif note_type == constant.ARTICLE_NAME:
@@ -327,11 +337,11 @@ class ZhihuCrawler(AbstractCrawler):
                     f"[ZhihuCrawler.get_specified_notes] Get article info, article_id: {article_id}"
                 )
                 result = await self.zhihu_client.get_article_info(article_id)
-                
+
                 # Sleep after fetching article details
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching article details {article_id}")
-                
+
                 return result
 
             elif note_type == constant.VIDEO_NAME:
@@ -340,11 +350,11 @@ class ZhihuCrawler(AbstractCrawler):
                     f"[ZhihuCrawler.get_specified_notes] Get video info, video_id: {video_id}"
                 )
                 result = await self.zhihu_client.get_video_info(video_id)
-                
+
                 # Sleep after fetching video details
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[ZhihuCrawler.get_note_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching video details {video_id}")
-                
+
                 return result
 
     async def get_specified_notes(self):
@@ -402,6 +412,7 @@ class ZhihuCrawler(AbstractCrawler):
             },
             playwright_page=self.context_page,
             cookie_dict=cookie_dict,
+            proxy_ip_pool=self.ip_proxy_pool,  # Pass proxy pool for automatic refresh
         )
         return zhihu_client_obj
 
@@ -429,10 +440,11 @@ class ZhihuCrawler(AbstractCrawler):
                 proxy=playwright_proxy,  # type: ignore
                 viewport={"width": 1920, "height": 1080},
                 user_agent=user_agent,
+                channel="chrome",  # Use system Chrome stable version
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy)  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, user_agent=user_agent
             )
@@ -446,7 +458,7 @@ class ZhihuCrawler(AbstractCrawler):
         headless: bool = True,
     ) -> BrowserContext:
         """
-        使用CDP模式启动浏览器
+        Launch browser using CDP mode
         """
         try:
             self.cdp_manager = CDPBrowserManager()
@@ -457,15 +469,15 @@ class ZhihuCrawler(AbstractCrawler):
                 headless=headless,
             )
 
-            # 显示浏览器信息
+            # Display browser information
             browser_info = await self.cdp_manager.get_browser_info()
-            utils.logger.info(f"[ZhihuCrawler] CDP浏览器信息: {browser_info}")
+            utils.logger.info(f"[ZhihuCrawler] CDP browser info: {browser_info}")
 
             return browser_context
 
         except Exception as e:
-            utils.logger.error(f"[ZhihuCrawler] CDP模式启动失败，回退到标准模式: {e}")
-            # 回退到标准模式
+            utils.logger.error(f"[ZhihuCrawler] CDP mode launch failed, falling back to standard mode: {e}")
+            # Fall back to standard mode
             chromium = playwright.chromium
             return await self.launch_browser(
                 chromium, playwright_proxy, user_agent, headless
@@ -473,7 +485,7 @@ class ZhihuCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
-        # 如果使用CDP模式，需要特殊处理
+        # Special handling if using CDP mode
         if self.cdp_manager:
             await self.cdp_manager.cleanup()
             self.cdp_manager = None

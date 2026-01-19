@@ -1,3 +1,17 @@
+<div align="center" markdown="1">
+   <sup>Special thanks to:</sup>
+   <br>
+   <br>
+   <a href="https://go.warp.dev/MediaCrawler">
+      <img alt="Warp sponsorship" width="400" src="https://github.com/warpdotdev/brand-assets/blob/main/Github/Sponsor/Warp-Github-LG-02.png?raw=true">
+   </a>
+
+### [Warp is built for coding with multiple AI agents](https://go.warp.dev/MediaCrawler)
+
+
+</div>
+<hr>
+
 # 🔥 MediaCrawler - Rastreador de Plataformas de Redes Sociales 🕷️
 
 <div align="center">
@@ -135,6 +149,37 @@ uv run main.py --platform xhs --lt qrcode --type detail
 uv run main.py --help
 ```
 
+## Soporte WebUI
+
+<details>
+<summary>🖥️ <strong>Interfaz de Operación Visual WebUI</strong></summary>
+
+MediaCrawler proporciona una interfaz de operación visual basada en web, permitiéndole usar fácilmente las funciones del rastreador sin línea de comandos.
+
+#### Iniciar Servicio WebUI
+
+```shell
+# Iniciar servidor API (puerto predeterminado 8080)
+uv run uvicorn api.main:app --port 8080 --reload
+
+# O iniciar usando método de módulo
+uv run python -m api.main
+```
+
+Después de iniciar exitosamente, visite `http://localhost:8080` para abrir la interfaz WebUI.
+
+#### Características de WebUI
+
+- Configuración visual de parámetros del rastreador (plataforma, método de login, tipo de rastreo, etc.)
+- Vista en tiempo real del estado de ejecución del rastreador y logs
+- Vista previa y exportación de datos
+
+#### Vista Previa de la Interfaz
+
+<img src="docs/static/images/img_8.png" alt="Vista Previa de Interfaz WebUI">
+
+</details>
+
 <details>
 <summary>🔗 <strong>Usando gestión de entorno venv nativo de Python (No recomendado)</strong></summary>
 
@@ -193,52 +238,60 @@ python main.py --help
 
 ## 💾 Almacenamiento de Datos
 
-Soporta múltiples métodos de almacenamiento de datos:
+MediaCrawler soporta múltiples métodos de almacenamiento de datos, incluyendo CSV, JSON, Excel, SQLite y bases de datos MySQL.
 
-- **Base de Datos SQLite**: Base de datos ligera sin servidor, ideal para uso personal (recomendado)
-  - Parámetro: `--save_data_option sqlite`
-  - Se crea automáticamente el archivo de base de datos
-- **Base de Datos MySQL**: Soporta guardar en base de datos relacional MySQL (necesita crear base de datos con anticipación)
-  - Ejecute `python db.py` para inicializar la estructura de tablas de la base de datos (solo ejecutar en la primera ejecución)
-- **Archivos CSV**: Soporta guardar en CSV (bajo el directorio `data/`)
-- **Archivos JSON**: Soporta guardar en JSON (bajo el directorio `data/`)
+📖 **Para instrucciones de uso detalladas, por favor vea: [Guía de Almacenamiento de Datos](docs/data_storage_guide.md)**
 
-### Ejemplos de Uso:
-```shell
-# Usar SQLite (recomendado para usuarios personales)
-uv run main.py --platform xhs --lt qrcode --type search --save_data_option sqlite
-
-# Usar MySQL
-uv run main.py --platform xhs --lt qrcode --type search --save_data_option db
-```
-
----
 
 [🚀 ¡Lanzamiento Mayor de MediaCrawlerPro 🚀! ¡Más características, mejor diseño arquitectónico!](https://github.com/MediaCrawlerPro)
 
-## 🤝 Comunidad y Soporte
 
 ### 💬 Grupos de Discusión
 - **Grupo de Discusión WeChat**: [Haga clic para unirse](https://nanmicoder.github.io/MediaCrawler/%E5%BE%AE%E4%BF%A1%E4%BA%A4%E6%B5%81%E7%BE%A4.html)
-
-### 📚 Documentación y Tutoriales
-- **Documentación en Línea**: [Documentación Completa de MediaCrawler](https://nanmicoder.github.io/MediaCrawler/)
-- **Tutorial de Rastreador**: [Tutorial Gratuito CrawlerTutorial](https://github.com/NanmiCoder/CrawlerTutorial)
+- **Cuenta de Bilibili**: [Sígueme](https://space.bilibili.com/434377496), compartiendo conocimientos de tecnología de IA y rastreo
 
 
-# Otras preguntas comunes pueden verse en la documentación en línea
->
-> La documentación en línea incluye métodos de uso, preguntas comunes, unirse a grupos de discusión del proyecto, etc.
-> [Documentación en Línea de MediaCrawler](https://nanmicoder.github.io/MediaCrawler/)
->
+### 💰 Exhibición de Patrocinadores
 
-# Servicios de Conocimiento del Autor
-> Si quiere comenzar rápidamente y aprender el uso de este proyecto, diseño arquitectónico del código fuente, aprender tecnología de programación, o quiere entender el diseño del código fuente de MediaCrawlerPro, puede revisar mi columna de conocimiento pagado.
-
-[Introducción de la Columna de Conocimiento Pagado del Autor](https://nanmicoder.github.io/MediaCrawler/%E7%9F%A5%E8%AF%86%E4%BB%98%E8%B4%B9%E4%BB%8B%E7%BB%8D.html)
-
+<a href="https://h.wandouip.com">
+<img src="docs/static/images/img_8.jpg">
+<br>
+WandouHTTP - Pool de recursos IP auto-operado de decenas de millones, pureza de IP ≥99.8%, actualizaciones de IP de alta frecuencia diarias, respuesta rápida, conexión estable, soporta múltiples escenarios de negocio, personalizable según demanda, regístrese para obtener 10000 IPs gratis.
+</a>
 
 ---
+
+<a href="https://tikhub.io/?utm_source=github.com/NanmiCoder/MediaCrawler&utm_medium=marketing_social&utm_campaign=retargeting&utm_content=carousel_ad">
+<img width="500" src="docs/static/images/tikhub_banner_zh.png">
+<br>
+TikHub.io proporciona 900+ interfaces de datos altamente estables, cubriendo 14+ plataformas principales nacionales e internacionales incluyendo TK, DY, XHS, Y2B, Ins, X, etc. Soporta APIs de datos públicos multidimensionales para usuarios, contenido, productos, comentarios, etc., con 40M+ conjuntos de datos estructurados limpios. Use el código de invitación <code>cfzyejV9</code> para registrarse y recargar, y obtenga $2 adicionales de bonificación.
+</a>
+
+---
+
+<a href="https://www.thordata.com/?ls=github&lk=mediacrawler">
+<img width="500" src="docs/static/images/Thordata.png">
+<br>
+Thordata: Proveedor de servicios de proxy confiable y rentable. Proporciona servicios de IP proxy global estables, eficientes y conformes para empresas y desarrolladores. Regístrese ahora para obtener 1GB de prueba gratuita de proxy residencial y 2000 llamadas serp-api.
+</a>
+<br>
+<a href="https://www.thordata.com/products/residential-proxies/?ls=github&lk=mediacrawler">【Proxies Residenciales】</a> | <a href="https://www.thordata.com/products/web-scraper/?ls=github&lk=mediacrawler">【serp-api】</a>
+
+
+### 🤝 Conviértase en Patrocinador
+
+¡Conviértase en patrocinador y muestre su producto aquí, obteniendo exposición masiva diariamente!
+
+**Información de Contacto**:
+- WeChat: `relakkes`
+- Email: `relakkes@gmail.com`
+---
+
+### 📚 Otros
+- **Preguntas Frecuentes**: [Documentación Completa de MediaCrawler](https://nanmicoder.github.io/MediaCrawler/)
+- **Tutorial de Rastreador para Principiantes**: [Tutorial Gratuito CrawlerTutorial](https://github.com/NanmiCoder/CrawlerTutorial)
+- **Proyecto de Código Abierto de Rastreador de Noticias**: [NewsCrawlerCollection](https://github.com/NanmiCoder/NewsCrawlerCollection)
+
 
 ## ⭐ Gráfico de Tendencia de Estrellas
 
@@ -246,26 +299,10 @@ uv run main.py --platform xhs --lt qrcode --type search --save_data_option db
 
 [![Star History Chart](https://api.star-history.com/svg?repos=NanmiCoder/MediaCrawler&type=Date)](https://star-history.com/#NanmiCoder/MediaCrawler&Date)
 
-### 💰 Exhibición de Patrocinadores
-
-<a href="https://www.swiftproxy.net/?ref=nanmi">
-<img src="docs/static/images/img_5.png">
-<br>
-**Swiftproxy** - ¡90M+ IPs residenciales puras de alta calidad globales, regístrese para obtener 500MB de tráfico de prueba gratuito, el tráfico dinámico nunca expira!
-> Código de descuento exclusivo: **GHB5** ¡Obtenga 10% de descuento instantáneamente!
-</a>
-
-### 🤝 Conviértase en Patrocinador
-
-¡Conviértase en patrocinador y muestre su producto aquí, obteniendo exposición masiva diariamente!
-
-**Información de Contacto**:
-- WeChat: `yzglan`
-- Email: `relakkes@gmail.com`
-
 
 ## 📚 Referencias
 
+- **Repositorio de Firma Xiaohongshu**: [Repositorio de firma xhs de Cloxl](https://github.com/Cloxl/xhshow)
 - **Cliente Xiaohongshu**: [Repositorio xhs de ReaJason](https://github.com/ReaJason/xhs)
 - **Reenvío de SMS**: [Repositorio de referencia SmsForwarder](https://github.com/pppscn/SmsForwarder)
 - **Herramienta de Penetración de Intranet**: [Documentación oficial de ngrok](https://ngrok.com/docs/)

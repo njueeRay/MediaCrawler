@@ -1,7 +1,8 @@
 httpx==0.28.1
-Pillow==9.5.0
+Pillow==12.1.0
 playwright==1.45.0
 tenacity==8.2.2
+typer>=0.12.3
 opencv-python
 aiomysql==0.2.0
 redis~=4.6.0
@@ -41,3 +42,11 @@ tiktoken==0.5.2      # Token计数
 gunicorn==21.2.0     # WSGI服务器
 prometheus-client==0.19.0  # 指标收集
 structlog==23.2.0    # 结构化日志
+cryptography>=45.0.7
+alembic>=1.16.5
+asyncmy>=0.2.10
+sqlalchemy>=2.0.43
+motor>=3.3.0
+openpyxl>=3.1.2
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

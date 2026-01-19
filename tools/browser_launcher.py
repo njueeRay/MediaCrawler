@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/tools/browser_launcher.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -14,6 +23,7 @@ import platform
 import subprocess
 import time
 import socket
+import signal
 from typing import Optional, List, Tuple
 import asyncio
 from pathlib import Path
@@ -23,30 +33,30 @@ from tools import utils
 
 class BrowserLauncher:
     """
-    浏览器启动器，用于检测和启动用户的Chrome/Edge浏览器
-    支持Windows和macOS系统
+    Browser launcher for detecting and launching user's Chrome/Edge browser
+    Supports Windows and macOS systems
     """
-    
+
     def __init__(self):
         self.system = platform.system()
         self.browser_process = None
         self.debug_port = None
-        
+
     def detect_browser_paths(self) -> List[str]:
         """
-        检测系统中可用的浏览器路径
-        返回按优先级排序的浏览器路径列表
+        Detect available browser paths in system
+        Returns list of browser paths sorted by priority
         """
         paths = []
-        
+
         if self.system == "Windows":
-            # Windows下的常见Chrome/Edge安装路径
+            # Common Chrome/Edge installation paths on Windows
             possible_paths = [
-                # Chrome路径
+                # Chrome paths
                 os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
                 os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
                 os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-                # Edge路径
+                # Edge paths
                 os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
                 os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
                 # Chrome Beta/Dev/Canary
@@ -55,21 +65,21 @@ class BrowserLauncher:
                 os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome SxS\Application\chrome.exe"),
             ]
         elif self.system == "Darwin":  # macOS
-            # macOS下的常见Chrome/Edge安装路径
+            # Common Chrome/Edge installation paths on macOS
             possible_paths = [
-                # Chrome路径
+                # Chrome paths
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                 "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
                 "/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev",
                 "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-                # Edge路径
+                # Edge paths
                 "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
                 "/Applications/Microsoft Edge Beta.app/Contents/MacOS/Microsoft Edge Beta",
                 "/Applications/Microsoft Edge Dev.app/Contents/MacOS/Microsoft Edge Dev",
                 "/Applications/Microsoft Edge Canary.app/Contents/MacOS/Microsoft Edge Canary",
             ]
         else:
-            # Linux等其他系统
+            # Linux and other systems
             possible_paths = [
                 "/usr/bin/google-chrome",
                 "/usr/bin/google-chrome-stable",
@@ -83,39 +93,39 @@ class BrowserLauncher:
                 "/usr/bin/microsoft-edge-beta",
                 "/usr/bin/microsoft-edge-dev",
             ]
-        
-        # 检查路径是否存在且可执行
+
+        # Check if path exists and is executable
         for path in possible_paths:
             if os.path.isfile(path) and os.access(path, os.X_OK):
                 paths.append(path)
-                
+
         return paths
-    
+
     def find_available_port(self, start_port: int = 9222) -> int:
         """
-        查找可用的端口
+        Find available port
         """
         port = start_port
-        while port < start_port + 100:  # 最多尝试100个端口
+        while port < start_port + 100:  # Try up to 100 ports
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.bind(('localhost', port))
                     return port
             except OSError:
                 port += 1
-        
-        raise RuntimeError(f"无法找到可用的端口，已尝试 {start_port} 到 {port-1}")
-    
-    def launch_browser(self, browser_path: str, debug_port: int, headless: bool = False, 
+
+        raise RuntimeError(f"Cannot find available port, tried {start_port} to {port-1}")
+
+    def launch_browser(self, browser_path: str, debug_port: int, headless: bool = False,
                       user_data_dir: Optional[str] = None) -> subprocess.Popen:
         """
-        启动浏览器进程
+        Launch browser process
         """
-        # 基本启动参数
+        # Basic launch arguments
         args = [
             browser_path,
             f"--remote-debugging-port={debug_port}",
-            "--remote-debugging-address=0.0.0.0",  # 允许远程访问
+            "--remote-debugging-address=0.0.0.0",  # Allow remote access
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-background-timer-throttling",
@@ -126,35 +136,36 @@ class BrowserLauncher:
             "--disable-hang-monitor",
             "--disable-prompt-on-repost",
             "--disable-sync",
-            "--disable-web-security",  # 可能有助于某些网站的访问
-            "--disable-features=VizDisplayCompositor",
-            "--disable-dev-shm-usage",  # 避免共享内存问题
-            "--no-sandbox",  # 在CDP模式下关闭沙箱
+            "--disable-dev-shm-usage",  # Avoid shared memory issues
+            "--no-sandbox",  # Disable sandbox in CDP mode
+            # Key anti-detection arguments
+            "--disable-blink-features=AutomationControlled",  # Disable automation control flag
+            "--exclude-switches=enable-automation",  # Exclude automation switch
+            "--disable-infobars",  # Disable info bars
         ]
-        
-        # 无头模式
+
+        # Headless mode
         if headless:
             args.extend([
-                "--headless",
+                "--headless=new",  # Use new headless mode
                 "--disable-gpu",
             ])
         else:
-            # 非无头模式下也保持一些稳定性参数
+            # Extra arguments for non-headless mode
             args.extend([
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
+                "--start-maximized",  # Maximize window, more like real user
             ])
-        
-        # 用户数据目录
+
+        # User data directory
         if user_data_dir:
             args.append(f"--user-data-dir={user_data_dir}")
-        
-        utils.logger.info(f"[BrowserLauncher] 启动浏览器: {browser_path}")
-        utils.logger.info(f"[BrowserLauncher] 调试端口: {debug_port}")
-        utils.logger.info(f"[BrowserLauncher] 无头模式: {headless}")
-        
+
+        utils.logger.info(f"[BrowserLauncher] Launching browser: {browser_path}")
+        utils.logger.info(f"[BrowserLauncher] Debug port: {debug_port}")
+        utils.logger.info(f"[BrowserLauncher] Headless mode: {headless}")
+
         try:
-            # 在Windows上，使用CREATE_NEW_PROCESS_GROUP避免Ctrl+C影响子进程
+            # On Windows, use CREATE_NEW_PROCESS_GROUP to prevent Ctrl+C from affecting subprocess
             if self.system == "Windows":
                 process = subprocess.Popen(
                     args,
@@ -167,21 +178,22 @@ class BrowserLauncher:
                     args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    preexec_fn=os.setsid  # 创建新的进程组
+                    preexec_fn=os.setsid  # Create new process group
                 )
-            
+
+            self.browser_process = process
             return process
-            
+
         except Exception as e:
-            utils.logger.error(f"[BrowserLauncher] 启动浏览器失败: {e}")
+            utils.logger.error(f"[BrowserLauncher] Failed to launch browser: {e}")
             raise
-    
+
     def wait_for_browser_ready(self, debug_port: int, timeout: int = 30) -> bool:
         """
-        等待浏览器准备就绪
+        Wait for browser to be ready
         """
-        utils.logger.info(f"[BrowserLauncher] 等待浏览器在端口 {debug_port} 上准备就绪...")
-        
+        utils.logger.info(f"[BrowserLauncher] Waiting for browser to be ready on port {debug_port}...")
+
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
@@ -189,19 +201,19 @@ class BrowserLauncher:
                     s.settimeout(1)
                     result = s.connect_ex(('localhost', debug_port))
                     if result == 0:
-                        utils.logger.info(f"[BrowserLauncher] 浏览器已在端口 {debug_port} 上准备就绪")
+                        utils.logger.info(f"[BrowserLauncher] Browser is ready on port {debug_port}")
                         return True
             except Exception:
                 pass
-            
+
             time.sleep(0.5)
-        
-        utils.logger.error(f"[BrowserLauncher] 浏览器在 {timeout} 秒内未能准备就绪")
+
+        utils.logger.error(f"[BrowserLauncher] Browser failed to be ready within {timeout} seconds")
         return False
-    
+
     def get_browser_info(self, browser_path: str) -> Tuple[str, str]:
         """
-        获取浏览器信息（名称和版本）
+        Get browser info (name and version)
         """
         try:
             if "chrome" in browser_path.lower():
@@ -212,38 +224,68 @@ class BrowserLauncher:
                 name = "Chromium"
             else:
                 name = "Unknown Browser"
-            
-            # 尝试获取版本信息
+
+            # Try to get version info
             try:
-                result = subprocess.run([browser_path, "--version"], 
-                                      capture_output=True, text=True, timeout=5)
+                result = subprocess.run([browser_path, "--version"],
+                                      capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=5)
                 version = result.stdout.strip() if result.stdout else "Unknown Version"
             except:
                 version = "Unknown Version"
-            
+
             return name, version
-            
+
         except Exception:
             return "Unknown Browser", "Unknown Version"
-    
+
     def cleanup(self):
         """
-        清理资源，关闭浏览器进程
+        Cleanup resources, close browser process
         """
-        if self.browser_process:
-            try:
-                utils.logger.info("[BrowserLauncher] 正在关闭浏览器进程...")
-                
-                if self.system == "Windows":
-                    # Windows下使用taskkill强制终止进程树
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.browser_process.pid)], 
-                                 capture_output=True)
+        if not self.browser_process:
+            return
+
+        process = self.browser_process
+
+        if process.poll() is not None:
+            utils.logger.info("[BrowserLauncher] Browser process already exited, no cleanup needed")
+            self.browser_process = None
+            return
+
+        utils.logger.info("[BrowserLauncher] Closing browser process...")
+
+        try:
+            if self.system == "Windows":
+                # First try normal termination
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    utils.logger.warning("[BrowserLauncher] Normal termination timeout, using taskkill to force kill")
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        capture_output=True,
+                        check=False,
+                        encoding='utf-8',
+                        errors='ignore'
+                    )
+                    process.wait(timeout=5)
+            else:
+                pgid = os.getpgid(process.pid)
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except ProcessLookupError:
+                    utils.logger.info("[BrowserLauncher] Browser process group does not exist, may have exited")
                 else:
-                    # Unix系统下终止进程组
-                    os.killpg(os.getpgid(self.browser_process.pid), 9)
-                
-                self.browser_process = None
-                utils.logger.info("[BrowserLauncher] 浏览器进程已关闭")
-                
-            except Exception as e:
-                utils.logger.warning(f"[BrowserLauncher] 关闭浏览器进程时出错: {e}")
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        utils.logger.warning("[BrowserLauncher] Graceful shutdown timeout, sending SIGKILL")
+                        os.killpg(pgid, signal.SIGKILL)
+                        process.wait(timeout=5)
+
+            utils.logger.info("[BrowserLauncher] Browser process closed")
+        except Exception as e:
+            utils.logger.warning(f"[BrowserLauncher] Error closing browser process: {e}")
+        finally:
+            self.browser_process = None

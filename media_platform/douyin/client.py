@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/douyin/client.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -12,21 +21,25 @@ import asyncio
 import copy
 import json
 import urllib.parse
-from typing import Any, Callable, Dict, Union, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Union, Optional
 
 import httpx
 from playwright.async_api import BrowserContext
 
 from base.base_crawler import AbstractApiClient
+from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
 from var import request_keyword_var
+
+if TYPE_CHECKING:
+    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import *
 from .field import *
 from .help import *
 
 
-class DouYinClient(AbstractApiClient):
+class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
 
     def __init__(
         self,
@@ -36,6 +49,7 @@ class DouYinClient(AbstractApiClient):
         headers: Dict,
         playwright_page: Optional[Page],
         cookie_dict: Dict,
+        proxy_ip_pool: Optional["ProxyIpPool"] = None,
     ):
         self.proxy = proxy
         self.timeout = timeout
@@ -43,6 +57,8 @@ class DouYinClient(AbstractApiClient):
         self._host = "https://www.douyin.com"
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
+        # 初始化代理池（来自 ProxyRefreshMixin）
+        self.init_proxy_pool(proxy_ip_pool)
 
     async def __process_req_params(
         self,
@@ -91,10 +107,15 @@ class DouYinClient(AbstractApiClient):
         post_data = {}
         if request_method == "POST":
             post_data = params
-        a_bogus = await get_a_bogus(uri, query_string, post_data, headers["User-Agent"], self.playwright_page)
-        params["a_bogus"] = a_bogus
+
+        if "/v1/web/general/search" not in uri:
+            a_bogus = await get_a_bogus(uri, query_string, post_data, headers["User-Agent"], self.playwright_page)
+            params["a_bogus"] = a_bogus
 
     async def request(self, method, url, **kwargs):
+        # 每次请求前检测代理是否过期
+        await self._refresh_proxy_if_expired()
+
         async with httpx.AsyncClient(proxy=self.proxy) as client:
             response = await client.request(method, url, timeout=self.timeout, **kwargs)
         try:
@@ -324,3 +345,28 @@ class DouYinClient(AbstractApiClient):
             except httpx.HTTPError as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
                 utils.logger.error(f"[DouYinClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}")  # 保留原始异常类型名称，以便开发者调试
                 return None
+
+    async def resolve_short_url(self, short_url: str) -> str:
+        """
+        解析抖音短链接,获取重定向后的真实URL
+        Args:
+            short_url: 短链接,如 https://v.douyin.com/iF12345ABC/
+        Returns:
+            重定向后的完整URL
+        """
+        async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=False) as client:
+            try:
+                utils.logger.info(f"[DouYinClient.resolve_short_url] Resolving short URL: {short_url}")
+                response = await client.get(short_url, timeout=10)
+
+                # 短链接通常返回302重定向
+                if response.status_code in [301, 302, 303, 307, 308]:
+                    redirect_url = response.headers.get("Location", "")
+                    utils.logger.info(f"[DouYinClient.resolve_short_url] Resolved to: {redirect_url}")
+                    return redirect_url
+                else:
+                    utils.logger.warning(f"[DouYinClient.resolve_short_url] Unexpected status code: {response.status_code}")
+                    return ""
+            except Exception as e:
+                utils.logger.error(f"[DouYinClient.resolve_short_url] Failed to resolve short URL: {e}")
+                return ""

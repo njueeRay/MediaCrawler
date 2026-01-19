@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025 relakkes@gmail.com
+#
+# This file is part of MediaCrawler project.
+# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/xhs/client.py
+# GitHub: https://github.com/NanmiCoder
+# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
+#
+
 # 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
 # 1. 不得用于任何商业用途。
 # 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
@@ -10,68 +19,85 @@
 
 import asyncio
 import json
-import re
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 import httpx
 from playwright.async_api import BrowserContext, Page
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_result
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 import config
 from base.base_crawler import AbstractApiClient
+from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
-from html import unescape
+
+if TYPE_CHECKING:
+    from proxy.proxy_ip_pool import ProxyIpPool
 
 from .exception import DataFetchError, IPBlockError
 from .field import SearchNoteType, SearchSortType
-from .help import get_search_id, sign
+from .help import get_search_id
 from .extractor import XiaoHongShuExtractor
+from .playwright_sign import sign_with_playwright
 
 
-class XiaoHongShuClient(AbstractApiClient):
+class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
 
     def __init__(
         self,
-        timeout=60,  # 若开启爬取媒体选项，xhs 的长视频需要更久的超时时间
+        timeout=60,  # If media crawling is enabled, Xiaohongshu long videos need longer timeout
         proxy=None,
         *,
         headers: Dict[str, str],
         playwright_page: Page,
         cookie_dict: Dict[str, str],
+        proxy_ip_pool: Optional["ProxyIpPool"] = None,
     ):
         self.proxy = proxy
         self.timeout = timeout
         self.headers = headers
         self._host = "https://edith.xiaohongshu.com"
         self._domain = "https://www.xiaohongshu.com"
-        self.IP_ERROR_STR = "网络连接异常，请检查网络设置或重启试试"
+        self.IP_ERROR_STR = "Network connection error, please check network settings or restart"
         self.IP_ERROR_CODE = 300012
-        self.NOTE_ABNORMAL_STR = "笔记状态异常，请稍后查看"
+        self.NOTE_ABNORMAL_STR = "Note status abnormal, please check later"
         self.NOTE_ABNORMAL_CODE = -510001
         self.playwright_page = playwright_page
         self.cookie_dict = cookie_dict
         self._extractor = XiaoHongShuExtractor()
+        # Initialize proxy pool (from ProxyRefreshMixin)
+        self.init_proxy_pool(proxy_ip_pool)
 
-    async def _pre_headers(self, url: str, data=None) -> Dict:
-        """
-        请求头参数签名
+    async def _pre_headers(self, url: str, params: Optional[Dict] = None, payload: Optional[Dict] = None) -> Dict:
+        """Request header parameter signing (using playwright injection method)
+
         Args:
-            url:
-            data:
+            url: Request URL
+            params: GET request parameters
+            payload: POST request parameters
 
         Returns:
-
+            Dict: Signed request header parameters
         """
-        encrypt_params = await self.playwright_page.evaluate(
-            "([url, data]) => window._webmsxyw(url,data)", [url, data]
-        )
-        local_storage = await self.playwright_page.evaluate("() => window.localStorage")
-        signs = sign(
-            a1=self.cookie_dict.get("a1", ""),
-            b1=local_storage.get("b1", ""),
-            x_s=encrypt_params.get("X-s", ""),
-            x_t=str(encrypt_params.get("X-t", "")),
+        a1_value = self.cookie_dict.get("a1", "")
+
+        # Determine request data, method and URI
+        if params is not None:
+            data = params
+            method = "GET"
+        elif payload is not None:
+            data = payload
+            method = "POST"
+        else:
+            raise ValueError("params or payload is required")
+
+        # Generate signature using playwright injection method
+        signs = await sign_with_playwright(
+            page=self.playwright_page,
+            uri=url,
+            data=data,
+            a1=a1_value,
+            method=method,
         )
 
         headers = {
@@ -86,15 +112,18 @@ class XiaoHongShuClient(AbstractApiClient):
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     async def request(self, method, url, **kwargs) -> Union[str, Any]:
         """
-        封装httpx的公共请求方法，对请求响应做一些处理
+        Wrapper for httpx common request method, processes request response
         Args:
-            method: 请求方法
-            url: 请求的URL
-            **kwargs: 其他请求参数，例如请求头、请求体等
+            method: Request method
+            url: Request URL
+            **kwargs: Other request parameters, such as headers, body, etc.
 
         Returns:
 
         """
+        # Check if proxy is expired before each request
+        await self._refresh_proxy_if_expired()
+
         # return response.text
         return_response = kwargs.pop("return_response", False)
         async with httpx.AsyncClient(proxy=self.proxy) as client:
@@ -104,7 +133,7 @@ class XiaoHongShuClient(AbstractApiClient):
             # someday someone maybe will bypass captcha
             verify_type = response.headers["Verifytype"]
             verify_uuid = response.headers["Verifyuuid"]
-            msg = f"出现验证码，请求失败，Verifytype: {verify_type}，Verifyuuid: {verify_uuid}, Response: {response}"
+            msg = f"CAPTCHA appeared, request failed, Verifytype: {verify_type}, Verifyuuid: {verify_uuid}, Response: {response}"
             utils.logger.error(msg)
             raise Exception(msg)
 
@@ -116,37 +145,37 @@ class XiaoHongShuClient(AbstractApiClient):
         elif data["code"] == self.IP_ERROR_CODE:
             raise IPBlockError(self.IP_ERROR_STR)
         else:
-            raise DataFetchError(data.get("msg", None))
+            err_msg = data.get("msg", None) or f"{response.text}"
+            raise DataFetchError(err_msg)
 
-    async def get(self, uri: str, params=None) -> Dict:
+    async def get(self, uri: str, params: Optional[Dict] = None) -> Dict:
         """
-        GET请求，对请求头签名
+        GET request, signs request headers
         Args:
-            uri: 请求路由
-            params: 请求参数
+            uri: Request route
+            params: Request parameters
 
         Returns:
 
         """
-        final_uri = uri
-        if isinstance(params, dict):
-            final_uri = f"{uri}?" f"{urlencode(params)}"
-        headers = await self._pre_headers(final_uri)
+        headers = await self._pre_headers(uri, params)
+        full_url = f"{self._host}{uri}"
+
         return await self.request(
-            method="GET", url=f"{self._host}{final_uri}", headers=headers
+            method="GET", url=full_url, headers=headers, params=params
         )
 
     async def post(self, uri: str, data: dict, **kwargs) -> Dict:
         """
-        POST请求，对请求头签名
+        POST request, signs request headers
         Args:
-            uri: 请求路由
-            data: 请求体参数
+            uri: Request route
+            data: Request body parameters
 
         Returns:
 
         """
-        headers = await self._pre_headers(uri, data)
+        headers = await self._pre_headers(uri, payload=data)
         json_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
         return await self.request(
             method="POST",
@@ -157,6 +186,9 @@ class XiaoHongShuClient(AbstractApiClient):
         )
 
     async def get_note_media(self, url: str) -> Union[bytes, None]:
+        # Check if proxy is expired before request
+        await self._refresh_proxy_if_expired()
+
         async with httpx.AsyncClient(proxy=self.proxy) as client:
             try:
                 response = await client.request("GET", url, timeout=self.timeout)
@@ -172,13 +204,13 @@ class XiaoHongShuClient(AbstractApiClient):
                 httpx.HTTPError
             ) as exc:  # some wrong when call httpx.request method, such as connection error, client error, server error or response status code is not 2xx
                 utils.logger.error(
-                    f"[DouYinClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}"
-                )  # 保留原始异常类型名称，以便开发者调试
+                    f"[XiaoHongShuClient.get_aweme_media] {exc.__class__.__name__} for {exc.request.url} - {exc}"
+                )  # Keep original exception type name for developer debugging
                 return None
 
     async def pong(self) -> bool:
         """
-        用于检查登录态是否失效了
+        Check if login state is still valid
         Returns:
 
         """
@@ -186,7 +218,7 @@ class XiaoHongShuClient(AbstractApiClient):
         utils.logger.info("[XiaoHongShuClient.pong] Begin to pong xhs...")
         ping_flag = False
         try:
-            note_card: Dict = await self.get_note_by_keyword(keyword="小红书")
+            note_card: Dict = await self.get_note_by_keyword(keyword="Xiaohongshu")
             if note_card.get("items"):
                 ping_flag = True
         except Exception as e:
@@ -198,9 +230,9 @@ class XiaoHongShuClient(AbstractApiClient):
 
     async def update_cookies(self, browser_context: BrowserContext):
         """
-        API客户端提供的更新cookies方法，一般情况下登录成功后会调用此方法
+        Update cookies method provided by API client, usually called after successful login
         Args:
-            browser_context: 浏览器上下文对象
+            browser_context: Browser context object
 
         Returns:
 
@@ -219,13 +251,13 @@ class XiaoHongShuClient(AbstractApiClient):
         note_type: SearchNoteType = SearchNoteType.ALL,
     ) -> Dict:
         """
-        根据关键词搜索笔记
+        Search notes by keyword
         Args:
-            keyword: 关键词参数
-            page: 分页第几页
-            page_size: 分页数据长度
-            sort: 搜索结果排序指定
-            note_type: 搜索的笔记类型
+            keyword: Keyword parameter
+            page: Page number
+            page_size: Page data length
+            sort: Search result sorting specification
+            note_type: Type of note to search
 
         Returns:
 
@@ -248,11 +280,11 @@ class XiaoHongShuClient(AbstractApiClient):
         xsec_token: str,
     ) -> Dict:
         """
-        获取笔记详情API
+        Get note detail API
         Args:
-            note_id:笔记ID
-            xsec_source: 渠道来源
-            xsec_token: 搜索关键字之后返回的比较列表中返回的token
+            note_id: Note ID
+            xsec_source: Channel source
+            xsec_token: Token returned from search keyword result list
 
         Returns:
 
@@ -272,7 +304,7 @@ class XiaoHongShuClient(AbstractApiClient):
         if res and res.get("items"):
             res_dict: Dict = res["items"][0]["note_card"]
             return res_dict
-        # 爬取频繁了可能会出现有的笔记能有结果有的没有
+        # When crawling frequently, some notes may have results while others don't
         utils.logger.error(
             f"[XiaoHongShuClient.get_note_by_id] get note id:{note_id} empty and res:{res}"
         )
@@ -285,11 +317,11 @@ class XiaoHongShuClient(AbstractApiClient):
         cursor: str = "",
     ) -> Dict:
         """
-        获取一级评论的API
+        Get first-level comments API
         Args:
-            note_id: 笔记ID
-            xsec_token: 验证token
-            cursor: 分页游标
+            note_id: Note ID
+            xsec_token: Verification token
+            cursor: Pagination cursor
 
         Returns:
 
@@ -313,13 +345,13 @@ class XiaoHongShuClient(AbstractApiClient):
         cursor: str = "",
     ):
         """
-        获取指定父评论下的子评论的API
+        Get sub-comments under specified parent comment API
         Args:
-            note_id: 子评论的帖子ID
-            root_comment_id: 根评论ID
-            xsec_token: 验证token
-            num: 分页数量
-            cursor: 分页游标
+            note_id: Post ID of sub-comments
+            root_comment_id: Root comment ID
+            xsec_token: Verification token
+            num: Pagination quantity
+            cursor: Pagination cursor
 
         Returns:
 
@@ -328,7 +360,7 @@ class XiaoHongShuClient(AbstractApiClient):
         params = {
             "note_id": note_id,
             "root_comment_id": root_comment_id,
-            "num": num,
+            "num": str(num),
             "cursor": cursor,
             "image_formats": "jpg,webp,avif",
             "top_comment_id": "",
@@ -345,13 +377,13 @@ class XiaoHongShuClient(AbstractApiClient):
         max_count: int = 10,
     ) -> List[Dict]:
         """
-        获取指定笔记下的所有一级评论，该方法会一直查找一个帖子下的所有评论信息
+        Get all first-level comments under specified note, this method will continuously find all comment information under a post
         Args:
-            note_id: 笔记ID
-            xsec_token: 验证token
-            crawl_interval: 爬取一次笔记的延迟单位（秒）
-            callback: 一次笔记爬取结束后
-            max_count: 一次笔记爬取的最大评论数量
+            note_id: Note ID
+            xsec_token: Verification token
+            crawl_interval: Crawl delay per note (seconds)
+            callback: Callback after one note crawl ends
+            max_count: Maximum number of comments to crawl per note
         Returns:
 
         """
@@ -393,12 +425,12 @@ class XiaoHongShuClient(AbstractApiClient):
         callback: Optional[Callable] = None,
     ) -> List[Dict]:
         """
-        获取指定一级评论下的所有二级评论, 该方法会一直查找一级评论下的所有二级评论信息
+        Get all second-level comments under specified first-level comments, this method will continuously find all second-level comment information under first-level comments
         Args:
-            comments: 评论列表
-            xsec_token: 验证token
-            crawl_interval: 爬取一次评论的延迟单位（秒）
-            callback: 一次评论爬取结束后
+            comments: Comment list
+            xsec_token: Verification token
+            crawl_interval: Crawl delay per comment (seconds)
+            callback: Callback after one comment crawl ends
 
         Returns:
 
@@ -451,13 +483,26 @@ class XiaoHongShuClient(AbstractApiClient):
                 result.extend(comments)
         return result
 
-    async def get_creator_info(self, user_id: str) -> Dict:
+    async def get_creator_info(
+        self, user_id: str, xsec_token: str = "", xsec_source: str = ""
+    ) -> Dict:
         """
-        通过解析网页版的用户主页HTML，获取用户个人简要信息
-        PC端用户主页的网页存在window.__INITIAL_STATE__这个变量上的，解析它即可
-        eg: https://www.xiaohongshu.com/user/profile/59d8cb33de5fb4696bf17217
+        Get user profile brief information by parsing user homepage HTML
+        The PC user homepage has window.__INITIAL_STATE__ variable, just parse it
+
+        Args:
+            user_id: User ID
+            xsec_token: Verification token (optional, pass if included in URL)
+            xsec_source: Channel source (optional, pass if included in URL)
+
+        Returns:
+            Dict: Creator information
         """
+        # Build URI, add xsec parameters to URL if available
         uri = f"/user/profile/{user_id}"
+        if xsec_token and xsec_source:
+            uri = f"{uri}?xsec_token={xsec_token}&xsec_source={xsec_source}"
+
         html_content = await self.request(
             "GET", self._domain + uri, return_response=True, headers=self.headers
         )
@@ -468,38 +513,47 @@ class XiaoHongShuClient(AbstractApiClient):
         creator: str,
         cursor: str,
         page_size: int = 30,
+        xsec_token: str = "",
+        xsec_source: str = "pc_feed",
     ) -> Dict:
         """
-        获取博主的笔记
+        Get creator's notes
         Args:
-            creator: 博主ID
-            cursor: 上一页最后一条笔记的ID
-            page_size: 分页数据长度
+            creator: Creator ID
+            cursor: Last note ID from previous page
+            page_size: Page data length
+            xsec_token: Verification token
+            xsec_source: Channel source
 
         Returns:
 
         """
-        uri = "/api/sns/web/v1/user_posted"
-        data = {
-            "user_id": creator,
-            "cursor": cursor,
+        uri = f"/api/sns/web/v1/user_posted"
+        params = {
             "num": page_size,
-            "image_formats": "jpg,webp,avif",
+            "cursor": cursor,
+            "user_id": creator,
+            "xsec_token": xsec_token,
+            "xsec_source": xsec_source,
         }
-        return await self.get(uri, data)
+        return await self.get(uri, params)
 
     async def get_all_notes_by_creator(
         self,
         user_id: str,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        xsec_token: str = "",
+        xsec_source: str = "pc_feed",
     ) -> List[Dict]:
         """
-        获取指定用户下的所有发过的帖子，该方法会一直查找一个用户下的所有帖子信息
+        Get all posts published by specified user, this method will continuously find all post information under a user
         Args:
-            user_id: 用户ID
-            crawl_interval: 爬取一次的延迟单位（秒）
-            callback: 一次分页爬取结束后的更新回调函数
+            user_id: User ID
+            crawl_interval: Crawl delay (seconds)
+            callback: Update callback function after one pagination crawl ends
+            xsec_token: Verification token
+            xsec_source: Channel source
 
         Returns:
 
@@ -508,7 +562,9 @@ class XiaoHongShuClient(AbstractApiClient):
         notes_has_more = True
         notes_cursor = ""
         while notes_has_more and len(result) < config.CRAWLER_MAX_NOTES_COUNT:
-            notes_res = await self.get_notes_by_creator(user_id, notes_cursor)
+            notes_res = await self.get_notes_by_creator(
+                user_id, notes_cursor, xsec_token=xsec_token, xsec_source=xsec_source
+            )
             if not notes_res:
                 utils.logger.error(
                     f"[XiaoHongShuClient.get_notes_by_creator] The current creator may have been banned by xhs, so they cannot access the data."
@@ -546,9 +602,9 @@ class XiaoHongShuClient(AbstractApiClient):
 
     async def get_note_short_url(self, note_id: str) -> Dict:
         """
-        获取笔记的短链接
+        Get note short URL
         Args:
-            note_id: 笔记ID
+            note_id: Note ID
 
         Returns:
 
@@ -566,7 +622,7 @@ class XiaoHongShuClient(AbstractApiClient):
         enable_cookie: bool = False,
     ) -> Optional[Dict]:
         """
-        通过解析网页版的笔记详情页HTML，获取笔记详情, 该接口可能会出现失败的情况，这里尝试重试3次
+        Get note details by parsing note detail page HTML, this interface may fail, retry 3 times here
         copy from https://github.com/ReaJason/xhs/blob/eb1c5a0213f6fbb592f0a2897ee552847c69ea2d/xhs/core.py#L217-L259
         thanks for ReaJason
         Args:
