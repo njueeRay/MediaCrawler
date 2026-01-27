@@ -254,6 +254,68 @@ class FeishuSyncManager:
                 )
         except Exception as exc:
             logger.warning(f"主字段重命名异常，已跳过: {exc}")
+
+    def _list_fields(self) -> Dict[str, AppTableField]:
+        """获取当前表字段列表"""
+        request = ListAppTableFieldRequest.builder() \
+            .app_token(self.app_token) \
+            .table_id(self.table_id) \
+            .page_size(200) \
+            .build()
+
+        response = self.client.bitable.v1.app_table_field.list(
+            request, self._get_request_option()
+        )
+
+        if not response.success():
+            raise RuntimeError(f"获取字段列表失败 - Code: {response.code}, Msg: {response.msg}")
+
+        items = response.data.items if response.data and response.data.items else []
+        return {field.field_name: field for field in items if field.field_name}
+
+    def ensure_fields(self, fields_config: List[Dict]) -> None:
+        """确保表格包含指定字段配置"""
+        if not self.table_id:
+            raise ValueError("表格ID未设置，无法确保字段")
+
+        if not fields_config:
+            return
+
+        primary_name = fields_config[0].get("field_name") or self.PRIMARY_FIELD_NAME
+        self._rename_primary_field(primary_name, fields_config)
+
+        try:
+            existing_fields = self._list_fields()
+        except Exception as exc:
+            logger.warning(f"获取字段列表失败，跳过字段创建: {exc}")
+            return
+
+        for field_config in fields_config:
+            field_name = field_config.get("field_name")
+            if not field_name or field_name in existing_fields:
+                continue
+
+            field_builder = AppTableField.builder() \
+                .field_name(field_name) \
+                .type(field_config.get("type"))
+
+            if "property" in field_config:
+                field_builder.property(field_config["property"])
+
+            field_request = CreateAppTableFieldRequest.builder() \
+                .app_token(self.app_token) \
+                .table_id(self.table_id) \
+                .request_body(field_builder.build()) \
+                .build()
+
+            field_response = self.client.bitable.v1.app_table_field.create(
+                field_request, self._get_request_option()
+            )
+
+            if not field_response.success():
+                logger.warning(
+                    f"创建字段失败 - Code: {field_response.code}, Msg: {field_response.msg}"
+                )
     
     def sync_from_json(self, json_file_path: str) -> Dict:
         """从JSON文件同步数据"""

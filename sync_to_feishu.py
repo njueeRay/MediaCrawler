@@ -22,6 +22,7 @@ from typing import Dict, List
 from feishu_sync.sync_manager import FeishuSyncManager
 from feishu_sync.data_formatter import XHSDataFormatter
 from feishu_sync.config import FeishuConfig
+from feishu_sync.json_column_sync import sync_csv_json_column, DEFAULT_PRIMARY_FIELD
 
 try:
     from dotenv import load_dotenv
@@ -109,10 +110,29 @@ def ensure_config() -> Dict:
     }
 
 
-def sync_file(manager: FeishuSyncManager, file_path: str, batch_size: int) -> Dict:
+def sync_file(
+    manager: FeishuSyncManager,
+    file_path: str,
+    batch_size: int,
+    json_column: str = "",
+    json_primary: str = DEFAULT_PRIMARY_FIELD,
+    json_table_name: str = "",
+    json_flatten_sep: str = ".",
+) -> Dict:
     logger.info(f"🚀 开始同步文件: {file_path}")
 
     ext = Path(file_path).suffix.lower()
+    if ext == ".csv" and json_column:
+        table_name = json_table_name or build_table_name(file_path)
+        return sync_csv_json_column(
+            manager,
+            file_path,
+            json_column=json_column,
+            table_name=table_name,
+            primary_field=json_primary,
+            flatten_sep=json_flatten_sep,
+            batch_size=batch_size,
+        )
     if ext == ".json":
         raw_data = load_json(file_path)
     elif ext == ".csv":
@@ -140,7 +160,16 @@ def sync_file(manager: FeishuSyncManager, file_path: str, batch_size: int) -> Di
     return result
 
 
-def sync_directory(manager: FeishuSyncManager, dir_path: str, pattern: str, batch_size: int) -> Dict:
+def sync_directory(
+    manager: FeishuSyncManager,
+    dir_path: str,
+    pattern: str,
+    batch_size: int,
+    json_column: str = "",
+    json_primary: str = DEFAULT_PRIMARY_FIELD,
+    json_table_name: str = "",
+    json_flatten_sep: str = ".",
+) -> Dict:
     logger.info(f"📂 开始同步目录: {dir_path}")
     search_pattern = os.path.join(dir_path, pattern)
     files = glob(search_pattern)
@@ -154,7 +183,15 @@ def sync_directory(manager: FeishuSyncManager, dir_path: str, pattern: str, batc
 
     for file_path in files:
         logger.info(f"\n{'='*60}")
-        result = sync_file(manager, file_path, batch_size)
+        result = sync_file(
+            manager,
+            file_path,
+            batch_size,
+            json_column=json_column,
+            json_primary=json_primary,
+            json_table_name=json_table_name,
+            json_flatten_sep=json_flatten_sep,
+        )
         results.append(result)
         total_success += result.get("success", 0)
         total_records += result.get("total", 0)
@@ -182,6 +219,10 @@ def main():
     parser.add_argument("--pattern", default="*.json", help="文件匹配模式 (默认: *.json)")
     parser.add_argument("--batch-size", type=int, default=50, help="批量上传大小 (默认: 50)")
     parser.add_argument("--log-level", default="INFO", help="日志级别")
+    parser.add_argument("--json-column", default="", help="CSV中包含JSON的列名")
+    parser.add_argument("--json-primary", default=DEFAULT_PRIMARY_FIELD, help="JSON表主字段名")
+    parser.add_argument("--json-table-name", default="", help="JSON同步表名")
+    parser.add_argument("--json-flatten-sep", default=".", help="JSON字段展开分隔符")
 
     args = parser.parse_args()
 
@@ -197,11 +238,28 @@ def main():
         )
 
         if args.file:
-            result = sync_file(manager, args.file, args.batch_size)
+            result = sync_file(
+                manager,
+                args.file,
+                args.batch_size,
+                json_column=args.json_column,
+                json_primary=args.json_primary,
+                json_table_name=args.json_table_name,
+                json_flatten_sep=args.json_flatten_sep,
+            )
             if result.get("success", 0) == 0:
                 raise RuntimeError(f"同步失败: {result}")
         else:
-            sync_directory(manager, args.dir, args.pattern, args.batch_size)
+            sync_directory(
+                manager,
+                args.dir,
+                args.pattern,
+                args.batch_size,
+                json_column=args.json_column,
+                json_primary=args.json_primary,
+                json_table_name=args.json_table_name,
+                json_flatten_sep=args.json_flatten_sep,
+            )
 
         logger.info("🎉 程序执行完成!")
 
