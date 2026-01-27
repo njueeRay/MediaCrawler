@@ -25,6 +25,7 @@ from typing import Dict, List
 import aiofiles
 import config
 from tools.utils import utils
+from var import source_keyword_var
 from tools.words import AsyncWordCloudGenerator
 
 class AsyncFileWriter:
@@ -37,8 +38,21 @@ class AsyncFileWriter:
     def _get_file_path(self, file_type: str, item_type: str) -> str:
         base_path = f"data/{self.platform}/{file_type}"
         pathlib.Path(base_path).mkdir(parents=True, exist_ok=True)
-        file_name = f"{self.crawler_type}_{item_type}_{utils.get_current_date()}.{file_type}"
+        keyword = self._sanitize_filename_part(source_keyword_var.get(""))
+        crawler_type = self._sanitize_filename_part(self.crawler_type)
+        item_type = self._sanitize_filename_part(item_type)
+        file_name = f"{keyword}_{utils.get_current_date()}_{crawler_type}_{item_type}.{file_type}"
         return f"{base_path}/{file_name}"
+
+    @staticmethod
+    def _sanitize_filename_part(value: str) -> str:
+        if not value:
+            return "all"
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            value = value.replace(char, "_")
+        value = value.strip().replace(" ", "_")
+        return value[:80] if value else "all"
 
     async def write_to_csv(self, item: Dict, item_type: str):
         file_path = self._get_file_path('csv', item_type)

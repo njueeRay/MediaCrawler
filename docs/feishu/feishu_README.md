@@ -12,7 +12,7 @@
 
 ## 📖 项目概述
 
-基于飞书开放平台REST API的企业级数据同步解决方案，专为MediaCrawler项目设计，实现社交媒体数据的自动化采集、清洗、同步和分析。
+基于飞书官方 SDK（lark-oapi）的企业级数据同步解决方案，专为 MediaCrawler 项目设计，实现社交媒体数据的自动化采集、清洗、同步和分析。
 
 ### 🎯 核心优势
 
@@ -28,10 +28,12 @@
 ```
 MediaCrawler/
 ├── 🎯 核心同步模块
-│   ├── feishu_sync_simple.py      # 主同步脚本
+│   ├── sync_to_feishu.py          # 统一 CLI（推荐）
 │   └── feishu_sync/               # 支持包
 │       ├── config.py             # 配置管理
-│       └── data_formatter.py     # 数据格式化
+│       ├── data_formatter.py     # 数据格式化
+│       ├── image_uploader.py     # 附件/图片上传
+│       └── sync_manager.py       # 建表/建字段/批量写入
 │
 ├── 🤖 自动化增强
 │   ├── auto_scheduler.py          # 自动化调度器
@@ -87,17 +89,14 @@ FEISHU_APP_TOKEN=bascnxxxxxxxxxxxxxxx # 多维表格App Token
 
 ### 3. 基础同步使用
 ```bash
-# 激活虚拟环境
-source venv/bin/activate
+# 同步单个 JSON/CSV 文件
+uv run sync_to_feishu.py --file data/xhs/json/search_contents_2026-01-22.json
 
-# 同步单个JSON文件
-python feishu_sync_simple.py --file data/xhs/json/search_contents_2025-09-05.json
-
-# 批量同步整个目录
-python feishu_sync_simple.py --dir data/xhs/json/ --batch-size 50
+# 批量同步目录
+uv run sync_to_feishu.py --dir data/xhs/json/ --pattern "*_search_contents.json"
 
 # 查看帮助信息
-python feishu_sync_simple.py --help
+uv run sync_to_feishu.py --help
 ```
 
 ### 4. 自动化调度（高级）
@@ -190,20 +189,18 @@ def sync_workflow(file_path):
 # 核心模块说明
 feishu_sync/
 ├── config.py              # 配置管理模块
-│   ├── FeishuConfig      # 飞书API配置
-│   ├── SyncConfig        # 同步参数配置
-│   └── LogConfig         # 日志配置
+│   └── FeishuConfig       # 飞书API与同步参数
 │
-├── data_formatter.py     # 数据格式化模块
-│   ├── detect_data_type()    # 数据类型检测
+├── data_formatter.py      # 数据格式化模块
+│   ├── detect_data_type()     # 数据类型检测
 │   ├── format_comment_record() # 评论数据格式化
-│   ├── format_note_record()    # 笔记数据格式化
-│   └── get_field_mapping()     # 字段映射获取
+│   └── format_note_record()    # 笔记数据格式化
 │
-└── sync_manager.py       # 同步管理模块（计划中）
-    ├── SyncManager       # 同步任务管理
-    ├── RetryHandler      # 重试机制
-    └── ProgressTracker   # 进度跟踪
+├── image_uploader.py      # 附件上传模块
+│   └── FeishuImageUploader # 上传素材并返回 file_token
+│
+└── sync_manager.py        # 同步管理模块
+    └── FeishuSyncManager  # 建表/建字段/批量写入/图片绑定
 ```
 
 ## 🚀 版本演进历史
@@ -298,8 +295,8 @@ python feishu_sync_simple.py --file your_file.json --limit 1
 
 **⭐ 如果这个功能对你有帮助，请给项目一个Star！**
 
-*最后更新：2025年9月5日*  
-*版本：v1.0.0-final*  
+*最后更新：2026年1月22日*  
+*版本：v1.1.0*  
 *状态：生产就绪 ✅*
 
 Made with ❤️ by MediaCrawler Team

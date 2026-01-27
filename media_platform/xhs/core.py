@@ -21,7 +21,8 @@ import asyncio
 import os
 import random
 from asyncio import Task
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from playwright.async_api import (
     BrowserContext,
@@ -126,6 +127,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
     async def search(self) -> None:
         """Search for notes and retrieve their comment information."""
         utils.logger.info("[XiaoHongShuCrawler.search] Begin search Xiaohongshu keywords")
+        time_range = self._get_time_range()
         xhs_limit_count = 20  # Xiaohongshu limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < xhs_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = xhs_limit_count
@@ -167,6 +169,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     note_details = await asyncio.gather(*task_list)
                     for note_detail in note_details:
                         if note_detail:
+                            if time_range and not self._is_within_time_range(note_detail.get("time"), time_range):
+                                continue
                             await xhs_store.update_xhs_note(note_detail)
                             await self.get_notice_media(note_detail)
                             note_ids.append(note_detail.get("note_id"))
@@ -199,6 +203,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     xsec_source=creator_info.xsec_source
                 )
                 if createor_info:
+                    creator_nickname = createor_info.get("basicInfo", {}).get("nickname") or user_id
+                    source_keyword_var.set(creator_nickname)
                     await xhs_store.save_creator(user_id, creator=createor_info)
             except ValueError as e:
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to parse creator URL: {e}")
@@ -224,6 +230,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
     async def fetch_creator_notes_detail(self, note_list: List[Dict]):
         """Concurrently obtain the specified post list and save the data"""
+        time_range = self._get_time_range()
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list = [
             self.get_note_detail_async_task(
@@ -237,8 +244,47 @@ class XiaoHongShuCrawler(AbstractCrawler):
         note_details = await asyncio.gather(*task_list)
         for note_detail in note_details:
             if note_detail:
+                if time_range and not self._is_within_time_range(note_detail.get("time"), time_range):
+                    continue
                 await xhs_store.update_xhs_note(note_detail)
                 await self.get_notice_media(note_detail)
+
+    @staticmethod
+    def _get_time_range() -> Optional[Tuple[int, int]]:
+        if not getattr(config, "XHS_ENABLE_TIME_RANGE", False):
+            return None
+        start = getattr(config, "START_DAY", "")
+        end = getattr(config, "END_DAY", "")
+        if not start or not end:
+            return None
+        try:
+            start_day = datetime.strptime(start, "%Y-%m-%d")
+            end_day = datetime.strptime(end, "%Y-%m-%d")
+        except ValueError:
+            utils.logger.warning("[XiaoHongShuCrawler] Invalid START_DAY/END_DAY format, expected YYYY-MM-DD")
+            return None
+        if start_day > end_day:
+            utils.logger.warning("[XiaoHongShuCrawler] START_DAY is after END_DAY, skip time filtering")
+            return None
+        if start_day == end_day:
+            end_day = start_day + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            end_day = end_day + timedelta(days=1) - timedelta(seconds=1)
+        return int(start_day.timestamp()), int(end_day.timestamp())
+
+    @staticmethod
+    def _is_within_time_range(note_time, time_range: Tuple[int, int]) -> bool:
+        if note_time is None:
+            return False
+        try:
+            if isinstance(note_time, str):
+                note_time = int(note_time)
+            if len(str(note_time)) >= 13:
+                note_time = int(note_time) // 1000
+        except (ValueError, TypeError):
+            return False
+        start_ts, end_ts = time_range
+        return start_ts <= int(note_time) <= end_ts
 
     async def get_specified_notes(self):
         """Get the information and comments of the specified post

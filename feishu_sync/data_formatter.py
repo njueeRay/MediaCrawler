@@ -88,10 +88,10 @@ class XHSDataFormatter:
                     "发布时间": publish_time,
                     "用户ID": raw_data.get('user_id', ''),
                     "用户昵称": raw_data.get('nickname', ''),
-                    "点赞数": int(raw_data.get('liked_count', 0)),
-                    "收藏数": int(raw_data.get('collected_count', 0)),
-                    "评论数": int(raw_data.get('comment_count', 0)),
-                    "分享数": int(raw_data.get('share_count', 0)),
+                    "点赞数": self.safe_int(raw_data.get('liked_count')),
+                    "收藏数": self.safe_int(raw_data.get('collected_count')),
+                    "评论数": self.safe_int(raw_data.get('comment_count')),
+                    "分享数": self.safe_int(raw_data.get('share_count')),
                     "地理位置": raw_data.get('ip_location', ''),
                     "标签": tags,
                     "搜索关键词": raw_data.get('source_keyword', ''),
@@ -118,24 +118,9 @@ class XHSDataFormatter:
             crawl_time = self.timestamp_to_date(raw_data.get('last_modify_ts'))
             
             # 安全获取数值字段
-            like_count = 0
-            sub_comment_count = 0
-            parent_comment_id = 0
-            
-            try:
-                like_count = int(raw_data.get('like_count', 0)) if raw_data.get('like_count') else 0
-            except (ValueError, TypeError):
-                like_count = 0
-                
-            try:
-                sub_comment_count = int(raw_data.get('sub_comment_count', 0)) if raw_data.get('sub_comment_count') else 0
-            except (ValueError, TypeError):
-                sub_comment_count = 0
-                
-            try:
-                parent_comment_id = int(raw_data.get('parent_comment_id', 0)) if raw_data.get('parent_comment_id') else 0
-            except (ValueError, TypeError):
-                parent_comment_id = 0
+            like_count = self.safe_int(raw_data.get('like_count'))
+            sub_comment_count = self.safe_int(raw_data.get('sub_comment_count'))
+            parent_comment_id = self.safe_int(raw_data.get('parent_comment_id'))
             
             # 构建飞书记录格式
             feishu_record = {
@@ -223,11 +208,11 @@ class XHSDataFormatter:
     
     def timestamp_to_date(self, timestamp) -> int:
         """时间戳转换为飞书日期格式"""
-        if not timestamp:
+        if timestamp is None or timestamp == "":
             return int(datetime.now().timestamp() * 1000)
         
         if isinstance(timestamp, str):
-            timestamp = int(timestamp)
+            timestamp = self.safe_int(timestamp)
         
         # 飞书需要毫秒级时间戳
         if len(str(timestamp)) == 10:
@@ -265,10 +250,10 @@ class XHSDataFormatter:
     def calculate_heat_score(self, data: Dict) -> float:
         """计算热度评分"""
         try:
-            likes = int(data.get('liked_count', 0))
-            collects = int(data.get('collected_count', 0))
-            comments = int(data.get('comment_count', 0))
-            shares = int(data.get('share_count', 0))
+            likes = self.safe_int(data.get('liked_count'))
+            collects = self.safe_int(data.get('collected_count'))
+            comments = self.safe_int(data.get('comment_count'))
+            shares = self.safe_int(data.get('share_count'))
             
             # 加权计算热度（可根据需要调整权重）
             heat_score = (likes * 1.0 + collects * 2.0 + comments * 3.0 + shares * 4.0) / 10
@@ -276,6 +261,19 @@ class XHSDataFormatter:
             return round(heat_score, 2)
         except Exception:
             return 0.0
+
+    @staticmethod
+    def safe_int(value) -> int:
+        """安全转换为整数，空字符串或非法值返回 0"""
+        if value is None or value == "":
+            return 0
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            try:
+                return int(float(value))
+            except (ValueError, TypeError):
+                return 0
     
     @staticmethod
     def get_table_fields(data_type: str = "note") -> List[Dict]:
@@ -321,6 +319,7 @@ class XHSDataFormatter:
                 {"field_name": "标签", "type": 4},  # 多选标签
                 {"field_name": "搜索关键词", "type": 1},  # 单行文本
                 {"field_name": "笔记链接", "type": 15},  # 超链接
+                {"field_name": "图片", "type": 17},  # 附件
                 {"field_name": "热度评分", "type": 2},  # 数字
                 {"field_name": "爬取时间", "type": 5}  # 日期时间
             ]
