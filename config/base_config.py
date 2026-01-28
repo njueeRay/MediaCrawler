@@ -19,7 +19,7 @@
 
 # 基础配置
 PLATFORM = "xhs"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "2026年1-2月黑客松活动汇总"  # 关键词搜索配置，以英文逗号分隔
+KEYWORDS = "2026年举办的国内创业孵化营地活动汇总"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = (
@@ -80,7 +80,7 @@ USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
 START_PAGE = 1 
 
 # 爬取视频/帖子的数量控制
-CRAWLER_MAX_NOTES_COUNT = 50
+CRAWLER_MAX_NOTES_COUNT = 100
 
 # 并发爬虫数量控制
 MAX_CONCURRENCY_NUM = 1

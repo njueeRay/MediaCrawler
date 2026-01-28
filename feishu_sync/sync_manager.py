@@ -8,8 +8,9 @@ import json
 import os
 import logging
 import time
-from typing import List, Dict, Optional
+from datetime import datetime
 from pathlib import Path
+from typing import List, Dict, Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ try:
         AppTableRecord,
         ListAppTableRecordRequest,
         ListAppTableFieldRequest,
-        UpdateAppTableFieldRequest
+        UpdateAppTableFieldRequest,
+        SearchAppTableRecordRequest,
+        SearchAppTableRecordRequestBody,
+        FilterInfo,
+        Condition
     )
     SDK_AVAILABLE = True
     logger.info("飞书官方SDK导入成功")
@@ -273,6 +278,111 @@ class FeishuSyncManager:
         items = response.data.items if response.data and response.data.items else []
         return {field.field_name: field for field in items if field.field_name}
 
+    def _filter_records_by_table_fields(self, records: List[Dict]) -> List[Dict]:
+        """过滤记录字段，只保留表中已存在字段"""
+        try:
+            existing_fields = self._list_fields()
+        except Exception as exc:
+            logger.warning(f"获取字段列表失败，跳过字段过滤: {exc}")
+            return records
+
+        allowed_fields = set(existing_fields.keys())
+        filtered_records: List[Dict] = []
+
+        for record in records:
+            fields = record.get("fields", {})
+            if not isinstance(fields, dict):
+                continue
+            filtered_fields = {key: value for key, value in fields.items() if key in allowed_fields}
+            if filtered_fields:
+                record["fields"] = filtered_fields
+                filtered_records.append(record)
+
+        dropped = len(records) - len(filtered_records)
+        if dropped > 0:
+            logger.info(f"字段过滤后丢弃 {dropped} 条空记录")
+
+        return filtered_records
+
+    @staticmethod
+    def _detect_timestamp(value) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            value_int = int(value)
+            digits = len(str(abs(value_int)))
+            if digits == 10:
+                return value_int * 1000
+            if digits == 13:
+                return value_int
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = datetime.fromisoformat(text)
+                return int(parsed.timestamp() * 1000)
+            except Exception:
+                return None
+        return None
+
+    @classmethod
+    def _coerce_value_by_type(cls, field_type: int, value):
+        if value is None or value == "":
+            return None
+        if field_type == 15:
+            if isinstance(value, dict):
+                return value
+            link_value = XHSDataFormatter.sanitize_note_url(str(value)) if value not in (None, "") else ""
+            return {"link": link_value, "text": "查看原文"} if link_value else None
+        if field_type == 17:
+            if isinstance(value, (dict, list)):
+                return value
+        if field_type == 2:
+            try:
+                return float(value)
+            except Exception:
+                return None
+        if field_type == 5:
+            return cls._detect_timestamp(value)
+        if field_type == 3:
+            text_value = str(value).strip().lower()
+            if text_value in {"1", "true", "yes", "y"}:
+                return "true"
+            if text_value in {"0", "false", "no", "n"}:
+                return "false"
+            return str(value)
+        if field_type == 4:
+            if isinstance(value, list):
+                return [str(item) for item in value if item not in (None, "")]
+            if isinstance(value, str):
+                parts = [part.strip() for part in value.split(",") if part.strip()]
+                return parts
+            return []
+        return str(value)
+
+    def _coerce_records_by_field_types(
+        self,
+        records: List[Dict],
+        field_type_map: Dict[str, int],
+    ) -> List[Dict]:
+        coerced_records: List[Dict] = []
+        for record in records:
+            fields = record.get("fields", {})
+            if not isinstance(fields, dict):
+                continue
+            new_fields: Dict[str, Any] = {}
+            for key, value in fields.items():
+                if key not in field_type_map:
+                    continue
+                coerced_value = self._coerce_value_by_type(field_type_map[key], value)
+                if coerced_value is not None:
+                    new_fields[key] = coerced_value
+            if new_fields:
+                coerced_records.append({"fields": new_fields})
+        return coerced_records
+
     def ensure_fields(self, fields_config: List[Dict]) -> None:
         """确保表格包含指定字段配置"""
         if not self.table_id:
@@ -316,6 +426,41 @@ class FeishuSyncManager:
                 logger.warning(
                     f"创建字段失败 - Code: {field_response.code}, Msg: {field_response.msg}"
                 )
+
+    def create_field_if_missing(self, field_config: Dict) -> None:
+        """按字段配置创建字段（不改主字段）"""
+        if not self.table_id:
+            raise ValueError("表格ID未设置，无法创建字段")
+
+        field_name = field_config.get("field_name")
+        if not field_name:
+            return
+
+        existing_fields = self._list_fields()
+        if field_name in existing_fields:
+            return
+
+        field_builder = AppTableField.builder() \
+            .field_name(field_name) \
+            .type(field_config.get("type"))
+
+        if "property" in field_config:
+            field_builder.property(field_config["property"])
+
+        field_request = CreateAppTableFieldRequest.builder() \
+            .app_token(self.app_token) \
+            .table_id(self.table_id) \
+            .request_body(field_builder.build()) \
+            .build()
+
+        field_response = self.client.bitable.v1.app_table_field.create(
+            field_request, self._get_request_option()
+        )
+
+        if not field_response.success():
+            logger.warning(
+                f"创建字段失败 - Code: {field_response.code}, Msg: {field_response.msg}"
+            )
     
     def sync_from_json(self, json_file_path: str) -> Dict:
         """从JSON文件同步数据"""
@@ -343,9 +488,10 @@ class FeishuSyncManager:
         
         return self.sync_data(raw_data)
     
-    def sync_data(self, raw_data: List[Dict]) -> Dict:
+    def sync_data(self, raw_data: Union[List[Dict], str, Path]) -> Dict:
         """
         同步数据到飞书 - 使用官方SDK，失败时回退到简化版本
+        支持传入数据列表或文件路径（CSV/JSON）
         
         Args:
             raw_data: 原始数据列表
@@ -353,6 +499,16 @@ class FeishuSyncManager:
         Returns:
             同步结果统计
         """
+        if isinstance(raw_data, (str, Path)):
+            file_path = str(raw_data)
+            suffix = Path(file_path).suffix.lower()
+            if suffix == ".json":
+                raw_data = self.formatter.load_from_json(file_path)
+            elif suffix == ".csv":
+                raw_data = self.formatter.load_from_csv(file_path)
+            else:
+                raise ValueError(f"不支持的文件格式: {suffix}")
+
         if not raw_data:
             logger.warning("没有数据需要同步")
             return {"success": 0, "failed": 0}
@@ -382,6 +538,17 @@ class FeishuSyncManager:
             note_id = record.get("fields", {}).get("笔记ID")
             if note_id:
                 self._attach_images(record["fields"], str(note_id))
+
+        # 过滤字段，避免表中不存在字段导致错误
+        unique_records = self._filter_records_by_table_fields(unique_records)
+
+        # 按远程字段类型做值转换，避免类型不匹配
+        try:
+            existing_fields = self._list_fields()
+            field_type_map = {name: field.type for name, field in existing_fields.items()}
+            unique_records = self._coerce_records_by_field_types(unique_records, field_type_map)
+        except Exception as exc:
+            logger.warning(f"获取字段类型失败，跳过类型匹配: {exc}")
         
         # 尝试使用SDK批量上传，失败时回退到简化版本
         try:
@@ -425,6 +592,11 @@ class FeishuSyncManager:
             try:
                 logger.info(f"正在处理第 {batch_num} 批，共 {len(batch_records)} 条记录...")
 
+                request_payload = {
+                    "table_id": self.table_id,
+                    "records": [record.get("fields", {}) for record in batch_records]
+                }
+
                 req_records = [
                     AppTableRecord.builder().fields(record["fields"]).build()
                     for record in batch_records
@@ -449,18 +621,30 @@ class FeishuSyncManager:
                 else:
                     error_msg = f"第 {batch_num} 批上传失败 - Code: {response.code}, Msg: {response.msg}"
                     logger.error(error_msg)
+                    logger.error(
+                        "请求体(仅字段): %s",
+                        json.dumps(request_payload, ensure_ascii=False)
+                    )
                     if hasattr(response, 'raw') and response.raw:
                         try:
                             error_detail = json.loads(response.raw.content)
                             logger.error(f"详细错误: {json.dumps(error_detail, indent=2, ensure_ascii=False)}")
                         except Exception:
-                            pass
+                            try:
+                                raw_text = response.raw.content.decode("utf-8", errors="ignore")
+                                logger.error(f"响应体(原始): {raw_text}")
+                            except Exception:
+                                pass
 
                 if i + batch_size < len(records):
                     time.sleep(FeishuConfig.RATE_LIMIT_DELAY)
 
             except Exception as e:
                 logger.error(f"第 {batch_num} 批处理失败: {e}")
+                logger.error(
+                    "请求体(仅字段): %s",
+                    json.dumps(request_payload, ensure_ascii=False)
+                )
 
         return {"success": success_count}
     
@@ -601,4 +785,60 @@ class FeishuSyncManager:
             "files_processed": len(processed_files),
             "processed_files": processed_files
         }
+
+    def search_records(
+        self,
+        field_names: Optional[List[str]] = None,
+        filter_info: Optional[FilterInfo] = None,
+        page_size: int = 100,
+        view_id: Optional[str] = None,
+    ) -> List[Dict]:
+        """查询多维表格记录"""
+        if not self.table_id:
+            raise ValueError("表格ID未设置，无法查询记录")
+
+        records: List[Dict] = []
+        page_token: Optional[str] = None
+        page_size = min(max(page_size, 1), 100)
+
+        while True:
+            body_builder = SearchAppTableRecordRequestBody.builder()
+            if field_names:
+                body_builder.field_names(field_names)
+            if filter_info:
+                body_builder.filter(filter_info)
+            if view_id:
+                body_builder.view_id(view_id)
+
+            request = SearchAppTableRecordRequest.builder() \
+                .app_token(self.app_token) \
+                .table_id(self.table_id) \
+                .page_size(page_size) \
+                .request_body(body_builder.build()) \
+                .build()
+
+            if page_token:
+                request.page_token = page_token
+                request.add_query("page_token", page_token)
+
+            response = self.client.bitable.v1.app_table_record.search(
+                request, self._get_request_option()
+            )
+
+            if not response.success():
+                raise RuntimeError(f"查询记录失败 - Code: {response.code}, Msg: {response.msg}")
+
+            items = response.data.items if response.data and response.data.items else []
+            for item in items:
+                fields = getattr(item, "fields", None) or {}
+                records.append(fields)
+
+            if not response.data or not response.data.has_more:
+                break
+
+            page_token = response.data.page_token
+            if not page_token:
+                break
+
+        return records
     

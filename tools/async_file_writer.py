@@ -41,7 +41,7 @@ class AsyncFileWriter:
         keyword = self._sanitize_filename_part(source_keyword_var.get(""))
         crawler_type = self._sanitize_filename_part(self.crawler_type)
         item_type = self._sanitize_filename_part(item_type)
-        file_name = f"{keyword}_{utils.get_current_date()}_{crawler_type}_{item_type}.{file_type}"
+        file_name = f"{utils.get_current_date()}_{keyword}_{crawler_type}_{item_type}.{file_type}"
         return f"{base_path}/{file_name}"
 
     @staticmethod

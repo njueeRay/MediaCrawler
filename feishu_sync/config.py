@@ -51,6 +51,11 @@ class FeishuConfig:
     MAX_TITLE_LENGTH = int(os.getenv("MAX_TITLE_LENGTH", "100"))
     MAX_DESC_LENGTH = int(os.getenv("MAX_DESC_LENGTH", "500"))
     MAX_TAGS_COUNT = int(os.getenv("MAX_TAGS_COUNT", "10"))
+    LINK_SANITIZE = os.getenv("FEISHU_LINK_SANITIZE", "false").lower() == "true"
+
+    @classmethod
+    def is_link_sanitize_enabled(cls) -> bool:
+        return os.getenv("FEISHU_LINK_SANITIZE", "false").lower() == "true"
     
     @classmethod
     def validate(cls):
@@ -119,6 +124,28 @@ class FeishuConfig:
         logger.info(f"自动同步: {'开启' if cls.AUTO_SYNC else '关闭'}")
         logger.info(f"同步间隔: {cls.SYNC_INTERVAL}秒")
         logger.info("=" * 30)
+
+
+class FeishuReadConfig:
+    """读取多维表格配置（read_from_feishu.py 使用）"""
+
+    TABLE_ID = "tblErW6O0gLGViIy"
+    VIEW_ID = "vewT7xrAZ5"
+    SELECT_FIELDS = "AI文本分析, 笔记ID, 笔记链接, 信息质量评估, type"
+    FILTER_FIELD = ""
+    FILTER_OPERATOR = ""
+    FILTER_VALUES = ""
+    FILTER_CONJUNCTION = ""
+
+    # SELECT_FIELDS = "AI文本分析, 笔记链接, 信息质量评估, type"
+    # FILTER_FIELD = "信息质量评估"
+    # FILTER_OPERATOR = "contains"
+    # FILTER_VALUES = "优质, 缺失但值得溯源"
+    # FILTER_CONJUNCTION = "or"
+    PAGE_SIZE = 100
+    OUTPUT_CSV = ""
+    LOG_LEVEL = "INFO"
+    LINK_FIELD_NAMES = ["笔记链接", "链接", "link"]
 
 # 便捷访问函数
 def get_config() -> FeishuConfig:

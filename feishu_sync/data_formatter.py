@@ -9,10 +9,26 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import logging
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from .config import FeishuConfig
 
 logger = logging.getLogger(__name__)
 
 class XHSDataFormatter:
+    _SENSITIVE_QUERY_KEYS = {
+        "xsec_token",
+        "xsec_source",
+        "xsec_platform",
+        "xsec_target",
+        "xsec_uid",
+        "share_from_user_hidden",
+        "share_channel",
+        "share_id",
+        "xhsshare",
+    }
+    _SENSITIVE_QUERY_PREFIXES = ("xsec_",)
+
     def __init__(self):
         # 笔记数据字段映射
         self.note_field_mapping = {
@@ -79,30 +95,32 @@ class XHSDataFormatter:
             heat_score = self.calculate_heat_score(raw_data)
             
             # 构建飞书记录格式
-            feishu_record = {
-                "fields": {
-                    "笔记ID": raw_data.get('note_id', ''),
-                    "标题": raw_data.get('title', '')[:100],  # 限制长度
-                    "内容摘要": self.clean_text(raw_data.get('desc', ''))[:500],
-                    "类型": "视频" if raw_data.get('type') == 'video' else "图文",
-                    "发布时间": publish_time,
-                    "用户ID": raw_data.get('user_id', ''),
-                    "用户昵称": raw_data.get('nickname', ''),
-                    "点赞数": self.safe_int(raw_data.get('liked_count')),
-                    "收藏数": self.safe_int(raw_data.get('collected_count')),
-                    "评论数": self.safe_int(raw_data.get('comment_count')),
-                    "分享数": self.safe_int(raw_data.get('share_count')),
-                    "地理位置": raw_data.get('ip_location', ''),
-                    "标签": tags,
-                    "搜索关键词": raw_data.get('source_keyword', ''),
-                    "笔记链接": {
-                        "link": raw_data.get('note_url', ''),
-                        "text": "查看原文"
-                    } if raw_data.get('note_url') else None,
-                    "热度评分": heat_score,
-                    "爬取时间": crawl_time
-                }
+            sanitized_note_url = self.sanitize_note_url(raw_data.get('note_url', ''))
+            
+            fields = {
+                "笔记ID": raw_data.get('note_id', ''),
+                    "标题": self.clean_text(raw_data.get('title', ''))[:FeishuConfig.MAX_TITLE_LENGTH],
+                    "内容摘要": self.clean_text(raw_data.get('desc', ''))[:FeishuConfig.MAX_DESC_LENGTH],
+                "类型": "视频" if raw_data.get('type') == 'video' else "图文",
+                "发布时间": publish_time,
+                "用户ID": raw_data.get('user_id', ''),
+                "用户昵称": raw_data.get('nickname', ''),
+                "点赞数": self.safe_int(raw_data.get('liked_count')),
+                "收藏数": self.safe_int(raw_data.get('collected_count')),
+                "评论数": self.safe_int(raw_data.get('comment_count')),
+                "分享数": self.safe_int(raw_data.get('share_count')),
+                "地理位置": raw_data.get('ip_location', ''),
+                "标签": tags[:FeishuConfig.MAX_TAGS_COUNT],
+                "搜索关键词": raw_data.get('source_keyword', ''),
+                "笔记链接": {
+                    "link": sanitized_note_url,
+                    "text": "查看原文"
+                } if sanitized_note_url else None,
+                "热度评分": heat_score,
+                "爬取时间": crawl_time
             }
+
+            feishu_record = {"fields": self.sanitize_fields(fields)}
             
             return feishu_record
             
@@ -123,22 +141,22 @@ class XHSDataFormatter:
             parent_comment_id = self.safe_int(raw_data.get('parent_comment_id'))
             
             # 构建飞书记录格式
-            feishu_record = {
-                "fields": {
-                    "评论ID": raw_data.get('comment_id', ''),
-                    "所属笔记ID": raw_data.get('note_id', ''),
-                    "评论内容": self.clean_text(raw_data.get('content', ''))[:1000],  # 限制长度
-                    "评论时间": comment_time,
-                    "用户ID": raw_data.get('user_id', ''),
-                    "用户昵称": raw_data.get('nickname', ''),
-                    "点赞数": like_count,
-                    "子评论数": sub_comment_count,
-                    "地理位置": raw_data.get('ip_location', '') or '',
-                    "父评论ID": str(parent_comment_id) if parent_comment_id > 0 else '',
-                    "是否为回复": "是" if parent_comment_id > 0 else "否",
-                    "爬取时间": crawl_time
-                }
+            fields = {
+                "评论ID": raw_data.get('comment_id', ''),
+                "所属笔记ID": raw_data.get('note_id', ''),
+                "评论内容": self.clean_text(raw_data.get('content', ''))[:1000],  # 限制长度
+                "评论时间": comment_time,
+                "用户ID": raw_data.get('user_id', ''),
+                "用户昵称": raw_data.get('nickname', ''),
+                "点赞数": like_count,
+                "子评论数": sub_comment_count,
+                "地理位置": raw_data.get('ip_location', '') or '',
+                "父评论ID": str(parent_comment_id) if parent_comment_id > 0 else '',
+                "是否为回复": "是" if parent_comment_id > 0 else "否",
+                "爬取时间": crawl_time
             }
+
+            feishu_record = {"fields": self.sanitize_fields(fields)}
             
             return feishu_record
             
@@ -208,21 +226,36 @@ class XHSDataFormatter:
     
     def timestamp_to_date(self, timestamp) -> int:
         """时间戳转换为飞书日期格式"""
-        if timestamp is None or timestamp == "":
-            return int(datetime.now().timestamp() * 1000)
-        
+        if timestamp is None or timestamp == "" or pd.isna(timestamp):
+            return None
+
         if isinstance(timestamp, str):
-            timestamp = self.safe_int(timestamp)
-        
+            timestamp = timestamp.strip()
+            if not timestamp:
+                return None
+            try:
+                timestamp = int(float(timestamp))
+            except (ValueError, TypeError):
+                return None
+        elif isinstance(timestamp, float):
+            if pd.isna(timestamp):
+                return None
+            timestamp = int(timestamp)
+        elif not isinstance(timestamp, int):
+            try:
+                timestamp = int(timestamp)
+            except (ValueError, TypeError):
+                return None
+
         # 飞书需要毫秒级时间戳
         if len(str(timestamp)) == 10:
             timestamp *= 1000
-            
+
         return timestamp
     
     def parse_tags(self, tag_string: str) -> List[str]:
         """解析标签字符串"""
-        if not tag_string:
+        if not tag_string or pd.isna(tag_string):
             return []
         
         try:
@@ -238,8 +271,11 @@ class XHSDataFormatter:
     
     def clean_text(self, text: str) -> str:
         """清理文本内容"""
-        if not text:
+        if text is None or pd.isna(text):
             return ""
+
+        if not isinstance(text, str):
+            text = str(text)
         
         # 移除特殊字符和多余空白
         text = text.replace('\n', ' ').replace('\r', ' ')
@@ -274,6 +310,80 @@ class XHSDataFormatter:
                 return int(float(value))
             except (ValueError, TypeError):
                 return 0
+
+    @staticmethod
+    def _sanitize_list(values: List[Any]) -> List[Any]:
+        cleaned = []
+        for value in values:
+            if value is None or pd.isna(value):
+                continue
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    continue
+            cleaned.append(value)
+        return cleaned
+
+    def sanitize_fields(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """清理字段中的 NaN/None，并规整数值类型"""
+        sanitized: Dict[str, Any] = {}
+
+        for key, value in fields.items():
+            if value is None:
+                continue
+
+            if isinstance(value, list):
+                value = self._sanitize_list(value)
+            elif isinstance(value, dict):
+                link_value = value.get("link") if isinstance(value, dict) else None
+                if link_value is None or (isinstance(link_value, str) and not link_value.strip()):
+                    continue
+            else:
+                if pd.isna(value):
+                    continue
+                if isinstance(value, float) and value.is_integer():
+                    value = int(value)
+
+            sanitized[key] = value
+
+        return sanitized
+
+    @classmethod
+    def _is_personal_query_param(cls, key: str) -> bool:
+        if not key:
+            return False
+        normalized = key.lower()
+        if normalized in cls._SENSITIVE_QUERY_KEYS:
+            return True
+        return any(normalized.startswith(prefix) for prefix in cls._SENSITIVE_QUERY_PREFIXES)
+
+    @classmethod
+    def sanitize_note_url(cls, url: Optional[str]) -> str:
+        """Remove personal query parameters before uploading links to Feishu."""
+        if not FeishuConfig.is_link_sanitize_enabled():
+            return url or ""
+        if not url:
+            return ""
+
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return url
+
+        if not parts.query:
+            return url
+
+        filtered_query = [
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if not cls._is_personal_query_param(key)
+        ]
+
+        new_query = urlencode(filtered_query, doseq=True)
+        if new_query == parts.query:
+            return url
+
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
     
     @staticmethod
     def get_table_fields(data_type: str = "note") -> List[Dict]:
