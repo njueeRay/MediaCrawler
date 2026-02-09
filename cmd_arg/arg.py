@@ -46,6 +46,7 @@ class PlatformEnum(str, Enum):
     WEIBO = "wb"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
+    WECHAT = "wechat"
 
 
 class LoginTypeEnum(str, Enum):
@@ -145,7 +146,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             PlatformEnum,
             typer.Option(
                 "--platform",
-                help="Media platform selection (xhs=XiaoHongShu | dy=Douyin | ks=Kuaishou | bili=Bilibili | wb=Weibo | tieba=Baidu Tieba | zhihu=Zhihu)",
+                help="Media platform selection (xhs=XiaoHongShu | dy=Douyin | ks=Kuaishou | bili=Bilibili | wb=Weibo | tieba=Baidu Tieba | zhihu=Zhihu | wechat=WeChat)",
                 rich_help_panel="Basic Configuration",
             ),
         ] = _coerce_enum(PlatformEnum, config.PLATFORM, PlatformEnum.XHS),
@@ -287,6 +288,8 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 config.WEIBO_SPECIFIED_ID_LIST = specified_id_list
             elif platform == PlatformEnum.KUAISHOU:
                 config.KS_SPECIFIED_ID_LIST = specified_id_list
+            elif platform == PlatformEnum.WECHAT:
+                config.WECHAT_SPECIFIED_ARTICLE_URL_LIST = specified_id_list
 
         if creator_id_list:
             if platform == PlatformEnum.XHS:
@@ -299,6 +302,8 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 config.WEIBO_CREATOR_ID_LIST = creator_id_list
             elif platform == PlatformEnum.KUAISHOU:
                 config.KS_CREATOR_ID_LIST = creator_id_list
+            elif platform == PlatformEnum.WECHAT:
+                config.WECHAT_CREATOR_ID_LIST = creator_id_list
 
         return SimpleNamespace(
             platform=config.PLATFORM,

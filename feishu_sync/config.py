@@ -137,11 +137,13 @@ class FeishuReadConfig:
     FILTER_VALUES = ""
     FILTER_CONJUNCTION = ""
 
+    # Example:
     # SELECT_FIELDS = "AI文本分析, 笔记链接, 信息质量评估, type"
     # FILTER_FIELD = "信息质量评估"
     # FILTER_OPERATOR = "contains"
     # FILTER_VALUES = "优质, 缺失但值得溯源"
     # FILTER_CONJUNCTION = "or"
+    
     PAGE_SIZE = 100
     OUTPUT_CSV = ""
     LOG_LEVEL = "INFO"

@@ -450,3 +450,47 @@ class ZhihuCreator(Base):
     get_voteup_count = Column(Integer, default=0)
     add_ts = Column(BigInteger)
     last_modify_ts = Column(BigInteger)
+
+
+# ==================== 微信公众号 ====================
+
+class WechatArticle(Base):
+    __tablename__ = 'wechat_article'
+    id = Column(Integer, primary_key=True)
+    article_id = Column(String(128), index=True)
+    title = Column(Text)
+    link = Column(Text)
+    digest = Column(Text)
+    cover = Column(Text)
+    author_name = Column(String(128))
+    account_nickname = Column(String(128))
+    create_time = Column(BigInteger, index=True)
+    update_time = Column(BigInteger)
+    create_time_str = Column(String(32))
+    update_time_str = Column(String(32))
+    content_format = Column(String(16))
+    content_length = Column(Integer, default=0)
+    copyright_type = Column(Integer, default=0)
+    source_keyword = Column(Text, default='')
+    add_ts = Column(BigInteger)
+    last_modify_ts = Column(BigInteger)
+
+
+class WechatCreator(Base):
+    __tablename__ = 'wechat_creator'
+    id = Column(Integer, primary_key=True)
+    fakeid = Column(String(64), index=True, unique=True)
+    nickname = Column(String(128))
+    alias = Column(String(128))
+    round_head_img = Column(Text)
+    signature = Column(Text)
+    service_type = Column(Integer, default=0)
+    verify_status = Column(Integer, default=0)
+    identity_name = Column(String(256))
+    original_article_count = Column(Integer, default=0)
+    intro = Column(Text)
+    org = Column(String(256))
+    account_type = Column(String(64))
+    ip_location = Column(String(128))
+    add_ts = Column(BigInteger)
+    last_modify_ts = Column(BigInteger)
