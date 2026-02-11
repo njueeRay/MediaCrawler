@@ -7,7 +7,7 @@
 | # | 文档 | 内容概要 |
 |---|------|----------|
 | 01 | [项目架构总览](01-项目架构总览.md) | 技术栈、目录结构、核心架构图、设计模式（工厂/模板方法/策略/Mixin）、数据流、运行方式 |
-| 02 | [平台爬虫模块详解](02-平台爬虫模块详解.md) | 7 个平台的统一模块结构、抽象基类体系、以小红书为例的完整流程、签名机制对比、三种爬虫类型（search/detail/creator）、并发与限流 |
+| 02 | [平台爬虫模块详解](02-平台爬虫模块详解.md) | 8 个平台的统一模块结构、抽象基类体系、以小红书为例的完整流程、签名机制对比、三种爬虫类型（search/detail/creator）、并发与限流 |
 | 03 | [数据存储系统详解](03-数据存储系统详解.md) | 7 种存储后端（CSV/JSON/Excel/MySQL/SQLite/PostgreSQL/MongoDB）、StoreFactory、ORM 模型、AsyncFileWriter、数据库 Session 管理与初始化 |
 | 04 | [工具链与基础设施](04-工具链与基础设施.md) | 浏览器管理（标准 + CDP 双模式）、代理 IP 池与自动刷新、缓存系统、爬虫工具函数、优雅启停、日志系统、ContextVar 上下文 |
 | 05 | [配置系统与命令行接口](05-配置系统与命令行接口.md) | 三层配置优先级、全局/平台/数据库配置项清单、Typer CLI 全部参数、环境变量、使用示例 |
@@ -24,6 +24,6 @@
 
 ## 项目概况
 
-MediaCrawler 是一个多平台社交媒体数据采集框架，支持 **小红书、抖音、快手、B站、微博、百度贴吧、知乎** 7 个平台，提供关键词搜索、指定帖子详情、创作者主页三种爬取模式，数据可存储至 CSV/JSON/Excel/MySQL/SQLite/PostgreSQL/MongoDB。
+MediaCrawler 是一个多平台社交媒体数据采集框架，支持 **小红书、抖音、快手、B站、微博、百度贴吧、知乎、微信公众号** 8 个平台，提供关键词搜索、指定帖子详情、创作者主页三种爬取模式，数据可存储至 CSV/JSON/Excel/MySQL/SQLite/PostgreSQL/MongoDB。
 
-核心技术栈：Python 3.22+ / asyncio / Playwright / httpx / SQLAlchemy / FastAPI / Typer
+核心技术栈：Python 3.11+ / asyncio / Playwright / httpx / SQLAlchemy / FastAPI / Typer

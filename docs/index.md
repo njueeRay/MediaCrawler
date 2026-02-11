@@ -3,6 +3,8 @@
 ## 项目文档
 
 - [项目架构文档](项目架构文档.md) - 系统架构、模块设计、数据流向（含 Mermaid 图表）
+- [微信公众号爬虫模块](wechat/README.md) - 微信公众号集成（配置、使用、API 参考）
+- [知识库](知识库/README.md) - 基于源码分析的架构知识库（6 篇）
 
 ## 推荐：使用 uv 管理依赖
 
@@ -46,6 +48,26 @@ uv run main.py --platform xhs --lt qrcode --type search --save_data_option db
 # 其他平台示例
 uv run main.py --help
 ```
+
+### 5. 微信公众号爬虫
+
+微信模块**不需要浏览器/Playwright**，通过 wechat-article-exporter 的 HTTP API 工作：
+
+```shell
+# 前置：确保 wechat-article-exporter 服务已启动
+# 配置：编辑 config/wechat_config.py（API 地址、Auth-Key、目标公众号）
+
+# 爬取指定公众号的文章（creator 模式）
+uv run main.py --platform wechat --type creator
+
+# 按关键词搜索公众号并爬取（search 模式）
+uv run main.py --platform wechat --type search --keywords "铁路12306"
+
+# 爬取指定文章链接（detail 模式）
+uv run main.py --platform wechat --type detail --specified_id "https://mp.weixin.qq.com/s/xxx"
+```
+
+> 详细配置和 Auth-Key 获取方式请参阅 [微信公众号爬虫模块文档](wechat/README.md)
 
 ## 备选：Python 原生 venv（不推荐）
 > 如果爬取抖音或知乎，需要提前安装 Node.js，版本 `>= 16`。

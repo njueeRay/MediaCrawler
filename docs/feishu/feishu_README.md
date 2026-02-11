@@ -115,6 +115,7 @@ python auto_scheduler.py --mode once --task daily_sync
 |---------|---------|---------|---------|------|
 | 小红书评论 | ✅ 完整支持 | 自动映射 | 50条/批次 | 1794条已验证 |
 | 小红书笔记 | ✅ 完整支持 | 自动映射 | 50条/批次 | 400条已验证 |
+| 微信公众号文章 | ✅ 基础支持 | WeChatDataFormatter | 50条/批次 | 字段映射已完成，图片上传待测试 |
 | 抖音数据 | 📋 计划中 | 待设计 | 50条/批次 | 预计v1.2 |
 | B站数据 | 📋 计划中 | 待设计 | 50条/批次 | 预计v1.3 |
 
@@ -194,7 +195,8 @@ feishu_sync/
 ├── data_formatter.py      # 数据格式化模块
 │   ├── detect_data_type()     # 数据类型检测
 │   ├── format_comment_record() # 评论数据格式化
-│   └── format_note_record()    # 笔记数据格式化
+│   ├── format_note_record()    # 笔记数据格式化
+│   └── WeChatDataFormatter    # 微信公众号文章格式化
 │
 ├── image_uploader.py      # 附件上传模块
 │   └── FeishuImageUploader # 上传素材并返回 file_token
