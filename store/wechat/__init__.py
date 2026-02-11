@@ -42,17 +42,10 @@ async def update_wechat_article(article_item: Dict) -> None:
     保存/更新微信公众号文章数据
 
     Args:
-        article_item: 已规范化的文章数据字典，包含以下关键字段:
-            - article_id: 文章唯一标识
-            - title: 文章标题
-            - link: 文章链接
-            - author_name: 作者名
-            - account_nickname: 公众号昵称
-            - create_time: 创建时间戳
-            - update_time: 更新时间戳
-            - content_format: 内容格式 (html/markdown/text/json)
-            - content_length: 内容长度
-            - last_modify_ts: 最后修改时间戳 (MediaCrawler 生成)
+        article_item: 已规范化的文章数据字典，包含以下字段:
+            article_id, fakeid, title, link, digest, author_name,
+            account_nickname, item_show_type, create_time_str,
+            update_time_str, image_list, source_keyword, add_ts
     """
     utils.logger.info(f"[store.wechat.update_wechat_article] article: {article_item.get('title', '')}")
     await WechatStoreFactory.create_store().store_content(article_item)

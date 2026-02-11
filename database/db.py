@@ -44,6 +44,7 @@ async def init_table_schema(db_type: str):
     utils.logger.info(f"[init_table_schema] {db_type} table schema init successful")
 
 async def init_db(db_type: str = None):
+    import database.webui_models  # noqa: F401 — ensure WebUI tables are registered in Base.metadata
     await init_table_schema(db_type)
 
 async def close():

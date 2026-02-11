@@ -41,7 +41,7 @@ except ImportError as e:
     SDK_AVAILABLE = False
 
 from .config import FeishuConfig
-from .data_formatter import XHSDataFormatter
+from .data_formatter import XHSDataFormatter, WeChatDataFormatter
 from .image_uploader import FeishuImageUploader
 
 class FeishuSyncManager:
@@ -50,8 +50,14 @@ class FeishuSyncManager:
     IMAGE_FIELD_NAME = "图片"
     IMAGE_ROOT_DIR = os.path.join("data", "xhs", "images")
     PRIMARY_FIELD_NAME = "主字段"
+
+    # 平台 → formatter 映射
+    _FORMATTER_MAP = {
+        "xhs": XHSDataFormatter,
+        "wechat": WeChatDataFormatter,
+    }
     
-    def __init__(self, app_id: str = None, app_secret: str = None, app_token: str = None, table_id: str = None):
+    def __init__(self, app_id: str = None, app_secret: str = None, app_token: str = None, table_id: str = None, platform: str = "xhs"):
         """
         初始化同步管理器
         
@@ -60,6 +66,7 @@ class FeishuSyncManager:
             app_secret: 飞书应用密钥（可选，默认从配置读取）
             app_token: 多维表格Token（可选，默认从配置读取）
             table_id: 数据表ID（可选）
+            platform: 数据平台标识（"xhs" | "wechat"），决定使用哪个 formatter
         """
         if not SDK_AVAILABLE:
             raise ImportError("lark-oapi未安装，请运行: pip install lark-oapi")
@@ -72,7 +79,9 @@ class FeishuSyncManager:
         
         # 创建官方SDK客户端
         self.client = self._create_lark_client()
-        self.formatter = XHSDataFormatter()
+        formatter_cls = self._FORMATTER_MAP.get(platform, XHSDataFormatter)
+        self.formatter = formatter_cls()
+        self.platform = platform
         self.image_uploader = FeishuImageUploader(self.client, self.app_token)
         
     def _create_lark_client(self):
@@ -533,11 +542,15 @@ class FeishuSyncManager:
         unique_records = self._deduplicate_records(formatted_records)
         print(f" >>>>>>>> 去重后剩余 {len(unique_records)} 条记录 >>>>>>>>")
         
-        # 绑定图片（基于 note_id）
-        for record in unique_records:
-            note_id = record.get("fields", {}).get("笔记ID")
-            if note_id:
-                self._attach_images(record["fields"], str(note_id))
+        # 绑定图片
+        if self.platform == "wechat":
+            for record in unique_records:
+                self._attach_wechat_images(record)
+        else:
+            for record in unique_records:
+                note_id = record.get("fields", {}).get("笔记ID")
+                if note_id:
+                    self._attach_images(record["fields"], str(note_id))
 
         # 过滤字段，避免表中不存在字段导致错误
         unique_records = self._filter_records_by_table_fields(unique_records)
@@ -649,14 +662,15 @@ class FeishuSyncManager:
         return {"success": success_count}
     
     def _deduplicate_records(self, records: List[Dict]) -> List[Dict]:
-        """去重处理（基于笔记ID）"""
+        """去重处理（基于平台主键字段）"""
+        key_field = "文章ID" if self.platform == "wechat" else "笔记ID"
         seen_ids = set()
         unique_records = []
 
         for record in records:
-            note_id = record["fields"].get("笔记ID")
-            if note_id and note_id not in seen_ids:
-                seen_ids.add(note_id)
+            pk = record["fields"].get(key_field)
+            if pk and pk not in seen_ids:
+                seen_ids.add(pk)
                 unique_records.append(record)
 
         duplicate_count = len(records) - len(unique_records)
@@ -703,6 +717,43 @@ class FeishuSyncManager:
 
         if items:
             record_fields[self.IMAGE_FIELD_NAME] = items
+
+    def _attach_wechat_images(self, record: Dict) -> None:
+        """
+        从 _image_meta.local_images 上传微信文章图片到飞书
+
+        WeChatDataFormatter 会在 format_article_record 中自动查找本地图片目录，
+        将文件路径列表放入 record["_image_meta"]["local_images"]。
+        本方法消费该元信息，上传后设置对应附件字段。
+        """
+        meta = record.pop("_image_meta", None)
+        if not meta:
+            return
+
+        local_images = meta.get("local_images", [])
+        field_name = meta.get("field_name", "文章图片")
+        if not local_images:
+            return
+
+        items = []
+        for image_path in local_images:
+            if not os.path.isfile(image_path):
+                logger.warning(f"图片文件不存在: {image_path}")
+                continue
+            try:
+                token = self.image_uploader.upload_image(image_path)
+            except Exception as exc:
+                logger.error(f"微信图片上传失败: {image_path} - {exc}")
+                continue
+            if token:
+                items.append({
+                    "file_token": token,
+                    "name": os.path.basename(image_path),
+                })
+
+        if items:
+            record.get("fields", {})[field_name] = items
+            logger.info(f"微信文章图片已绑定: {len(items)} 张 → {field_name}")
     
     def get_sync_status(self) -> Dict:
         """获取同步状态"""

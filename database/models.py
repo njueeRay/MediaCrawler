@@ -457,23 +457,21 @@ class ZhihuCreator(Base):
 class WechatArticle(Base):
     __tablename__ = 'wechat_article'
     id = Column(Integer, primary_key=True)
-    article_id = Column(String(128), index=True)
+    article_id = Column(String(128), index=True, unique=True)
+    fakeid = Column(String(64), index=True)
     title = Column(Text)
     link = Column(Text)
     digest = Column(Text)
-    cover = Column(Text)
+    content = Column(Text, default='')                  # 文章完整内容 (markdown/text)
     author_name = Column(String(128))
     account_nickname = Column(String(128))
-    create_time = Column(BigInteger, index=True)
-    update_time = Column(BigInteger)
+    item_show_type = Column(String(32), default='普通图文')  # 展示类型中文标签
     create_time_str = Column(String(32))
     update_time_str = Column(String(32))
-    content_format = Column(String(16))
-    content_length = Column(Integer, default=0)
-    copyright_type = Column(Integer, default=0)
+    cover = Column(Text, default='')                  # 封面图片 URL
+    image_list = Column(Text, default='')             # 文章图片 URL 列表（逗号分隔）
     source_keyword = Column(Text, default='')
-    add_ts = Column(BigInteger)
-    last_modify_ts = Column(BigInteger)
+    add_ts = Column(String(32), default='')           # 入库时间 (YYYY-MM-DD HH:MM:SS)
 
 
 class WechatCreator(Base):

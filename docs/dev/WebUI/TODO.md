@@ -43,46 +43,25 @@
 
 ---
 
-## Phase 1: 配置管理 + 仪表盘 (5天)
-- [ ] 1.1 ConfigService 完整实现
-- [ ] 1.2 连接测试端点
-- [ ] 1.3 ConfigManager.vue 页面
-- [ ] 1.4 Dashboard 数据聚合 API
-- [ ] 1.5 Dashboard.vue 页面
+## Phase 1: 前端-后端全面对接 ✅
 
-## Phase 2: 订阅管理 (5天)
-- [ ] 2.1 Subscription 模型（已在 Phase 0 创建）
-- [ ] 2.2 SubscriptionService 完整实现
-- [ ] 2.3 搜索创作者页面
-- [ ] 2.4 订阅列表页面
-- [ ] 2.5 创作者详情页面
+> 后端审计结论：Phase 0 已实现全部 Service + Router。本阶段将 8 个前端页面从 stub 升级为真实 API 调用。
 
-## Phase 3: 数据浏览 + 字段映射 (7天)
-- [ ] 3.1 数据查询 API（DB 查询 + 分页 + 过滤）
-- [ ] 3.2 FieldMapping 模型（已在 Phase 0 创建）
-- [ ] 3.3 FieldMappingService 完整实现
-- [ ] 3.4 默认映射种子数据（已在 Phase 0 创建）
-- [ ] 3.5 DataExplorer.vue
-- [ ] 3.6 FieldMapping.vue
-- [ ] 3.7 映射 ↔ 数据浏览集成
+- [x] 1.1 Dashboard.vue — `/api/dashboard` 聚合 + 爬虫控制 + 最近日志
+- [x] 1.2 ConfigManager.vue — 多类型测试连接 + 变更历史 Tab
+- [x] 1.3 Subscription.vue — 统计卡片 + 手动添加 + toggle active + 触发采集
+- [x] 1.4 DataExplorer.vue — 类型过滤 + 预览 + 下载 + 统计
+- [x] 1.5 FieldMapping.vue — 方案详情编辑器 + 行内 item 编辑 + 增删 item
+- [x] 1.6 FeishuSync.vue — 同步表单启用 + 方案联动 + `POST /feishu/sync`
+- [x] 1.7 TaskScheduler.vue — 执行历史 Tab + cron + toggle enable/disable
+- [x] 1.8 Logs.vue — 加载历史按钮 + WebSocket 实时流
+- [x] 1.9 TypeScript + Vite 构建验证通过
 
-## Phase 4: 飞书同步 (5天)
-- [ ] 4.1 FeishuService 完整实现
-- [ ] 4.2 异步同步 + WebSocket 进度
-- [ ] 4.3 同步历史 API
-- [ ] 4.4 FeishuSync.vue
-- [ ] 4.5 同步进度 + 历史
-
-## Phase 5: 任务调度 (5天)
-- [ ] 5.1 APScheduler 集成
-- [ ] 5.2 ScheduledTask + TaskExecution 模型（已在 Phase 0 创建）
-- [ ] 5.3 SchedulerService 完整实现
-- [ ] 5.4 TaskScheduler.vue
-- [ ] 5.5 执行历史 + 调度状态
-
-## Phase 6: 日志监控 + 优化 (5天)
-- [ ] 6.1 Logs.vue（WebSocket 日志流）
-- [ ] 6.2 仪表盘增强
-- [ ] 6.3 全局错误处理 / Loading / 空状态
-- [ ] 6.4 暗色主题
-- [ ] 6.5 生产构建 + README
+## Phase 2: 增强与完善 (待开始)
+- [ ] 2.1 `search_creators()` 真实平台搜索（需各平台 API 适配器）
+- [ ] 2.2 WebSocket 同步进度推送（FeishuSync 实时进度条）
+- [ ] 2.3 Dashboard 图表增强（趋势图、平台分布）
+- [ ] 2.4 全局错误处理 / Loading / 空状态优化
+- [ ] 2.5 暗色主题完善
+- [ ] 2.6 Vite chunk 分割优化（vendor 拆分）
+- [ ] 2.7 生产部署文档 / README 更新

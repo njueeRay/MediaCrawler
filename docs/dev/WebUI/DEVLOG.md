@@ -68,3 +68,26 @@
 - [x] Vite 生产构建成功 → `api/webui/`
 
 ---
+
+## Phase 1: 前端-后端全面对接
+
+> 后端审计确认：所有 6 个 Service 层、5 个 Router 层均已完整实现（唯一占位：`search_creators()` 返回空列表，Phase 2 实现）。
+> 本阶段核心：将 8 个前端页面从骨架 stub 升级为真实调用后端 API。
+
+### 页面重写清单
+
+- [x] **Dashboard.vue** — 调用 `GET /api/dashboard` 获取真实聚合数据；爬虫状态徽章 + 启动/停止控制；4 张统计卡片（crawler/subscriptions/data/scheduler）；最近日志面板（`GET /crawler/logs?limit=20`）
+- [x] **FeishuSync.vue** — 启用同步表单（原 Phase 4 禁用）；平台/数据类型/映射方案选择器联动；`watch()` 自动加载匹配方案并自动选中默认方案；`POST /feishu/sync` 发起同步；连接检测 loading 状态；历史增加 duration 列
+- [x] **DataExplorer.vue** — 文件类型过滤(json/csv/xlsx)；平台列从路径提取；record_count 列；预览模态框（`GET /data/files/{path}?preview=true` + 自动列生成）；下载链接 `/api/data/download/{path}`；统计面板（`GET /data/stats`）
+- [x] **Subscription.vue** — 统计卡片(total/active/platform_count) via `GET /subscribe/stats`；"手动添加"模态框(platform/creator_id/creator_name/creator_url/auto_crawl/notes)；`POST /subscribe` 创建；切换 active/pause via `PUT /subscribe/{id}`；触发采集；删除
+- [x] **FieldMapping.vue** — 方案列表 + 详情编辑器切换；`GET /mapping/schemes/{id}` 加载方案含 items；行内编辑表格 (source_field/display_name/transform 8 选项/feishu_type/enabled/sort_order)；增删 item；`PUT /mapping/schemes/{id}` 保存；预览模态框占位
+- [x] **ConfigManager.vue** — 多类型测试连接(feishu/database/wechat)；"变更历史" Tab + `GET /config/history` 分页；loading/saving 状态；修复重复 `</script>` 标签
+- [x] **TaskScheduler.vue** — 两个 Tab（任务 + 执行历史）；`GET /scheduler/executions` + 状态过滤；执行列 (task_name/trigger_type/status/started_at/finished_at/duration/error)；cron expression 输入支持；toggle enable/disable via `PUT /scheduler/tasks/{id}`；status bar next_run 展示
+- [x] **Logs.vue** — 新增"加载历史"按钮调用 `GET /crawler/logs?limit=200`；历史日志 prepend 到 logs 数组；import 修正 (`http` → 与其他视图一致)
+
+### 验证
+
+- [x] `vue-tsc --noEmit` — TypeScript 类型检查通过
+- [x] `vite build` — 生产构建成功，8 个页面 chunk 全部生成
+
+---

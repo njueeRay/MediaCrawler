@@ -74,41 +74,39 @@ class WechatDbStoreImplement(AbstractStore):
 
     async def _add_content(self, session: AsyncSession, item: Dict):
         from database.models import WechatArticle
-        now = int(get_current_timestamp())
         article = WechatArticle(
             article_id=item.get("article_id"),
+            fakeid=item.get("fakeid", ""),
             title=item.get("title"),
             link=item.get("link"),
             digest=item.get("digest"),
-            cover=item.get("cover"),
+            content=item.get("content", ""),
             author_name=item.get("author_name"),
             account_nickname=item.get("account_nickname"),
-            create_time=item.get("create_time"),
-            update_time=item.get("update_time"),
+            item_show_type=item.get("item_show_type", "普通图文"),
             create_time_str=item.get("create_time_str"),
             update_time_str=item.get("update_time_str"),
-            content_format=item.get("content_format"),
-            content_length=item.get("content_length", 0),
-            copyright_type=item.get("copyright_type", 0),
+            cover=item.get("cover", ""),
+            image_list=item.get("image_list", ""),
             source_keyword=item.get("source_keyword", ""),
-            add_ts=now,
-            last_modify_ts=now,
+            add_ts=item.get("add_ts", ""),
         )
         session.add(article)
 
     async def _update_content(self, session: AsyncSession, item: Dict):
         from database.models import WechatArticle
-        now = int(get_current_timestamp())
+        update_vals = {
+            "cover": item.get("cover", ""),
+            "image_list": item.get("image_list", ""),
+            "source_keyword": item.get("source_keyword", ""),
+        }
+        # 仅在有内容时更新 content 字段（避免空值覆盖已有内容）
+        if item.get("content"):
+            update_vals["content"] = item["content"]
         stmt = (
             update(WechatArticle)
             .where(WechatArticle.article_id == item.get("article_id"))
-            .values(
-                last_modify_ts=now,
-                content_format=item.get("content_format"),
-                content_length=item.get("content_length", 0),
-                update_time=item.get("update_time"),
-                update_time_str=item.get("update_time_str"),
-            )
+            .values(**update_vals)
         )
         await session.execute(stmt)
 

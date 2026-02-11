@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from feishu_sync.sync_manager import FeishuSyncManager
-from feishu_sync.data_formatter import XHSDataFormatter
+from feishu_sync.data_formatter import XHSDataFormatter, WeChatDataFormatter
 from feishu_sync.config import FeishuConfig
 from feishu_sync.json_column_sync import sync_csv_json_column, DEFAULT_PRIMARY_FIELD
 

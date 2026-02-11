@@ -179,3 +179,7 @@ agent_zone
 debug_tools
 
 database/*.db
+
+
+# webui
+webui-src/node_modules

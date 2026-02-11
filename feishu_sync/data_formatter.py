@@ -1,10 +1,12 @@
 """
-小红书数据格式化器
-将CSV/JSON格式的小红书数据转换为飞书多维表格格式
+数据格式化器
+将CSV/JSON格式的爬虫数据转换为飞书多维表格格式
 基于飞书官方Python SDK (lark-oapi)
+支持平台: 小红书 (XHSDataFormatter), 微信公众号 (WeChatDataFormatter)
 """
 
 import json
+import os
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -453,3 +455,172 @@ class XHSDataFormatter:
             return "comment"
         else:
             return "note"
+
+
+# ==================== 微信公众号数据格式化器 ====================
+
+class WeChatDataFormatter(XHSDataFormatter):
+    """
+    微信公众号数据格式化器
+
+    复用 XHSDataFormatter 的通用工具方法（clean_text, safe_int, sanitize_fields,
+    load_from_csv, load_from_json, format_batch_records 等），
+    重写字段映射和记录格式化逻辑。
+
+    当通过 CSV 上传飞书时，自动查找本地图片目录
+    （data/wechat/images/<nickname>/<article_id>/）并标记为待上传附件。
+    """
+
+    # item_show_type → 文章类型（兼容数字和中文两种输入）
+    _SHOW_TYPE_MAP = {0: "普通图文", 5: "视频分享", 6: "音乐分享",
+                      7: "音频分享", 8: "图片分享", 10: "文本分享",
+                      11: "文章分享", 17: "短文"}
+
+    # 默认图片根目录
+    DEFAULT_IMAGE_BASE_DIR = os.path.join("data", "wechat", "images")
+
+    def __init__(self, image_base_dir: str = ""):
+        """
+        Args:
+            image_base_dir: 图片根目录，默认 data/wechat/images
+        """
+        # 不调用 super().__init__()，跳过 XHS field_mapping，保留工具方法
+        self.image_base_dir = image_base_dir or self.DEFAULT_IMAGE_BASE_DIR
+
+    # ---------- 记录格式化 ----------
+
+    def format_single_record(self, raw_data: Dict) -> Optional[Dict]:
+        """格式化单条微信文章记录"""
+        try:
+            if "article_id" in raw_data:
+                return self.format_article_record(raw_data)
+            logger.warning(f"无法识别的微信数据记录: {list(raw_data.keys())[:5]}")
+            return None
+        except Exception as e:
+            logger.error(f"格式化微信记录失败: {e}")
+            return None
+
+    def format_article_record(self, raw_data: Dict) -> Optional[Dict]:
+        """
+        格式化微信文章记录为飞书多维表格行格式
+
+        自动匹配本地图片目录，生成 _image_meta 供 sync_manager 上传。
+        """
+        try:
+            article_id = raw_data.get("article_id", "")
+
+            # 文章类型：已是中文标签则直接使用，否则从数字映射
+            raw_type = raw_data.get("item_show_type", "普通图文")
+            if isinstance(raw_type, (int, float)):
+                type_text = self._SHOW_TYPE_MAP.get(int(raw_type), f"未知类型({raw_type})")
+            else:
+                type_text = str(raw_type) if raw_type else "普通图文"
+
+            # 文章链接
+            article_link = raw_data.get("link", "")
+
+            fields = {
+                "文章ID": article_id,
+                "标题": self.clean_text(
+                    raw_data.get("title", "")
+                )[:FeishuConfig.MAX_TITLE_LENGTH],
+                "摘要": self.clean_text(
+                    raw_data.get("digest", "")
+                )[:FeishuConfig.MAX_DESC_LENGTH],
+                "公众号": raw_data.get("account_nickname", ""),
+                "作者": raw_data.get("author_name", ""),
+                "文章类型": type_text,
+                "发布时间": raw_data.get("create_time_str", ""),
+                "更新时间": raw_data.get("update_time_str", ""),
+                "文章链接": {
+                    "link": article_link,
+                    "text": "查看原文",
+                } if article_link else None,
+                "来源标签": raw_data.get("source_keyword", ""),
+            }
+
+            feishu_record: Dict = {"fields": self.sanitize_fields(fields)}
+
+            # 查找本地图片文件（data/wechat/images/*/<article_id>/）
+            local_images = self.find_article_images(article_id, self.image_base_dir)
+            if local_images:
+                feishu_record["_image_meta"] = {
+                    "local_images": local_images,
+                    "field_name": "文章图片",
+                }
+
+            return feishu_record
+
+        except Exception as e:
+            logger.error(
+                f"格式化微信文章记录失败: {e}, article_id={raw_data.get('article_id')}"
+            )
+            return None
+
+    # ---------- 本地图片查找 ----------
+
+    @staticmethod
+    def find_article_images(
+        article_id: str,
+        image_base_dir: str = "data/wechat/images",
+    ) -> List[str]:
+        """
+        查找指定文章的本地图片文件
+
+        目录结构: <image_base_dir>/<nickname>/<article_id>/<file>
+
+        Args:
+            article_id: 文章 ID
+            image_base_dir: 图片根目录
+
+        Returns:
+            排序后的图片文件绝对路径列表
+        """
+        if not article_id:
+            return []
+        from pathlib import Path
+
+        base = Path(image_base_dir)
+        if not base.exists():
+            return []
+
+        # 跨所有公众号子目录查找 article_id 文件夹
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+        matches = []
+        for p in sorted(base.glob(f"*/{article_id}/*")):
+            if p.is_file() and p.suffix.lower() in image_exts:
+                matches.append(str(p.resolve()))
+        return matches
+
+    # ---------- 飞书表结构定义 ----------
+
+    @staticmethod
+    def get_table_fields(data_type: str = "article") -> List[Dict]:
+        """
+        获取微信公众号飞书表格字段定义
+
+        字段与 CSV 存储字段对齐，内部字段 (fakeid, add_ts) 不上传飞书。
+        """
+        return [
+            {"field_name": "文章ID", "type": 1},              # 单行文本
+            {"field_name": "标题", "type": 1},                 # 单行文本
+            {"field_name": "摘要", "type": 1},                 # 单行文本
+            {"field_name": "公众号", "type": 1},               # 单行文本
+            {"field_name": "作者", "type": 1},                 # 单行文本
+            {"field_name": "文章类型", "type": 3, "property": {"options": [
+                {"name": "普通图文"}, {"name": "视频分享"},
+                {"name": "音乐分享"}, {"name": "音频分享"},
+                {"name": "图片分享"}, {"name": "文本分享"},
+                {"name": "文章分享"}, {"name": "短文"},
+            ]}},                                               # 单选
+            {"field_name": "发布时间", "type": 1},             # 单行文本 (create_time_str)
+            {"field_name": "更新时间", "type": 1},             # 单行文本 (update_time_str)
+            {"field_name": "文章链接", "type": 15},            # 超链接
+            {"field_name": "文章图片", "type": 17},            # 附件（本地图片上传）
+            {"field_name": "来源标签", "type": 1},             # 单行文本
+        ]
+
+    @staticmethod
+    def detect_data_type(data_list: List[Dict]) -> str:
+        """检测微信数据类型"""
+        return "article"

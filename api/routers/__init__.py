@@ -19,5 +19,19 @@
 from .crawler import router as crawler_router
 from .data import router as data_router
 from .websocket import router as websocket_router
+from .config import router as config_router
+from .subscription import router as subscription_router
+from .field_mapping import router as field_mapping_router
+from .feishu import router as feishu_router
+from .scheduler import router as scheduler_router
 
-__all__ = ["crawler_router", "data_router", "websocket_router"]
+__all__ = [
+    "crawler_router",
+    "data_router",
+    "websocket_router",
+    "config_router",
+    "subscription_router",
+    "field_mapping_router",
+    "feishu_router",
+    "scheduler_router",
+]

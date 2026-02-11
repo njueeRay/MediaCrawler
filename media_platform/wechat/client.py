@@ -261,6 +261,40 @@ class WeChatClient:
         params = {"url": url, "format": format}
         return await self._request_text("/api/public/v1/download", params=params)
 
+    async def fetch_article_raw_html(self, article_url: str) -> str:
+        """
+        直接请求微信文章原始 HTML 页面（不经过 wechat-article-exporter 解析）
+
+        用于降级提取 JS 动态渲染的内容（图片分享 / 文本分享等），
+        原始 HTML 中包含 window.picture_page_info_list、__QMTPL_SSR_DATA__ 等变量。
+
+        Args:
+            article_url: 微信文章链接
+
+        Returns:
+            原始 HTML 文本（失败返回空字符串）
+        """
+        import httpx
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://mp.weixin.qq.com/",
+            "Origin": "https://mp.weixin.qq.com",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
+                resp = await http.get(article_url, headers=headers)
+                resp.raise_for_status()
+                return resp.text
+        except Exception as e:
+            from tools import utils
+            utils.logger.warning(f"[WeChatClient] 获取原始 HTML 失败: {e}")
+            return ""
+
     async def get_author_info(self, fakeid: str) -> Dict[str, Any]:
         """
         获取公众号主体信息（beta，不需要 auth-key）
@@ -370,6 +404,7 @@ class WeChatClient:
         fakeid: str,
         max_count: int = 0,
         interval_sec: float = 2.0,
+        date_start_ts: int = 0,
     ) -> List[Dict[str, Any]]:
         """
         获取公众号全部文章（自动翻页）
@@ -378,6 +413,7 @@ class WeChatClient:
             fakeid: 公众号唯一标识
             max_count: 最大文章数，0 表示不限制
             interval_sec: 请求间隔（秒）
+            date_start_ts: 日期起始时间戳，文章早于此时间则终止翻页（利用倒序排列特性）
 
         Returns:
             文章信息列表
@@ -402,6 +438,19 @@ class WeChatClient:
 
             # 过滤已删除文章
             valid_articles = [a for a in articles if not a.get("is_deleted", False)]
+
+            # 日期早停：如果本页最旧的文章已早于 date_start_ts，只保留范围内的
+            hit_date_boundary = False
+            if date_start_ts > 0 and valid_articles:
+                filtered_batch = []
+                for a in valid_articles:
+                    ct = a.get("create_time", 0)
+                    if ct and ct < date_start_ts:
+                        hit_date_boundary = True
+                        break
+                    filtered_batch.append(a)
+                valid_articles = filtered_batch
+
             all_articles.extend(valid_articles)
 
             utils.logger.info(
@@ -411,6 +460,13 @@ class WeChatClient:
             # 达到数量限制
             if max_count > 0 and len(all_articles) >= max_count:
                 all_articles = all_articles[:max_count]
+                break
+
+            # 日期早停：已遇到早于起始日期的文章
+            if hit_date_boundary:
+                utils.logger.info(
+                    f"[WeChatClient] fakeid={fakeid} 已到达日期起始边界, 停止翻页, 共获取 {len(all_articles)} 篇"
+                )
                 break
 
             # 本页不满表示已到末尾

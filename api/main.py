@@ -30,7 +30,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from .routers import crawler_router, data_router, websocket_router
+from .routers import (
+    crawler_router, data_router, websocket_router,
+    config_router, subscription_router, field_mapping_router,
+    feishu_router, scheduler_router,
+)
 
 app = FastAPI(
     title="MediaCrawler WebUI API",
@@ -55,10 +59,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+# Register routers — existing
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
+
+# Register routers — WebUI new
+app.include_router(config_router, prefix="/api")
+app.include_router(subscription_router, prefix="/api")
+app.include_router(field_mapping_router, prefix="/api")
+app.include_router(feishu_router, prefix="/api")
+app.include_router(scheduler_router, prefix="/api")
+
+
+@app.on_event("startup")
+async def webui_startup():
+    """WebUI 首次启动: 注入默认字段映射方案"""
+    try:
+        from database.db_session import get_session
+        from api.services.webui_init import seed_default_mappings
+        async with get_session() as session:
+            if session is not None:
+                count = await seed_default_mappings(session)
+                if count > 0:
+                    print(f"[WebUI] Seeded {count} default field mapping schemes")
+    except Exception as e:
+        print(f"[WebUI] Startup seed skipped: {e}")
 
 
 @app.get("/")
@@ -78,6 +104,64 @@ async def serve_frontend():
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/dashboard")
+async def dashboard_data():
+    """仪表盘数据聚合 — 爬虫状态 + 数据统计 + 订阅/调度概要"""
+    from api.services.crawler_manager import crawler_manager
+    from pathlib import Path
+
+    # 爬虫状态
+    crawler_status = crawler_manager.get_status()
+
+    # 数据文件统计
+    data_dir = Path(__file__).parent.parent / "data"
+    total_files = 0
+    total_size = 0
+    platforms_with_data = set()
+    if data_dir.exists():
+        for root, dirs, files in os.walk(data_dir):
+            for f in files:
+                fp = Path(root) / f
+                if fp.suffix.lower() in (".json", ".csv", ".xlsx", ".xls"):
+                    total_files += 1
+                    total_size += fp.stat().st_size
+                    # 第一级子目录就是平台
+                    try:
+                        rel = fp.relative_to(data_dir)
+                        if rel.parts:
+                            platforms_with_data.add(rel.parts[0])
+                    except Exception:
+                        pass
+
+    # 订阅/调度统计 (best-effort, 可能无数据库)
+    sub_stats = {"total": 0, "active": 0}
+    scheduler_stats = {"active_tasks": 0, "total_executions": 0}
+    try:
+        from database.db_session import get_session
+        from api.services.subscription_service import subscription_service
+        from api.services.scheduler_service import scheduler_service
+        async with get_session() as session:
+            if session:
+                sub_stats = await subscription_service.get_stats(session)
+                scheduler_stats = await scheduler_service.get_status(session)
+    except Exception:
+        pass
+
+    return {
+        "code": 0,
+        "data": {
+            "crawler": crawler_status,
+            "data": {
+                "total_files": total_files,
+                "total_size": total_size,
+                "platforms": list(platforms_with_data),
+            },
+            "subscriptions": sub_stats,
+            "scheduler": scheduler_stats,
+        },
+    }
 
 
 @app.get("/api/env/check")
