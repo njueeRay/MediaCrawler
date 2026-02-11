@@ -89,11 +89,27 @@
         <div v-if="!recentLogs.length" class="text-gray-500">暂无日志</div>
       </div>
     </n-card>
+
+    <!-- Platform Data Distribution -->
+    <n-card title="平台数据分布" size="small" class="mt-4" v-if="platformList.length">
+      <div v-for="p in platformList" :key="p.name" class="flex items-center gap-3 mb-2">
+        <span class="w-16 text-sm font-medium truncate">{{ platformLabels[p.name] || p.name }}</span>
+        <n-progress
+          type="line"
+          :percentage="dashboard.data.total_files ? Math.round(p.files / dashboard.data.total_files * 100) : 0"
+          :height="16"
+          :show-indicator="false"
+          :color="platformColors[p.name] || '#63e2b7'"
+          class="flex-1"
+        />
+        <span class="text-xs text-gray-400 w-24 text-right">{{ p.files }} 文件 / {{ formatSize(p.size) }}</span>
+      </div>
+    </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import http from '@/api'
 
@@ -101,12 +117,25 @@ const message = useMessage()
 
 const dashboard = ref({
   crawler: { status: 'idle', platform: '', crawler_type: '', started_at: '' },
-  data: { total_files: 0, total_size: 0, platforms: [] as string[] },
+  data: { total_files: 0, total_size: 0, platforms: [] as string[], by_platform: {} as Record<string, { files: number; size: number }> },
   subscriptions: { total: 0, active: 0 },
   scheduler: { active_tasks: 0, total_executions: 0 },
 })
 
 const recentLogs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
+
+const platformLabels: Record<string, string> = {
+  xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博', wechat: '微信', tieba: '贴吧', zhihu: '知乎',
+}
+const platformColors: Record<string, string> = {
+  xhs: '#ff2442', dy: '#000000', ks: '#ff4500', bili: '#00a1d6', wb: '#ff8200', wechat: '#07c160', tieba: '#4e6ef2', zhihu: '#0066ff',
+}
+const platformList = computed(() => {
+  const bp = dashboard.value.data.by_platform || {}
+  return Object.entries(bp)
+    .map(([name, stat]) => ({ name, files: stat.files, size: stat.size }))
+    .sort((a, b) => b.files - a.files)
+})
 
 const statusLabelMap: Record<string, string> = {
   idle: '空闲', running: '运行中', stopping: '停止中', error: '异常',
@@ -172,8 +201,16 @@ async function loadLogs() {
   }
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   loadDashboard()
   loadLogs()
+  // Auto-refresh every 30s
+  refreshTimer = setInterval(() => { loadDashboard(); loadLogs() }, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>

@@ -25,5 +25,13 @@ export default defineConfig({
   build: {
     outDir: '../api/webui',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'naive-ui': ['naive-ui'],
+          'vue-vendor': ['vue', 'vue-router', 'pinia'],
+        },
+      },
+    },
   },
 })

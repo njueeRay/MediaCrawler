@@ -1,5 +1,6 @@
 <template>
   <div>
+    <DbRequiredAlert v-if="dbNotReady" />
     <!-- Filters + Create -->
     <n-card size="small" class="mb-4">
       <n-space>
@@ -70,7 +71,8 @@
 import { ref, h, onMounted } from 'vue'
 import { NTag, NButton, NInput, NSelect, NSwitch, NSpace, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http from '@/api'
+import http, { isDbError } from '@/api'
+import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const loading = ref(false)
@@ -78,6 +80,7 @@ const saving = ref(false)
 const previewing = ref(false)
 const showCreate = ref(false)
 const showPreview = ref(false)
+const dbNotReady = ref(false)
 
 const platform = ref('')
 const dataType = ref('')
@@ -177,6 +180,7 @@ async function loadSchemes() {
     const { data } = await http.get('/mapping/schemes', { params })
     schemes.value = data.data?.items || []
   } catch (e: any) {
+    if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
   } finally {
     loading.value = false

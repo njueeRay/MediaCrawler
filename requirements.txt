@@ -48,5 +48,8 @@ asyncmy>=0.2.10
 sqlalchemy>=2.0.43
 motor>=3.3.0
 openpyxl>=3.1.2
+
+# WebUI 调度模块依赖
+apscheduler>=3.10.0  # 定时任务调度
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

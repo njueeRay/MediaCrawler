@@ -91,3 +91,98 @@
 - [x] `vite build` — 生产构建成功，8 个页面 chunk 全部生成
 
 ---
+
+## 2026-02-12 — Phase 2: 增强与完善
+
+### 后端启动验证 ✅
+
+- 后端 `uv run uvicorn api.main:app --port 8080` 启动成功
+- 验证所有路由注册：`/api/dashboard` 200, `/api/config/groups` 200, `/api/data/files` 200, `/api/feishu/status` 200
+- 发现并修复缺失依赖：`apscheduler>=3.10.0` 添加到 `requirements.txt`
+- 确认 CSV 存储模式下 DB 依赖端点返回 400（by-design），带描述性错误消息
+
+### 全局错误处理 ✅
+
+- **Axios 拦截器增强** (`api/index.ts`)：检测后端 "数据库未配置" 400 错误，附加 `isDbNotConfigured` 标记，显示友好提示
+- **`isDbError()` 工具函数**：供各页面统一判断 DB 配置错误
+- **`DbRequiredAlert` 组件** (`components/common/DbRequiredAlert.vue`)：警告提示 + 一键跳转配置管理页
+- **4 个 DB 依赖页面**（Subscription、FieldMapping、FeishuSync、TaskScheduler）添加 `dbNotReady` 状态 + 警告显示
+- **Subscription.vue** 添加空状态提示 "暂无订阅，请通过搜索或手动添加创建"
+- **ConfigManager.vue** 历史 Tab DB 错误时显示提示行
+
+### 暗色主题完善 ✅
+
+- **App.vue**：添加 `watchEffect` 同步 `dark` class 到 `<html>` 元素，支持 TailwindCSS `dark:` 工具类
+- **App.vue**：添加 `<n-notification-provider>` 全局通知层
+- **stores/app.ts**：darkMode 和 sidebarCollapsed 持久化到 `localStorage`
+- **main.css**：添加 `@custom-variant dark` + `color-scheme` 过渡动画
+
+### Dashboard 图表增强 ✅
+
+- **后端** (`api/main.py`)：`/api/dashboard` 新增 `by_platform` 字段，返回每个平台的文件数和大小
+- **前端** (`Dashboard.vue`)：新增"平台数据分布"卡片，通过 `<n-progress>` 条形图展示各平台文件占比
+- 平台名称中英文映射 + 品牌色标
+
+### Vite Chunk 分割优化 ✅
+
+- Vite `build.rollupOptions.output.manualChunks` 拆分：
+  - `naive-ui` → 独立 chunk (1,351 KB, 可长期缓存)
+  - `vue-vendor` → Vue + Router + Pinia (105 KB)
+  - 应用代码 → 37 KB
+- `build.chunkSizeWarningLimit` → 1500 KB
+
+### 验证
+
+- [x] `vue-tsc --noEmit` — TypeScript 类型检查通过
+- [x] `vite build` — 生产构建成功
+- [x] 后端启动成功，前端通过静态文件正常服务
+- [x] 浏览器访问 http://localhost:8080 可用
+
+---
+
+## Phase 3: 真实功能实现 + 实时进度
+
+### 创作者搜索真实实现 ✅
+
+- **`subscription_service.py`** — `search_creators()` 从空占位升级为真实平台搜索：
+  - `_search_bilibili(keyword)` — B站 Web Search API (`search_type=bili_user`)，无需鉴权，返回 mid/uname/upic/fans/videos/level
+  - `_search_wechat(keyword)` — 通过 wechat-article-exporter 本地 API (尝试 3000/8088 端口)，返回 fakeid/nickname/avatar
+  - `_search_weibo(keyword)` — 微博 M 站 API (`m.weibo.cn/api/container/getIndex`)，提取用户卡片
+  - 其他平台 (xhs/dy/ks/tieba/zhihu) 因依赖浏览器会话暂返回空列表
+- **`Subscription.vue`** — 搜索结果展示面板：
+  - 头像 + 用户名 + 平台标签 + 粉丝/视频计数
+  - 一键快捷订阅按钮 (`quickSubscribe()`)
+  - 已订阅状态反馈
+  - 默认搜索平台改为 B 站 (有免鉴权 API)
+
+### WebSocket 同步进度推送 ✅
+
+- **`websocket.py`** — 新增 `sync_manager` (ConnectionManager) + `sync_progress_queue` + `push_sync_progress()` + `/ws/sync` 端点
+  - `sync_broadcaster()` 后台任务读取队列并广播给所有 WS 客户端
+  - 支持 ping/pong 保活 + 30s 超时检测
+- **`feishu_service.py`** — `_run_sync_subprocess()` 集成 WS 进度：
+  - 启动时推送 `sync_start` 事件
+  - 每行输出推送 `sync_progress` (line_count/success_count/failed_count/total_records)
+  - 完成时推送 `sync_complete` (status/duration/error)
+
+### 飞书同步实时进度条 ✅
+
+- **`FeishuSync.vue`** — 完整重写：
+  - WebSocket 连接 `/ws/sync`，自动重连 (3s 间隔)
+  - 实时进度面板：进度条 + 已处理行/成功/失败/总记录统计
+  - 实时日志滚动面板 (`<n-log>`)
+  - `sync_complete` 自动刷新历史 + 5s 后隐藏进度
+  - 同步进行中禁用"开始同步"按钮
+
+### 前端细节优化 ✅
+
+- **`Logs.vue`** — WebSocket 断线自动重连 (3s 间隔)，组件卸载时清理 timer
+- **`Dashboard.vue`** — 30s 自动刷新仪表盘数据，组件卸载时清理 interval
+
+### 验证
+
+- [x] Python AST 语法检查 — 3 个后端文件全部通过
+- [x] `vue-tsc --noEmit` — TypeScript 类型检查通过
+- [x] `vite build` — 生产构建成功 (19.98s, 15 个 chunk)
+
+---

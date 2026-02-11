@@ -1,8 +1,8 @@
 # MediaCrawler WebUI — 设计文档索引
 
 > 项目: MediaCrawler 统一 Web 控制台
-> 日期: 2026-02-11
-> 状态: 设计阶段 (Draft v0.1)
+> 日期: 2026-02-12
+> 状态: **Phase 2 完成** — 全部 8 页面已对接后端 API，可运行
 
 ---
 
@@ -55,15 +55,31 @@
 ### 实施计划 (约 35 天)
 
 ```
-Phase 0 (3d)   ████                    基础设施
-Phase 1 (5d)   ████████                配置管理 + 仪表盘
-Phase 2 (5d)           ████████        订阅管理
-Phase 3 (7d)                  ██████████  数据浏览 + 字段映射
-Phase 4 (5d)                           ████████  飞书同步
-Phase 5 (5d)                                    ████████  任务调度
-Phase 6 (5d)                                            ████████  日志 + 优化
-               ──────────────────────────────────────────────────▶
-               M0      M1      M2       M3       M4      M5    M6
+Phase 0 (3d)   ████ ✅                  基础设施
+Phase 1 (5d)   ████████ ✅              前端-后端全面对接
+Phase 2 (5d)   ████████ ✅              增强与完善
+Phase 3 (TBD)  ░░░░░░░░                创作者搜索 + WS进度 + 部署
+```
+
+---
+
+## 快速启动
+
+```bash
+# 1. 安装依赖
+cd MediaCrawler
+uv pip install -r requirements.txt
+
+# 2. 启动后端 (默认 CSV 模式; 切 DB 需在配置管理页修改)
+uv run uvicorn api.main:app --port 8080
+
+# 3. 访问 WebUI
+# 浏览器打开 http://localhost:8080
+
+# (可选) 前端开发模式
+cd webui-src
+yarn install
+yarn dev   # -> http://localhost:3000 (代理 API 到 8080)
 ```
 
 ---

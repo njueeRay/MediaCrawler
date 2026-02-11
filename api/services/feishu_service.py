@@ -111,7 +111,9 @@ class FeishuService:
         return history
 
     async def _run_sync_subprocess(self, history_id: int, cmd: List[str]):
-        """后台运行同步子进程并更新历史记录"""
+        """后台运行同步子进程并更新历史记录，同时通过 WebSocket 推送进度"""
+        from ..routers.websocket import push_sync_progress
+
         loop = asyncio.get_event_loop()
         start_time = datetime.now()
         log_lines: List[str] = []
@@ -120,6 +122,13 @@ class FeishuService:
         total_records = 0
         status = "success"
         error_message = None
+
+        # Notify WS: sync started
+        await push_sync_progress({
+            "type": "sync_start",
+            "history_id": history_id,
+            "message": "同步任务已开始",
+        })
 
         try:
             process = subprocess.Popen(
@@ -133,15 +142,16 @@ class FeishuService:
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
 
+            line_count = 0
             while process.poll() is None:
                 line = await loop.run_in_executor(None, process.stdout.readline)
                 if line:
                     line = line.strip()
                     log_lines.append(line)
+                    line_count += 1
                     # 解析同步进度
                     if "成功写入" in line or "successfully" in line.lower():
                         try:
-                            # 尝试提取数字
                             parts = line.split()
                             for i, p in enumerate(parts):
                                 if "成功" in p or "success" in p.lower():
@@ -169,6 +179,17 @@ class FeishuService:
                                     total_records = max(total_records, int(word))
                         except Exception:
                             pass
+
+                    # Push progress via WS every line
+                    await push_sync_progress({
+                        "type": "sync_progress",
+                        "history_id": history_id,
+                        "line": line,
+                        "line_count": line_count,
+                        "success_count": success_count,
+                        "failed_count": failed_count,
+                        "total_records": total_records,
+                    })
 
             # 读取剩余输出
             if process.stdout:
@@ -210,6 +231,18 @@ class FeishuService:
                     await session.commit()
         except Exception:
             pass
+
+        # Notify WS: sync completed
+        await push_sync_progress({
+            "type": "sync_complete",
+            "history_id": history_id,
+            "status": status,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "total_records": total_records,
+            "duration": round(duration, 1),
+            "error": error_message,
+        })
 
     def _build_sync_command(self, request: dict) -> List[str]:
         """构建 sync_to_feishu.py 命令行参数"""

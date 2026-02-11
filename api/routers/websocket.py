@@ -17,7 +17,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
-from typing import Set, Optional
+from typing import Set, Optional, Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -57,6 +57,39 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+sync_manager = ConnectionManager()
+
+# Sync progress queue — feishu_service pushes progress events here
+sync_progress_queue: asyncio.Queue = asyncio.Queue()
+
+
+async def push_sync_progress(event: dict):
+    """Push sync progress event to be broadcast to WebSocket clients.
+    Called by feishu_service during subprocess execution."""
+    await sync_progress_queue.put(event)
+
+
+async def sync_broadcaster():
+    """Background task: read sync progress events and broadcast"""
+    while True:
+        try:
+            event = await sync_progress_queue.get()
+            await sync_manager.broadcast(event)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Sync broadcaster error: {e}")
+            await asyncio.sleep(0.1)
+
+
+_sync_broadcaster_task: Optional[asyncio.Task] = None
+
+
+def start_sync_broadcaster():
+    """Start sync broadcast task"""
+    global _sync_broadcaster_task
+    if _sync_broadcaster_task is None or _sync_broadcaster_task.done():
+        _sync_broadcaster_task = asyncio.create_task(sync_broadcaster())
 
 
 async def log_broadcaster():
@@ -149,3 +182,27 @@ async def websocket_status(websocket: WebSocket):
         pass
     except Exception:
         pass
+
+
+@router.websocket("/ws/sync")
+async def websocket_sync(websocket: WebSocket):
+    """WebSocket sync progress stream — real-time feishu sync updates"""
+    try:
+        start_sync_broadcaster()
+        await sync_manager.connect(websocket)
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_text("ping")
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        sync_manager.disconnect(websocket)

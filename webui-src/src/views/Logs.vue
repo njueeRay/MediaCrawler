@@ -51,6 +51,7 @@ const wsConnected = ref(false)
 const loadingHistory = ref(false)
 let ws: WebSocket | null = null
 let logId = 0
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 const levelOptions = [
   { label: '全部', value: 'all' },
@@ -99,6 +100,8 @@ function connectWs() {
   ws.onclose = () => {
     wsConnected.value = false
     addLog('warning', 'WebSocket 断开连接')
+    // Auto reconnect after 3s
+    wsReconnectTimer = setTimeout(connectWs, 3000)
   }
 
   ws.onerror = () => {
@@ -128,7 +131,8 @@ function addLog(level: string, message: string) {
 onMounted(connectWs)
 
 onUnmounted(() => {
-  if (ws) ws.close()
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+  if (ws) { ws.onclose = null; ws.close() }
 })
 
 async function loadHistoryLogs() {

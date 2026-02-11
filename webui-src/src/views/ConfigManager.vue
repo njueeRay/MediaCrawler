@@ -65,7 +65,7 @@
 import { ref, h, onMounted, watch } from 'vue'
 import { NTag, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http from '@/api'
+import http, { isDbError } from '@/api'
 
 const message = useMessage()
 const loading = ref(false)
@@ -156,8 +156,8 @@ async function loadHistory() {
     historyItems.value = data.data?.items || []
     const total = data.data?.total || 0
     historyPageCount.value = Math.max(1, Math.ceil(total / 20))
-  } catch {
-    // silent
+  } catch (e: any) {
+    if (isDbError(e)) historyItems.value = [{ config_key: '提示', old_value: '-', new_value: '需要数据库支持', group: '-', changed_at: '-' }]
   } finally {
     historyLoading.value = false
   }

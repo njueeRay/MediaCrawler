@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export const useAppStore = defineStore('app', () => {
-  const darkMode = ref(false)
-  const sidebarCollapsed = ref(false)
+  const darkMode = ref(localStorage.getItem('mc-dark-mode') === 'true')
+  const sidebarCollapsed = ref(localStorage.getItem('mc-sidebar-collapsed') === 'true')
+  const dbConfigured = ref(true) // tracks whether backend has DB
 
   function toggleDarkMode() {
     darkMode.value = !darkMode.value
@@ -13,5 +14,9 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
-  return { darkMode, sidebarCollapsed, toggleDarkMode, toggleSidebar }
+  // Persist preferences
+  watch(darkMode, (v) => localStorage.setItem('mc-dark-mode', String(v)))
+  watch(sidebarCollapsed, (v) => localStorage.setItem('mc-sidebar-collapsed', String(v)))
+
+  return { darkMode, sidebarCollapsed, dbConfigured, toggleDarkMode, toggleSidebar }
 })

@@ -1,5 +1,6 @@
 <template>
   <div>
+    <DbRequiredAlert v-if="dbNotReady" />
     <!-- Connection Status -->
     <n-card size="small" class="mb-4">
       <n-space align="center">
@@ -7,6 +8,24 @@
         <span>飞书连接: {{ feishuConnected ? '已连接' : '未连接' }}</span>
         <n-button size="small" @click="checkConnection" :loading="checking">检测</n-button>
         <n-button size="small" type="primary" @click="$router.push({ name: 'ConfigManager' })">前往配置</n-button>
+      </n-space>
+    </n-card>
+
+    <!-- Live Sync Progress -->
+    <n-card v-if="syncProgress.active" title="同步进行中" size="small" class="mb-4">
+      <n-space vertical>
+        <n-progress type="line" :percentage="syncProgress.percentage" :status="syncProgressStatus" indicator-placement="inside" :processing="syncProgress.status === 'running'" />
+        <n-space :size="24">
+          <n-statistic label="已处理行" :value="syncProgress.lineCount" />
+          <n-statistic label="成功" :value="syncProgress.successCount">
+            <template #suffix><span class="text-green-500 text-xs"> 条</span></template>
+          </n-statistic>
+          <n-statistic label="失败" :value="syncProgress.failedCount">
+            <template #suffix><span class="text-red-500 text-xs"> 条</span></template>
+          </n-statistic>
+          <n-statistic v-if="syncProgress.totalRecords" label="总记录" :value="syncProgress.totalRecords" />
+        </n-space>
+        <n-log :rows="6" :log="syncProgress.logText" class="mt-2" />
       </n-space>
     </n-card>
 
@@ -31,7 +50,7 @@
           <n-select v-model:value="syncForm.date_range_type" :options="dateRangeOptions" style="width: 140px" />
         </n-form-item>
         <n-form-item>
-          <n-button type="primary" :loading="syncing" :disabled="!feishuConnected || !syncForm.mapping_scheme_id" @click="startSync">
+          <n-button type="primary" :loading="syncing" :disabled="!feishuConnected || !syncForm.mapping_scheme_id || syncProgress.active" @click="startSync">
             开始同步
           </n-button>
         </n-form-item>
@@ -53,9 +72,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted, watch } from 'vue'
+import { ref, h, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NTag, useMessage } from 'naive-ui'
-import http from '@/api'
+import http, { isDbError } from '@/api'
+import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const loading = ref(false)
@@ -64,6 +84,109 @@ const syncing = ref(false)
 const feishuConnected = ref(false)
 const histories = ref<any[]>([])
 const schemeOptions = ref<any[]>([])
+const dbNotReady = ref(false)
+
+// WebSocket sync progress
+const syncProgress = ref({
+  active: false,
+  status: 'running' as 'running' | 'success' | 'failed',
+  historyId: 0,
+  lineCount: 0,
+  successCount: 0,
+  failedCount: 0,
+  totalRecords: 0,
+  logText: '',
+  percentage: 0,
+})
+
+const syncProgressStatus = computed(() => {
+  if (syncProgress.value.status === 'success') return 'success'
+  if (syncProgress.value.status === 'failed') return 'error'
+  return undefined
+})
+
+let ws: WebSocket | null = null
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+function connectSyncWS() {
+  if (ws && ws.readyState <= 1) return // already connecting or open
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const url = `${protocol}//${location.host}/api/ws/sync`
+  ws = new WebSocket(url)
+
+  ws.onmessage = (event) => {
+    if (event.data === 'ping') {
+      ws?.send('pong')
+      return
+    }
+    try {
+      const data = JSON.parse(event.data)
+      handleSyncEvent(data)
+    } catch { /* ignore non-JSON */ }
+  }
+
+  ws.onclose = () => {
+    // Auto reconnect while component is mounted
+    wsReconnectTimer = setTimeout(connectSyncWS, 3000)
+  }
+
+  ws.onerror = () => {
+    ws?.close()
+  }
+}
+
+function handleSyncEvent(data: any) {
+  if (data.type === 'sync_start') {
+    syncProgress.value = {
+      active: true,
+      status: 'running',
+      historyId: data.history_id,
+      lineCount: 0,
+      successCount: 0,
+      failedCount: 0,
+      totalRecords: 0,
+      logText: '',
+      percentage: 0,
+    }
+    message.info(data.message || '同步已开始')
+  } else if (data.type === 'sync_progress') {
+    syncProgress.value.lineCount = data.line_count || 0
+    syncProgress.value.successCount = data.success_count || 0
+    syncProgress.value.failedCount = data.failed_count || 0
+    syncProgress.value.totalRecords = data.total_records || 0
+    if (data.line) {
+      syncProgress.value.logText += data.line + '\n'
+    }
+    // Estimate percentage from total_records
+    const total = data.total_records || 0
+    const done = (data.success_count || 0) + (data.failed_count || 0)
+    syncProgress.value.percentage = total > 0 ? Math.min(99, Math.round((done / total) * 100)) : 0
+  } else if (data.type === 'sync_complete') {
+    syncProgress.value.status = data.status === 'success' ? 'success' : 'failed'
+    syncProgress.value.successCount = data.success_count || 0
+    syncProgress.value.failedCount = data.failed_count || 0
+    syncProgress.value.totalRecords = data.total_records || 0
+    syncProgress.value.percentage = 100
+    if (data.status === 'success') {
+      message.success(`同步完成: ${data.success_count} 条成功, 耗时 ${data.duration}s`)
+    } else {
+      message.error(`同步失败: ${data.error || '未知错误'}`)
+    }
+    // Auto-hide progress after a delay, reload history
+    setTimeout(() => { syncProgress.value.active = false }, 5000)
+    loadHistory()
+  }
+}
+
+function disconnectSyncWS() {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+  wsReconnectTimer = null
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
+  }
+}
 
 const syncForm = ref({
   platform: 'xhs',
@@ -139,12 +262,12 @@ async function loadSchemes() {
     const { data } = await http.get('/mapping/schemes', { params })
     const items = data.data?.items || []
     schemeOptions.value = items.map((s: any) => ({ label: s.name, value: s.id }))
-    // auto-select default
     const dft = items.find((s: any) => s.is_default)
     if (dft) syncForm.value.mapping_scheme_id = dft.id
     else if (items.length) syncForm.value.mapping_scheme_id = items[0].id
     else syncForm.value.mapping_scheme_id = null
-  } catch {
+  } catch (e: any) {
+    if (isDbError(e)) dbNotReady.value = true
     schemeOptions.value = []
   }
 }
@@ -175,8 +298,8 @@ async function loadHistory() {
   try {
     const { data } = await http.get('/feishu/history')
     histories.value = data.data?.items || []
-  } catch {
-    // silent
+  } catch (e: any) {
+    if (isDbError(e)) dbNotReady.value = true
   } finally {
     loading.value = false
   }
@@ -186,5 +309,10 @@ onMounted(() => {
   checkConnection()
   loadSchemes()
   loadHistory()
+  connectSyncWS()
+})
+
+onUnmounted(() => {
+  disconnectSyncWS()
 })
 </script>

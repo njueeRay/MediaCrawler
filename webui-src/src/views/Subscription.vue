@@ -1,5 +1,6 @@
 <template>
   <div>
+    <DbRequiredAlert v-if="dbNotReady" />
     <!-- Stats -->
     <n-grid :x-gap="12" :y-gap="12" :cols="3" class="mb-4">
       <n-gi>
@@ -32,6 +33,48 @@
       </n-space>
     </n-card>
 
+    <!-- Search Results -->
+    <n-card v-if="searchResults.length" title="搜索结果" size="small" class="mb-4">
+      <template #header-extra>
+        <n-button size="small" quaternary @click="searchResults = []">清除</n-button>
+      </template>
+      <n-list hoverable clickable>
+        <n-list-item v-for="item in searchResults" :key="item.creator_id">
+          <template #prefix>
+            <n-avatar v-if="item.creator_avatar" :src="item.creator_avatar" :size="36" round />
+            <n-avatar v-else :size="36" round>{{ (item.creator_name || '?')[0] }}</n-avatar>
+          </template>
+          <n-thing>
+            <template #header>
+              <n-space align="center" :size="8">
+                <span>{{ item.creator_name }}</span>
+                <n-tag size="small" :bordered="false">{{ platformLabels[searchPlatform] }}</n-tag>
+              </n-space>
+            </template>
+            <template #description>
+              <span class="text-xs text-gray-400">ID: {{ item.creator_id }}</span>
+              <template v-if="item.meta">
+                <span v-if="item.meta.fans" class="ml-3 text-xs">粉丝: {{ item.meta.fans }}</span>
+                <span v-if="item.meta.followers_count" class="ml-3 text-xs">粉丝: {{ item.meta.followers_count }}</span>
+                <span v-if="item.meta.videos" class="ml-3 text-xs">视频: {{ item.meta.videos }}</span>
+              </template>
+            </template>
+          </n-thing>
+          <template #suffix>
+            <n-button
+              size="small"
+              :type="item._subscribed ? 'default' : 'primary'"
+              :disabled="item._subscribed"
+              :loading="item._subscribing"
+              @click="quickSubscribe(item)"
+            >
+              {{ item._subscribed ? '已订阅' : '订阅' }}
+            </n-button>
+          </template>
+        </n-list-item>
+      </n-list>
+    </n-card>
+
     <!-- Subscription List -->
     <n-card title="我的订阅" size="small">
       <template #header-extra>
@@ -54,6 +97,7 @@
           :remote="true"
           @update:page="handlePageChange"
         />
+        <n-empty v-if="!loading && !subscriptions.length && !dbNotReady" description="暂无订阅，请通过搜索或手动添加创建" class="py-8" />
       </n-spin>
     </n-card>
 
@@ -90,17 +134,20 @@
 <script setup lang="ts">
 import { ref, h, onMounted } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
-import http from '@/api'
+import http, { isDbError } from '@/api'
+import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const loading = ref(false)
 const searching = ref(false)
 const adding = ref(false)
 const showAdd = ref(false)
+const dbNotReady = ref(false)
 
-const searchPlatform = ref('xhs')
+const searchPlatform = ref('bili')
 const searchKeyword = ref('')
 const filterPlatform = ref('')
+const searchResults = ref<any[]>([])
 
 const subscriptions = ref<any[]>([])
 const subStats = ref<any>({ total: 0, active: 0, by_platform: {} })
@@ -174,6 +221,7 @@ async function loadSubscriptions() {
     subscriptions.value = data.data?.items || []
     pagination.value.itemCount = data.data?.total || 0
   } catch (e: any) {
+    if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
   } finally {
     loading.value = false
@@ -184,8 +232,8 @@ async function loadStats() {
   try {
     const { data } = await http.get('/subscribe/stats')
     subStats.value = data.data || {}
-  } catch {
-    // silent
+  } catch (e: any) {
+    if (isDbError(e)) dbNotReady.value = true
   }
 }
 
@@ -197,12 +245,18 @@ function handlePageChange(page: number) {
 async function searchCreators() {
   if (!searchKeyword.value) return
   searching.value = true
+  searchResults.value = []
   try {
     const { data } = await http.post('/subscribe/search', {
       platform: searchPlatform.value,
       keyword: searchKeyword.value,
     })
-    const items = data.data?.items || []
+    const items = (data.data?.items || []).map((it: any) => ({
+      ...it,
+      _subscribed: false,
+      _subscribing: false,
+    }))
+    searchResults.value = items
     if (items.length) {
       message.info(`搜索到 ${items.length} 个创作者`)
     } else {
@@ -212,6 +266,27 @@ async function searchCreators() {
     message.error(e.message || '搜索失败')
   } finally {
     searching.value = false
+  }
+}
+
+async function quickSubscribe(item: any) {
+  item._subscribing = true
+  try {
+    await http.post('/subscribe', {
+      platform: searchPlatform.value,
+      creator_id: item.creator_id,
+      creator_name: item.creator_name,
+      creator_url: item.creator_url || '',
+      auto_crawl: true,
+    })
+    item._subscribed = true
+    message.success(`已订阅 ${item.creator_name}`)
+    loadSubscriptions()
+    loadStats()
+  } catch (e: any) {
+    message.error(e.message || '订阅失败')
+  } finally {
+    item._subscribing = false
   }
 }
 

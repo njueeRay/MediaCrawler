@@ -1,5 +1,6 @@
 <template>
   <div>
+    <DbRequiredAlert v-if="dbNotReady" />
     <!-- Scheduler Status -->
     <n-card size="small" class="mb-4">
       <n-space align="center">
@@ -78,12 +79,14 @@
 import { ref, h, onMounted } from 'vue'
 import { NTag, NButton, NSpace, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http from '@/api'
+import http, { isDbError } from '@/api'
+import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const loading = ref(false)
 const execLoading = ref(false)
 const showCreate = ref(false)
+const dbNotReady = ref(false)
 
 const schedulerStatus = ref({ running: false, active_tasks: 0, total_executions: 0, next_run: '' })
 const tasks = ref<any[]>([])
@@ -175,7 +178,9 @@ async function loadStatus() {
   try {
     const { data } = await http.get('/scheduler/status')
     schedulerStatus.value = data.data || {}
-  } catch { /* silent */ }
+  } catch (e: any) {
+    if (isDbError(e)) dbNotReady.value = true
+  }
 }
 
 async function loadTasks() {
@@ -184,6 +189,7 @@ async function loadTasks() {
     const { data } = await http.get('/scheduler/tasks')
     tasks.value = data.data?.items || []
   } catch (e: any) {
+    if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
   } finally {
     loading.value = false

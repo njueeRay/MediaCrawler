@@ -57,11 +57,32 @@
 - [x] 1.8 Logs.vue — 加载历史按钮 + WebSocket 实时流
 - [x] 1.9 TypeScript + Vite 构建验证通过
 
-## Phase 2: 增强与完善 (待开始)
-- [ ] 2.1 `search_creators()` 真实平台搜索（需各平台 API 适配器）
-- [ ] 2.2 WebSocket 同步进度推送（FeishuSync 实时进度条）
-- [ ] 2.3 Dashboard 图表增强（趋势图、平台分布）
-- [ ] 2.4 全局错误处理 / Loading / 空状态优化
-- [ ] 2.5 暗色主题完善
-- [ ] 2.6 Vite chunk 分割优化（vendor 拆分）
-- [ ] 2.7 生产部署文档 / README 更新
+## Phase 2: 增强与完善 ✅
+
+- [x] 2.1 后端启动验证 + apscheduler 依赖安装
+- [x] 2.2 全局 DB 错误检测 + `DbRequiredAlert` 组件
+- [x] 2.3 Dashboard 图表增强（平台数据分布进度条）
+- [x] 2.4 全局错误处理 / Loading / 空状态优化
+- [x] 2.5 暗色主题完善（localStorage 持久化 + dark class 同步）
+- [x] 2.6 Vite chunk 分割优化（vendor 拆分）
+- [x] 2.7 文档更新 (DEVLOG + TODO)
+
+## Phase 3: 真实功能实现 + 实时进度 ✅
+
+- [x] 3.1 `search_creators()` 真实平台搜索 — B 站/微博/微信 HTTP API 适配器
+- [x] 3.2 Subscription.vue 搜索结果展示 + 一键快捷订阅
+- [x] 3.3 WebSocket `/ws/sync` 端点 + `sync_progress_queue` + 后台广播
+- [x] 3.4 `feishu_service` 子进程 → WS 实时进度推送 (start/progress/complete)
+- [x] 3.5 FeishuSync.vue 实时进度条 + 日志面板 + 自动重连
+- [x] 3.6 Logs.vue WebSocket 自动重连
+- [x] 3.7 Dashboard 30s 自动刷新
+- [x] 3.8 构建验证 (Python AST + vue-tsc + vite build)
+- [x] 3.9 DEVLOG/TODO 文档更新
+
+## Phase 4: 待办 (后续推进)
+- [ ] 4.1 Dashboard 更多图表（时间趋势、采集频率折线图）
+- [ ] 4.2 生产部署文档 / README 更新
+- [ ] 4.3 E2E 测试 / API 集成测试 (pytest)
+- [ ] 4.4 小红书/抖音/快手搜索支持（需 cookie/浏览器会话）
+- [ ] 4.5 订阅触发采集 (`POST /subscribe/{id}/crawl`) 对接 CrawlerManager
+- [ ] 4.6 字段映射预览功能实现

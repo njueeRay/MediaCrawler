@@ -120,18 +120,24 @@ async def dashboard_data():
     total_files = 0
     total_size = 0
     platforms_with_data = set()
+    platform_file_counts: dict[str, int] = {}
+    platform_sizes: dict[str, int] = {}
     if data_dir.exists():
         for root, dirs, files in os.walk(data_dir):
             for f in files:
                 fp = Path(root) / f
                 if fp.suffix.lower() in (".json", ".csv", ".xlsx", ".xls"):
                     total_files += 1
-                    total_size += fp.stat().st_size
+                    fsize = fp.stat().st_size
+                    total_size += fsize
                     # 第一级子目录就是平台
                     try:
                         rel = fp.relative_to(data_dir)
                         if rel.parts:
-                            platforms_with_data.add(rel.parts[0])
+                            plat = rel.parts[0]
+                            platforms_with_data.add(plat)
+                            platform_file_counts[plat] = platform_file_counts.get(plat, 0) + 1
+                            platform_sizes[plat] = platform_sizes.get(plat, 0) + fsize
                     except Exception:
                         pass
 
@@ -157,6 +163,7 @@ async def dashboard_data():
                 "total_files": total_files,
                 "total_size": total_size,
                 "platforms": list(platforms_with_data),
+                "by_platform": {p: {"files": platform_file_counts.get(p, 0), "size": platform_sizes.get(p, 0)} for p in platforms_with_data},
             },
             "subscriptions": sub_stats,
             "scheduler": scheduler_stats,
