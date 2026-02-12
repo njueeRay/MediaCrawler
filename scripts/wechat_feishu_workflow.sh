@@ -50,13 +50,21 @@ WECHAT_CRAWL_TAG="${WECHAT_CRAWL_TAG:-}"
 TABLE1_ID="${TABLE1_ID:-}"
 TABLE1_BATCH_SIZE="${TABLE1_BATCH_SIZE:-50}"
 TABLE1_SOURCE_CSV="${TABLE1_SOURCE_CSV:-}"
+TABLE1_RANGE_START="${TABLE1_RANGE_START:-0}"
+TABLE1_RANGE_END="${TABLE1_RANGE_END:-0}"
 
 TABLE1_EXPORT_CSV="${TABLE1_EXPORT_CSV:-data/wechat/csv/table1_export_for_parse.csv}"
+TABLE1_EXPORT_TO_DB="${TABLE1_EXPORT_TO_DB:-0}"
+TABLE1_EXPORT_DB_TYPE="${TABLE1_EXPORT_DB_TYPE:-${SAVE_DATA_OPTION}}"
+TABLE1_EXPORT_DB_DATASET="${TABLE1_EXPORT_DB_DATASET:-wechat_table1_readback}"
 TABLE1_SELECT_FIELDS="${TABLE1_SELECT_FIELDS:-文章ID,标题}"
+TABLE1_VIEW_ID="${TABLE1_VIEW_ID:-}"
 TABLE1_FILTER_FIELD="${TABLE1_FILTER_FIELD:-}"
 TABLE1_FILTER_OPERATOR="${TABLE1_FILTER_OPERATOR:-}"
 TABLE1_FILTER_VALUES="${TABLE1_FILTER_VALUES:-}"
 TABLE1_FILTER_CONJUNCTION="${TABLE1_FILTER_CONJUNCTION:-or}"
+TABLE1_FILTERS_JSON="${TABLE1_FILTERS_JSON:-}"
+TABLE1_FILTERS_CONJUNCTION="${TABLE1_FILTERS_CONJUNCTION:-and}"
 
 TABLE2_ID="${TABLE2_ID:-}"
 JSON_COLUMNS="${JSON_COLUMNS:-}"
@@ -64,6 +72,8 @@ JSON_KEEP_COLUMNS="${JSON_KEEP_COLUMNS:-}"
 TABLE2_PRIMARY="${TABLE2_PRIMARY:-}"
 JSON_FLATTEN_SEP="${JSON_FLATTEN_SEP:-.}"
 TABLE2_BATCH_SIZE="${TABLE2_BATCH_SIZE:-50}"
+TABLE2_RANGE_START="${TABLE2_RANGE_START:-0}"
+TABLE2_RANGE_END="${TABLE2_RANGE_END:-0}"
 
 export WECHAT_ARTICLE_DATE_START WECHAT_ARTICLE_DATE_END WECHAT_MAX_ARTICLES_PER_CREATOR WECHAT_CRAWL_TAG
 
@@ -95,6 +105,28 @@ run_crawler() {
 sync_table1() {
   [[ -n "${TABLE1_ID}" ]] || die "TABLE1_ID 不能为空（用于同步表1）"
 
+  local save_opt="${SAVE_DATA_OPTION,,}"
+  if [[ "${save_opt}" == "mysql" ]]; then
+    save_opt="db"
+  fi
+
+  if [[ "${save_opt}" == "db" || "${save_opt}" == "sqlite" || "${save_opt}" == "postgres" ]]; then
+    log "步骤2/4：检测到 DB 存储，直接从 DB 同步到表1"
+
+    uv run python sync_to_feishu.py \
+      --platform wechat \
+      --db \
+      --db-type "${save_opt}" \
+      --data-type article \
+      --append-table-id "${TABLE1_ID}" \
+      --batch-size "${TABLE1_BATCH_SIZE}" \
+      --range-start "${TABLE1_RANGE_START}" \
+      --range-end "${TABLE1_RANGE_END}"
+
+    log "步骤2/4：表1同步完成（DB源）"
+    return
+  fi
+
   local source_csv="${TABLE1_SOURCE_CSV}"
   if [[ -z "${source_csv}" ]]; then
     source_csv="$(find_latest_contents_csv)"
@@ -107,7 +139,9 @@ sync_table1() {
     --platform wechat \
     --file "${source_csv}" \
     --append-table-id "${TABLE1_ID}" \
-    --batch-size "${TABLE1_BATCH_SIZE}"
+    --batch-size "${TABLE1_BATCH_SIZE}" \
+    --range-start "${TABLE1_RANGE_START}" \
+    --range-end "${TABLE1_RANGE_END}"
 
   log "步骤2/4：表1同步完成"
 }
@@ -123,14 +157,26 @@ read_table1() {
     --select-fields "${TABLE1_SELECT_FIELDS}"
     --output-csv "${TABLE1_EXPORT_CSV}")
 
-  if [[ -n "${TABLE1_FILTER_FIELD}" ]]; then
-    cmd+=(--filter-field "${TABLE1_FILTER_FIELD}")
+  if [[ -n "${TABLE1_VIEW_ID}" ]]; then
+    cmd+=(--view-id "${TABLE1_VIEW_ID}")
   fi
-  if [[ -n "${TABLE1_FILTER_OPERATOR}" ]]; then
-    cmd+=(--filter-operator "${TABLE1_FILTER_OPERATOR}")
+
+  if [[ "${TABLE1_EXPORT_TO_DB}" == "1" ]]; then
+    cmd+=(--output-db --db-type "${TABLE1_EXPORT_DB_TYPE}" --db-dataset "${TABLE1_EXPORT_DB_DATASET}")
   fi
-  if [[ -n "${TABLE1_FILTER_VALUES}" ]]; then
-    cmd+=(--filter-values "${TABLE1_FILTER_VALUES}" --filter-conjunction "${TABLE1_FILTER_CONJUNCTION}")
+
+  if [[ -n "${TABLE1_FILTERS_JSON}" ]]; then
+    cmd+=(--filters-json "${TABLE1_FILTERS_JSON}" --filters-conjunction "${TABLE1_FILTERS_CONJUNCTION}")
+  else
+    if [[ -n "${TABLE1_FILTER_FIELD}" ]]; then
+      cmd+=(--filter-field "${TABLE1_FILTER_FIELD}")
+    fi
+    if [[ -n "${TABLE1_FILTER_OPERATOR}" ]]; then
+      cmd+=(--filter-operator "${TABLE1_FILTER_OPERATOR}")
+    fi
+    if [[ -n "${TABLE1_FILTER_VALUES}" ]]; then
+      cmd+=(--filter-values "${TABLE1_FILTER_VALUES}" --filter-conjunction "${TABLE1_FILTER_CONJUNCTION}")
+    fi
   fi
 
   "${cmd[@]}"
@@ -151,7 +197,9 @@ parse_and_sync_table2() {
     --file "${TABLE1_EXPORT_CSV}"
     --json-columns "${JSON_COLUMNS}"
     --json-flatten-sep "${JSON_FLATTEN_SEP}"
-    --batch-size "${TABLE2_BATCH_SIZE}")
+    --batch-size "${TABLE2_BATCH_SIZE}"
+    --range-start "${TABLE2_RANGE_START}"
+    --range-end "${TABLE2_RANGE_END}")
 
   if [[ -n "${JSON_KEEP_COLUMNS}" ]]; then
     cmd+=(--json-keep-columns "${JSON_KEEP_COLUMNS}")

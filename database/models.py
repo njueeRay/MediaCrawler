@@ -492,3 +492,16 @@ class WechatCreator(Base):
     ip_location = Column(String(128))
     add_ts = Column(BigInteger)
     last_modify_ts = Column(BigInteger)
+
+
+# ==================== 飞书读取快照 ====================
+
+class FeishuRecordSnapshot(Base):
+    __tablename__ = 'feishu_record_snapshot'
+    id = Column(Integer, primary_key=True)
+    source_app_token = Column(String(128), index=True)
+    source_table_id = Column(String(128), index=True)
+    source_view_id = Column(String(128), default='')
+    dataset_name = Column(String(128), index=True, default='default')
+    fields_json = Column(Text)
+    add_ts = Column(String(32), default='')

@@ -31,7 +31,7 @@ from database import models as db_models
 from feishu_sync.sync_manager import FeishuSyncManager
 from feishu_sync.data_formatter import XHSDataFormatter, WeChatDataFormatter
 from feishu_sync.config import FeishuConfig
-from feishu_sync.json_column_sync import sync_csv_json_column, DEFAULT_PRIMARY_FIELD
+from feishu_sync.json_column_sync import sync_csv_json_column, sync_rows_json_column, DEFAULT_PRIMARY_FIELD
 
 try:
     from dotenv import load_dotenv
@@ -238,6 +238,12 @@ def _build_append_records(
     extra_field_options: str | None = None,
 ) -> tuple[list[Dict], dict[str, int]]:
     existing_fields = manager._list_fields()
+
+    if manager.platform == "wechat":
+        for field_name in ("图片", "封面"):
+            if field_name not in existing_fields:
+                manager.create_field_if_missing({"field_name": field_name, "type": 17})
+        existing_fields = manager._list_fields()
 
     if extra_field_name and extra_field_type:
         if extra_field_name not in existing_fields:
@@ -733,11 +739,38 @@ def main():
                     since_id=args.db_since_id,
                 )
             )
+            raw_data = _apply_range(raw_data, args.range_start, args.range_end)
 
             if not raw_data:
                 raise RuntimeError("数据库无可同步数据")
 
             ensure_manager_platform(manager, args.platform)
+            if args.append_table_id:
+                manager.table_id = args.append_table_id
+
+            resolved_json_columns: List[str] = list(json_columns or [])
+            if args.json_column:
+                for column in str(args.json_column).split(","):
+                    name = column.strip()
+                    if name and name not in resolved_json_columns:
+                        resolved_json_columns.append(name)
+
+            if resolved_json_columns:
+                table_name = args.json_table_name or "JSON数据同步"
+                result = sync_rows_json_column(
+                    manager,
+                    raw_data,
+                    json_columns=resolved_json_columns,
+                    keep_columns=json_keep_columns,
+                    table_name=table_name,
+                    primary_field=args.json_primary,
+                    flatten_sep=args.json_flatten_sep,
+                    batch_size=args.batch_size,
+                )
+                if result.get("success", 0) == 0:
+                    raise RuntimeError(f"同步失败: {result}")
+                logger.info("🎉 程序执行完成!")
+                return
 
             if args.platform == "xhs":
                 manager.formatter.get_table_fields = lambda: XHSDataFormatter.get_table_fields(db_data_type)

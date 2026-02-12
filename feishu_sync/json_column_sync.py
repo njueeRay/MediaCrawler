@@ -209,6 +209,84 @@ def _build_row_records(
     return records
 
 
+def _resolve_json_target_columns(
+    json_column: Optional[str] = None,
+    json_columns: Optional[List[str]] = None,
+) -> List[str]:
+    target_columns: List[str] = []
+    if json_columns:
+        target_columns.extend([col for col in json_columns if col])
+    if json_column:
+        for candidate in str(json_column).split(","):
+            candidate = candidate.strip()
+            if candidate and candidate not in target_columns:
+                target_columns.append(candidate)
+    return target_columns
+
+
+def sync_rows_json_column(
+    manager: "FeishuSyncManager",
+    rows: List[Dict[str, Any]],
+    json_column: Optional[str] = None,
+    json_columns: Optional[List[str]] = None,
+    table_name: Optional[str] = None,
+    primary_field: str = DEFAULT_PRIMARY_FIELD,
+    flatten_sep: str = ".",
+    batch_size: Optional[int] = None,
+    keep_columns: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。"""
+    if not rows:
+        return {"success": 0, "failed": 0, "error": "输入数据为空"}
+
+    target_columns = _resolve_json_target_columns(json_column, json_columns)
+    if not target_columns:
+        return {"success": 0, "failed": 0, "error": "未指定需要解析的 JSON 列"}
+
+    logger.info("📥 解析 JSON 列: %s", ", ".join(target_columns))
+
+    json_records: List[Dict[str, Any]] = []
+    for row in rows:
+        row_records = _build_row_records(row, target_columns, keep_columns, flatten_sep)
+        if row_records:
+            json_records.extend(row_records)
+
+    if not json_records:
+        return {"success": 0, "failed": len(rows), "error": "JSON 列解析为空"}
+
+    resolved_primary_field = _resolve_primary_field(json_records, primary_field)
+    fields_config = build_fields_config(json_records, resolved_primary_field)
+    table_name = table_name or "JSON数据同步"
+
+    ensure_table_and_fields(manager, table_name, fields_config)
+
+    if batch_size:
+        FeishuConfig.BATCH_SIZE = batch_size
+
+    existing_type_map: Optional[Dict[str, int]] = None
+    try:
+        existing_fields = manager._list_fields()
+        existing_type_map = {name: field.type for name, field in existing_fields.items()}
+    except Exception as exc:
+        logger.warning("获取远程字段类型失败，继续使用本地推断类型: %s", exc)
+
+    formatted_records = format_records(
+        json_records,
+        fields_config,
+        resolved_primary_field,
+        field_type_map=existing_type_map,
+    )
+    result = manager._batch_create_records_with_sdk(formatted_records)
+
+    return {
+        "success": result.get("success", 0),
+        "failed": max(0, len(json_records) - result.get("success", 0)),
+        "total": len(json_records),
+        "table_id": manager.table_id,
+        "app_token": manager.app_token,
+    }
+
+
 def detect_timestamp(value: Any) -> Optional[int]:
     """识别时间字段，返回毫秒时间戳。"""
     if value is None or value == "":
@@ -389,57 +467,14 @@ def sync_csv_json_column(
     if not rows:
         return {"success": 0, "failed": 0, "error": "无法加载CSV数据"}
 
-    target_columns: List[str] = []
-    if json_columns:
-        target_columns.extend([col for col in json_columns if col])
-    if json_column:
-        for candidate in str(json_column).split(","):
-            candidate = candidate.strip()
-            if candidate and candidate not in target_columns:
-                target_columns.append(candidate)
-
-    if not target_columns:
-        return {"success": 0, "failed": 0, "error": "未指定需要解析的 JSON 列"}
-
-    logger.info("📥 解析 JSON 列: %s", ", ".join(target_columns))
-
-    json_records: List[Dict[str, Any]] = []
-    for row in rows:
-        row_records = _build_row_records(row, target_columns, keep_columns, flatten_sep)
-        if row_records:
-            json_records.extend(row_records)
-
-    if not json_records:
-        return {"success": 0, "failed": len(rows), "error": "JSON 列解析为空"}
-
-    resolved_primary_field = _resolve_primary_field(json_records, primary_field)
-    fields_config = build_fields_config(json_records, resolved_primary_field)
-    table_name = table_name or "JSON数据同步"
-
-    ensure_table_and_fields(manager, table_name, fields_config)
-
-    if batch_size:
-        FeishuConfig.BATCH_SIZE = batch_size
-
-    existing_type_map: Optional[Dict[str, int]] = None
-    try:
-        existing_fields = manager._list_fields()
-        existing_type_map = {name: field.type for name, field in existing_fields.items()}
-    except Exception as exc:
-        logger.warning("获取远程字段类型失败，继续使用本地推断类型: %s", exc)
-
-    formatted_records = format_records(
-        json_records,
-        fields_config,
-        resolved_primary_field,
-        field_type_map=existing_type_map,
+    return sync_rows_json_column(
+        manager,
+        rows,
+        json_column=json_column,
+        json_columns=json_columns,
+        table_name=table_name,
+        primary_field=primary_field,
+        flatten_sep=flatten_sep,
+        batch_size=batch_size,
+        keep_columns=keep_columns,
     )
-    result = manager._batch_create_records_with_sdk(formatted_records)
-
-    return {
-        "success": result.get("success", 0),
-        "failed": max(0, len(json_records) - result.get("success", 0)),
-        "total": len(json_records),
-        "table_id": manager.table_id,
-        "app_token": manager.app_token,
-    }

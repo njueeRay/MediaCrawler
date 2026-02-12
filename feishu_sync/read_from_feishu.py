@@ -9,11 +9,17 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime
 from typing import Dict, List, Optional, Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 try:
     from .sync_manager import FeishuSyncManager
     from .config import FeishuConfig, FeishuReadConfig
+    from database.db_session import create_tables, get_async_engine
+    from database.models import FeishuRecordSnapshot
 except ImportError:
     from pathlib import Path
     import sys as _sys
@@ -23,6 +29,8 @@ except ImportError:
         _sys.path.insert(0, str(_ROOT))
     from feishu_sync.sync_manager import FeishuSyncManager
     from feishu_sync.config import FeishuConfig, FeishuReadConfig
+    from database.db_session import create_tables, get_async_engine
+    from database.models import FeishuRecordSnapshot
 
 try:
     from dotenv import load_dotenv
@@ -79,6 +87,73 @@ def build_filter_info(field: str, operator: str, values: List[str], conjunction:
         Condition.builder().field_name(field).operator(operator).value([value]).build()
         for value in values
     ]
+
+    return FilterInfo.builder().conjunction(conjunction).conditions(conditions).build()
+
+
+def parse_filters_json(filters_json: str) -> List[Dict[str, Any]]:
+    if not filters_json:
+        return []
+    try:
+        parsed = json.loads(filters_json)
+    except Exception as exc:
+        raise ValueError(f"filters_json 解析失败: {exc}") from exc
+
+    if not isinstance(parsed, list):
+        raise ValueError("filters_json 必须是数组")
+
+    normalized: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field", "")).strip()
+        operator = str(item.get("operator", "")).strip()
+        values = item.get("values", [])
+        if isinstance(values, str):
+            values = [values]
+        if not isinstance(values, list):
+            values = []
+        values = [str(v) for v in values if str(v).strip()]
+        if field and operator:
+            normalized.append({
+                "field": field,
+                "operator": operator,
+                "values": values,
+            })
+    return normalized
+
+
+def build_filter_info_multi(filter_specs: List[Dict[str, Any]], conjunction: str):
+    if not filter_specs:
+        return None
+
+    from lark_oapi.api.bitable.v1 import FilterInfo, Condition
+
+    conditions = []
+    for spec in filter_specs:
+        field = spec.get("field", "")
+        operator = spec.get("operator", "")
+        values = spec.get("values", []) or []
+
+        if operator not in SUPPORTED_OPERATORS:
+            raise ValueError(f"不支持的 operator: {operator}")
+
+        if operator in {"isEmpty", "isNotEmpty"}:
+            conditions.append(
+                Condition.builder().field_name(field).operator(operator).value([]).build()
+            )
+            continue
+
+        if not values:
+            raise ValueError(f"过滤条件需要提供 values: field={field}, operator={operator}")
+
+        for value in values:
+            conditions.append(
+                Condition.builder().field_name(field).operator(operator).value([value]).build()
+            )
+
+    if not conditions:
+        return None
 
     return FilterInfo.builder().conjunction(conjunction).conditions(conditions).build()
 
@@ -171,6 +246,57 @@ def write_csv(rows: List[Dict], output_path: str, field_names: Optional[List[str
     logger.info(f"✅ CSV已保存: {output_path}")
 
 
+async def save_rows_to_db(
+    rows: List[Dict],
+    db_type: str,
+    app_token: str,
+    table_id: str,
+    view_id: str,
+    dataset_name: str,
+) -> int:
+    """将飞书读取结果保存到关系型数据库（sqlite/mysql/postgres）。"""
+    if not rows:
+        return 0
+
+    normalized_db_type = (db_type or "").strip().lower()
+    if normalized_db_type == "mysql":
+        normalized_db_type = "db"
+
+    if normalized_db_type not in {"sqlite", "db", "postgres"}:
+        raise ValueError(f"不支持的数据库类型: {db_type}")
+
+    await create_tables(normalized_db_type)
+    engine = get_async_engine(normalized_db_type)
+    if not engine:
+        raise RuntimeError("数据库引擎不可用")
+
+    AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    async with AsyncSessionFactory() as session:
+        assert isinstance(session, AsyncSession)
+        for row in rows:
+            session.add(
+                FeishuRecordSnapshot(
+                    source_app_token=app_token or "",
+                    source_table_id=table_id or "",
+                    source_view_id=view_id or "",
+                    dataset_name=dataset_name or "default",
+                    fields_json=json.dumps(row, ensure_ascii=False),
+                    add_ts=now_text,
+                )
+            )
+        await session.commit()
+
+    logger.info(
+        "✅ DB已保存: %s 条记录 -> feishu_record_snapshot (db_type=%s, dataset=%s)",
+        len(rows),
+        normalized_db_type,
+        dataset_name or "default",
+    )
+    return len(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="读取飞书多维表格数据（支持过滤与导出）")
     parser.add_argument("--table-id", default=FeishuReadConfig.TABLE_ID, help="目标数据表ID（覆盖环境变量 FEISHU_TABLE_ID）")
@@ -180,8 +306,13 @@ def main() -> None:
     parser.add_argument("--filter-operator", default=FeishuReadConfig.FILTER_OPERATOR, help="过滤关系：contains/doesNotContain/isEmpty/isNotEmpty/is/isNot")
     parser.add_argument("--filter-values", default=FeishuReadConfig.FILTER_VALUES, help="过滤值，逗号分隔")
     parser.add_argument("--filter-conjunction", default=FeishuReadConfig.FILTER_CONJUNCTION, choices=["and", "or"], help="多值过滤时关系")
+    parser.add_argument("--filters-json", default="", help="多条件过滤 JSON 数组，示例: [{\"field\":\"来源关键词\",\"operator\":\"contains\",\"values\":[\"黑客松\"]}]")
+    parser.add_argument("--filters-conjunction", default="and", choices=["and", "or"], help="filters-json 条件关系")
     parser.add_argument("--page-size", type=int, default=FeishuReadConfig.PAGE_SIZE, help="每页数量（1-100）")
     parser.add_argument("--output-csv", default=FeishuReadConfig.OUTPUT_CSV, help="导出CSV路径")
+    parser.add_argument("--output-db", action="store_true", help="将读取结果保存到数据库")
+    parser.add_argument("--db-type", default="", choices=["sqlite", "db", "mysql", "postgres"], help="数据库类型，默认取 SAVE_DATA_OPTION")
+    parser.add_argument("--db-dataset", default="", help="写入 DB 时的数据集名称（用于区分批次）")
     parser.add_argument("--log-level", default=FeishuReadConfig.LOG_LEVEL, help="日志级别")
 
     args = parser.parse_args()
@@ -206,13 +337,18 @@ def main() -> None:
     )
 
     field_names = parse_values(args.select_fields)
-    filter_values = parse_values(args.filter_values)
-    filter_info = build_filter_info(
-        args.filter_field,
-        args.filter_operator,
-        filter_values,
-        args.filter_conjunction,
-    )
+    filter_info = None
+    if args.filters_json:
+        filter_specs = parse_filters_json(args.filters_json)
+        filter_info = build_filter_info_multi(filter_specs, args.filters_conjunction)
+    else:
+        filter_values = parse_values(args.filter_values)
+        filter_info = build_filter_info(
+            args.filter_field,
+            args.filter_operator,
+            filter_values,
+            args.filter_conjunction,
+        )
 
     view_id = args.view_id or FeishuReadConfig.VIEW_ID or config.get("view_id") or None
 
@@ -227,9 +363,29 @@ def main() -> None:
 
     logger.info(f"🎯 读取记录数: {len(rows)}")
 
+    wrote_output = False
     if args.output_csv:
         write_csv(rows, args.output_csv, field_names or None)
-    else:
+        wrote_output = True
+
+    if args.output_db:
+        resolved_db_type = (args.db_type or os.getenv("SAVE_DATA_OPTION", "")).strip().lower()
+        if not resolved_db_type:
+            raise ValueError("output-db 模式下缺少 db_type，请设置 --db-type 或 SAVE_DATA_OPTION")
+        import asyncio
+        asyncio.run(
+            save_rows_to_db(
+                rows=rows,
+                db_type=resolved_db_type,
+                app_token=manager.app_token,
+                table_id=table_id,
+                view_id=view_id or "",
+                dataset_name=args.db_dataset or table_id,
+            )
+        )
+        wrote_output = True
+
+    if not wrote_output:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
 
 

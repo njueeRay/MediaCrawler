@@ -529,6 +529,11 @@ class FeishuSyncManager:
         # 确保表格已创建
         if not self.table_id:
             self.setup_table()
+        else:
+            try:
+                self.ensure_fields(self.formatter.get_table_fields())
+            except Exception as exc:
+                logger.warning(f"确保表字段失败，继续同步: {exc}")
         
         # 格式化数据
         logger.info(f"开始格式化 {len(raw_data)} 条数据...")
