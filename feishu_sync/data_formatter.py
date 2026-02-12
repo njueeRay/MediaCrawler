@@ -271,17 +271,22 @@ class XHSDataFormatter:
             logger.warning(f"解析标签失败: {e}, 原始标签: {tag_string}")
             return []
     
-    def clean_text(self, text: str) -> str:
+    def clean_text(self, text: str, preserve_newlines: bool = False) -> str:
         """清理文本内容"""
         if text is None or pd.isna(text):
             return ""
 
         if not isinstance(text, str):
             text = str(text)
-        
-        # 移除特殊字符和多余空白
-        text = text.replace('\n', ' ').replace('\r', ' ')
-        text = ' '.join(text.split())  # 合并多个空格
+
+        if preserve_newlines:
+            text = text.replace('\r\n', '\n').replace('\r', '\n')
+            lines = [' '.join(line.split()) for line in text.split('\n')]
+            text = '\n'.join(lines).strip('\n')
+        else:
+            # 移除特殊字符和多余空白
+            text = text.replace('\n', ' ').replace('\r', ' ')
+            text = ' '.join(text.split())  # 合并多个空格
         
         return text
     
@@ -467,8 +472,8 @@ class WeChatDataFormatter(XHSDataFormatter):
     load_from_csv, load_from_json, format_batch_records 等），
     重写字段映射和记录格式化逻辑。
 
-    当通过 CSV 上传飞书时，自动查找本地图片目录
-    （data/wechat/images/<nickname>/<article_id>/）并标记为待上传附件。
+    字段命名与 XHS 保持一致风格（如 "标题"、"类型"、"发布时间"、"爬取时间"、"图片"）。
+    不上传封面链接 (cover) 和图片链接列表 (image_list)，仅以附件形式上传实际图片文件。
     """
 
     # item_show_type → 文章类型（兼容数字和中文两种输入）
@@ -487,12 +492,29 @@ class WeChatDataFormatter(XHSDataFormatter):
         # 不调用 super().__init__()，跳过 XHS field_mapping，保留工具方法
         self.image_base_dir = image_base_dir or self.DEFAULT_IMAGE_BASE_DIR
 
+        # CSV 列名 → 飞书中文字段名（不含 cover / image_list，仅上传附件）
+        self.article_field_mapping = {
+            "article_id": "文章ID",
+            "fakeid": "公众号ID",
+            "title": "标题",
+            "link": "文章链接",
+            "digest": "内容摘要",
+            "content": "全文内容",
+            "author_name": "作者",
+            "account_nickname": "公众号名称",
+            "item_show_type": "类型",
+            "create_time_str": "发布时间",
+            "update_time_str": "更新时间",
+            "source_keyword": "来源关键词",
+            "add_ts": "爬取时间",
+        }
+
     # ---------- 记录格式化 ----------
 
     def format_single_record(self, raw_data: Dict) -> Optional[Dict]:
         """格式化单条微信文章记录"""
         try:
-            if "article_id" in raw_data:
+            if "article_id" in raw_data or "文章ID" in raw_data:
                 return self.format_article_record(raw_data)
             logger.warning(f"无法识别的微信数据记录: {list(raw_data.keys())[:5]}")
             return None
@@ -504,49 +526,52 @@ class WeChatDataFormatter(XHSDataFormatter):
         """
         格式化微信文章记录为飞书多维表格行格式
 
+        根据 article_field_mapping 映射 CSV 列 → 飞书字段，
         自动匹配本地图片目录，生成 _image_meta 供 sync_manager 上传。
         """
         try:
-            article_id = raw_data.get("article_id", "")
+            article_id = raw_data.get("article_id") or raw_data.get("文章ID") or ""
 
             # 文章类型：已是中文标签则直接使用，否则从数字映射
-            raw_type = raw_data.get("item_show_type", "普通图文")
+            raw_type = raw_data.get("item_show_type", raw_data.get("类型", "普通图文"))
             if isinstance(raw_type, (int, float)):
                 type_text = self._SHOW_TYPE_MAP.get(int(raw_type), f"未知类型({raw_type})")
             else:
                 type_text = str(raw_type) if raw_type else "普通图文"
 
-            # 文章链接
-            article_link = raw_data.get("link", "")
+            article_link = raw_data.get("link") or raw_data.get("文章链接") or ""
 
-            fields = {
-                "文章ID": article_id,
-                "标题": self.clean_text(
-                    raw_data.get("title", "")
-                )[:FeishuConfig.MAX_TITLE_LENGTH],
-                "摘要": self.clean_text(
-                    raw_data.get("digest", "")
-                )[:FeishuConfig.MAX_DESC_LENGTH],
-                "公众号": raw_data.get("account_nickname", ""),
-                "作者": raw_data.get("author_name", ""),
-                "文章类型": type_text,
-                "发布时间": raw_data.get("create_time_str", ""),
-                "更新时间": raw_data.get("update_time_str", ""),
-                "文章链接": {
-                    "link": article_link,
-                    "text": "查看原文",
-                } if article_link else None,
-                "来源标签": raw_data.get("source_keyword", ""),
-            }
+            fields: Dict[str, Any] = {}
+            for csv_key, feishu_name in self.article_field_mapping.items():
+                value = raw_data.get(csv_key, raw_data.get(feishu_name, ""))
+
+                # 特殊字段处理
+                if csv_key == "item_show_type":
+                    value = type_text
+                elif csv_key == "link":
+                    value = {"link": article_link, "text": "查看原文"} if article_link else None
+                elif csv_key == "title":
+                    value = self.clean_text(str(value))[:FeishuConfig.MAX_TITLE_LENGTH]
+                elif csv_key == "digest":
+                    value = self.clean_text(str(value))[:FeishuConfig.MAX_DESC_LENGTH]
+                elif csv_key == "content":
+                    cleaned_content = self.clean_text(str(value), preserve_newlines=True) if value else ""
+                    max_content_length = getattr(FeishuConfig, "MAX_CONTENT_LENGTH", 0)
+                    if max_content_length and max_content_length > 0:
+                        value = cleaned_content[:max_content_length]
+                    else:
+                        value = cleaned_content
+
+                fields[feishu_name] = value
 
             feishu_record: Dict = {"fields": self.sanitize_fields(fields)}
 
-            # 查找本地图片文件（data/wechat/images/*/<article_id>/）
+            # 查找本地图片文件（data/wechat/images/<nickname>/<article_id>/）
             local_images = self.find_article_images(article_id, self.image_base_dir)
             if local_images:
                 feishu_record["_image_meta"] = {
                     "local_images": local_images,
-                    "field_name": "文章图片",
+                    "field_name": "图片",
                 }
 
             return feishu_record
@@ -599,25 +624,29 @@ class WeChatDataFormatter(XHSDataFormatter):
         """
         获取微信公众号飞书表格字段定义
 
-        字段与 CSV 存储字段对齐，内部字段 (fakeid, add_ts) 不上传飞书。
+        与 article_field_mapping 对齐，不含 cover / image_list 文本字段，
+        通过 "图片" 附件字段上传实际图片文件。
         """
         return [
             {"field_name": "文章ID", "type": 1},              # 单行文本
+            {"field_name": "公众号ID", "type": 1},             # 单行文本
             {"field_name": "标题", "type": 1},                 # 单行文本
-            {"field_name": "摘要", "type": 1},                 # 单行文本
-            {"field_name": "公众号", "type": 1},               # 单行文本
+            {"field_name": "文章链接", "type": 15},            # 超链接
+            {"field_name": "内容摘要", "type": 1},             # 单行文本
+            {"field_name": "全文内容", "type": 1},             # 单行文本
             {"field_name": "作者", "type": 1},                 # 单行文本
-            {"field_name": "文章类型", "type": 3, "property": {"options": [
+            {"field_name": "公众号名称", "type": 1},           # 单行文本
+            {"field_name": "类型", "type": 3, "property": {"options": [
                 {"name": "普通图文"}, {"name": "视频分享"},
                 {"name": "音乐分享"}, {"name": "音频分享"},
                 {"name": "图片分享"}, {"name": "文本分享"},
                 {"name": "文章分享"}, {"name": "短文"},
             ]}},                                               # 单选
-            {"field_name": "发布时间", "type": 1},             # 单行文本 (create_time_str)
-            {"field_name": "更新时间", "type": 1},             # 单行文本 (update_time_str)
-            {"field_name": "文章链接", "type": 15},            # 超链接
-            {"field_name": "文章图片", "type": 17},            # 附件（本地图片上传）
-            {"field_name": "来源标签", "type": 1},             # 单行文本
+            {"field_name": "发布时间", "type": 1},             # 单行文本
+            {"field_name": "更新时间", "type": 1},             # 单行文本
+            {"field_name": "来源关键词", "type": 1},           # 单行文本
+            {"field_name": "爬取时间", "type": 1},             # 单行文本
+            {"field_name": "图片", "type": 17},                # 附件（本地图片上传）
         ]
 
     @staticmethod

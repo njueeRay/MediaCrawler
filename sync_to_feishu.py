@@ -211,9 +211,26 @@ def _build_append_records(
                     extra_field_value,
                 )
         if "图片" in allowed_fields:
-            note_id = fields.get("笔记ID")
-            if note_id:
-                manager._attach_images(fields, str(note_id))
+            if manager.platform == "wechat":
+                article_id = fields.get("文章ID")
+                if article_id:
+                    local_images = WeChatDataFormatter.find_article_images(str(article_id))
+                    items = []
+                    for img_path in local_images:
+                        if not os.path.isfile(img_path):
+                            continue
+                        try:
+                            token = manager.image_uploader.upload_image(img_path)
+                            if token:
+                                items.append({"file_token": token, "name": os.path.basename(img_path)})
+                        except Exception as exc:
+                            logger.error(f"图片上传失败: {img_path} - {exc}")
+                    if items:
+                        fields["图片"] = items
+            else:
+                note_id = fields.get("笔记ID")
+                if note_id:
+                    manager._attach_images(fields, str(note_id))
         if fields:
             records.append({"fields": fields})
 
@@ -258,6 +275,16 @@ def sync_csv_append(
     if batch_size:
         FeishuConfig.BATCH_SIZE = batch_size
 
+    records = manager.filter_existing_records_by_remote_ids(records)
+    if not records:
+        return {
+            "success": 0,
+            "failed": 0,
+            "total": 0,
+            "table_id": manager.table_id,
+            "app_token": manager.app_token,
+        }
+
     result = manager._batch_create_records_with_sdk(records)
 
     return {
@@ -273,10 +300,40 @@ def detect_data_type(raw_data: List[Dict]) -> str:
     return XHSDataFormatter.detect_data_type(raw_data)
 
 
-def build_table_name(file_path: str) -> str:
+def detect_platform(raw_data: List[Dict], preferred: str = "xhs") -> str:
+    """根据数据字段自动识别平台，识别失败时回退 preferred。"""
+    if not raw_data:
+        return preferred
+
+    first = raw_data[0] if isinstance(raw_data[0], dict) else {}
+    keys = set(first.keys())
+
+    if {"article_id", "fakeid"}.issubset(keys) or "article_id" in keys:
+        return "wechat"
+    if {"文章ID", "公众号ID"}.issubset(keys) or "文章ID" in keys:
+        return "wechat"
+
+    if "note_id" in keys or "comment_id" in keys or "笔记ID" in keys:
+        return "xhs"
+
+    return preferred
+
+
+def ensure_manager_platform(manager: FeishuSyncManager, platform: str) -> None:
+    """确保 manager 的 platform/formatter 与输入数据一致。"""
+    if platform == manager.platform:
+        return
+
+    manager.platform = platform
+    manager.formatter = WeChatDataFormatter() if platform == "wechat" else XHSDataFormatter()
+    logger.info(f"🔁 自动切换平台: {platform}")
+
+
+def build_table_name(file_path: str, platform: str = "xhs") -> str:
     base = os.path.basename(file_path)
     name = os.path.splitext(base)[0]
-    return f"小红书_{name}"
+    prefix = "微信公众号" if platform == "wechat" else "小红书"
+    return f"{prefix}_{name}"
 
 
 def ensure_config() -> Dict:
@@ -341,6 +398,9 @@ def sync_file(
 
         raw_data = _apply_range(raw_data, range_start, range_end)
 
+        detected_platform = detect_platform(raw_data, manager.platform)
+        ensure_manager_platform(manager, detected_platform)
+
         if append_table_id:
             manager.table_id = append_table_id
 
@@ -363,6 +423,15 @@ def sync_file(
             return {"success": 0, "failed": len(raw_data), "error": "字段与表字段不匹配"}
 
         FeishuConfig.BATCH_SIZE = batch_size
+        records = manager.filter_existing_records_by_remote_ids(records)
+        if not records:
+            return {
+                "success": 0,
+                "failed": 0,
+                "total": 0,
+                "table_id": manager.table_id,
+                "app_token": manager.app_token,
+            }
         result = manager._batch_create_records_with_sdk(records)
         return {
             "success": result.get("success", 0),
@@ -373,7 +442,7 @@ def sync_file(
         }
 
     if ext == ".csv" and resolved_json_columns:
-        table_name = json_table_name or build_table_name(file_path)
+        table_name = json_table_name or build_table_name(file_path, manager.platform)
         return sync_csv_json_column(
             manager,
             file_path,
@@ -393,13 +462,23 @@ def sync_file(
 
     raw_data = _apply_range(raw_data, range_start, range_end)
 
-    data_type = detect_data_type(raw_data)
+    detected_platform = detect_platform(raw_data, manager.platform)
+    ensure_manager_platform(manager, detected_platform)
+
+    data_type = (
+        detect_data_type(raw_data)
+        if manager.platform == "xhs"
+        else WeChatDataFormatter.detect_data_type(raw_data)
+    )
     logger.info(f"📊 检测到数据类型: {data_type}")
 
-    table_name = build_table_name(file_path)
+    table_name = build_table_name(file_path, manager.platform)
 
-    # 临时覆盖表结构获取逻辑，确保 comment/note 表结构正确
-    manager.formatter.get_table_fields = lambda: XHSDataFormatter.get_table_fields(data_type)
+    # 按平台覆盖表结构获取逻辑
+    if manager.platform == "xhs":
+        manager.formatter.get_table_fields = lambda: XHSDataFormatter.get_table_fields(data_type)
+    else:
+        manager.formatter.get_table_fields = lambda: WeChatDataFormatter.get_table_fields(data_type)
 
     if not manager.table_id:
         manager.setup_table(table_name)
@@ -516,6 +595,8 @@ def main():
     parser.add_argument("--append-extra-options", default="", help="单选/多选选项列表，逗号分隔，如: 黑客松,峰会,比赛")
     parser.add_argument("--range-start", type=int, default=0, help="上传范围起始（从1开始）")
     parser.add_argument("--range-end", type=int, default=0, help="上传范围结束（包含该条）")
+    parser.add_argument("--platform", default="xhs", choices=["xhs", "wechat"],
+                        help="数据平台（可选）；若与输入数据不一致会自动按数据字段切换")
 
     args = parser.parse_args()
 
@@ -528,6 +609,7 @@ def main():
             app_secret=config["app_secret"],
             app_token=config["app_token"],
             table_id=config["table_id"] or None,
+            platform=args.platform,
         )
 
         json_columns = _parse_column_list_arg(args.json_columns) or None

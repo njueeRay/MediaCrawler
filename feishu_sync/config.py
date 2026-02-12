@@ -50,6 +50,7 @@ class FeishuConfig:
     # 数据处理配置
     MAX_TITLE_LENGTH = int(os.getenv("MAX_TITLE_LENGTH", "100"))
     MAX_DESC_LENGTH = int(os.getenv("MAX_DESC_LENGTH", "500"))
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "0"))
     MAX_TAGS_COUNT = int(os.getenv("MAX_TAGS_COUNT", "10"))
     LINK_SANITIZE = os.getenv("FEISHU_LINK_SANITIZE", "false").lower() == "true"
 

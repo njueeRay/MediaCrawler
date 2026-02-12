@@ -540,7 +540,18 @@ class FeishuSyncManager:
         
         # 去重处理
         unique_records = self._deduplicate_records(formatted_records)
+        unique_records = self.filter_existing_records_by_remote_ids(unique_records)
         print(f" >>>>>>>> 去重后剩余 {len(unique_records)} 条记录 >>>>>>>>")
+
+        if not unique_records:
+            logger.info("远程去重后无新增记录，跳过上传")
+            return {
+                "success": 0,
+                "failed": 0,
+                "total": len(raw_data),
+                "table_id": self.table_id,
+                "app_token": self.app_token,
+            }
         
         # 绑定图片
         if self.platform == "wechat":
@@ -679,6 +690,106 @@ class FeishuSyncManager:
 
         return unique_records
 
+    def _get_primary_key_field(self) -> str:
+        """获取当前平台的主键字段名"""
+        return "文章ID" if self.platform == "wechat" else "笔记ID"
+
+    @staticmethod
+    def _normalize_cell_to_text(value: Any) -> str:
+        """将飞书 fields 的单元格值归一化为字符串（兼容富文本结构）。"""
+        if value in (None, ""):
+            return ""
+
+        if isinstance(value, (int, float, bool)):
+            return str(value).strip()
+
+        if isinstance(value, str):
+            return value.strip()
+
+        # 常见：富文本 list，例如: [{"type":"text","text":"xxx"}, ...]
+        if isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                text = FeishuSyncManager._normalize_cell_to_text(item)
+                if text:
+                    parts.append(text)
+            return "".join(parts).strip()
+
+        # 常见：富文本 dict，例如: {"text": "xxx"}
+        if isinstance(value, dict):
+            if "text" in value:
+                return str(value.get("text") or "").strip()
+            if "value" in value:
+                return str(value.get("value") or "").strip()
+            # 超链接字段可能是 {link,text}
+            if "link" in value and "text" in value:
+                return str(value.get("text") or "").strip()
+            return str(value).strip()
+
+        return str(value).strip()
+
+    def _extract_record_id(self, record: Dict, key_field: str) -> str:
+        """从记录中提取主键值并转为字符串"""
+        if not isinstance(record, dict):
+            return ""
+        fields = record.get("fields", {})
+        if not isinstance(fields, dict):
+            return ""
+        value = fields.get(key_field)
+        return self._normalize_cell_to_text(value)
+
+    def _fetch_remote_ids(self, key_field: str) -> set[str]:
+        """读取远程数据表已有主键，用于上传前去重"""
+        if not self.table_id:
+            return set()
+
+        try:
+            remote_rows = self.search_records(field_names=[key_field], page_size=100)
+        except Exception as exc:
+            logger.warning(f"读取远程{key_field}失败，跳过远程去重: {exc}")
+            return set()
+
+        remote_ids: set[str] = set()
+        for fields in remote_rows:
+            if not isinstance(fields, dict):
+                continue
+            value = fields.get(key_field)
+            normalized = self._normalize_cell_to_text(value)
+            if not normalized:
+                continue
+            remote_ids.add(normalized)
+
+        logger.info(f"远程表已有 {len(remote_ids)} 条 {key_field}")
+        return remote_ids
+
+    def filter_existing_records_by_remote_ids(self, records: List[Dict]) -> List[Dict]:
+        """根据远程已存在 ID 过滤待上传记录"""
+        if not records:
+            return records
+
+        key_field = self._get_primary_key_field()
+        remote_ids = self._fetch_remote_ids(key_field)
+        if not remote_ids:
+            return records
+
+        filtered_records: List[Dict] = []
+        skipped_count = 0
+
+        for record in records:
+            record_id = self._extract_record_id(record, key_field)
+            if not record_id:
+                filtered_records.append(record)
+                continue
+            if record_id in remote_ids:
+                skipped_count += 1
+                continue
+            filtered_records.append(record)
+
+        if skipped_count > 0:
+            logger.info(f"远程去重: 跳过 {skipped_count} 条重复记录")
+
+        return filtered_records
+
     def _collect_images(self, note_id: str) -> List[str]:
         note_dir = os.path.join(self.IMAGE_ROOT_DIR, note_id)
         if not os.path.isdir(note_dir):
@@ -731,7 +842,7 @@ class FeishuSyncManager:
             return
 
         local_images = meta.get("local_images", [])
-        field_name = meta.get("field_name", "文章图片")
+        field_name = meta.get("field_name", "图片")
         if not local_images:
             return
 
