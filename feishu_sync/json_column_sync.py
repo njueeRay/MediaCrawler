@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Set
 from .config import FeishuConfig
 from .data_formatter import XHSDataFormatter
 
+from read_from_feishu import FeishuReadConfig
+
 if TYPE_CHECKING:
     from .sync_manager import FeishuSyncManager
 
@@ -174,10 +176,9 @@ def _extract_scalar_fields(
     else:
         columns = [col for col in row.keys() if col not in json_column_set]
     scalar_fields: Dict[str, Any] = {}
-    link_field_names = {"笔记链接", "链接", "link", "note_url", "url"}
     for column in columns:
         value = normalize_value(row.get(column))
-        if column in link_field_names and isinstance(value, str):
+        if column in FeishuReadConfig.LINK_FIELD_NAMES and isinstance(value, str):
             value = XHSDataFormatter.sanitize_note_url(value)
         scalar_fields[column] = value
     return scalar_fields
@@ -310,7 +311,7 @@ def format_records(
                     fields[key] = value
                 else:
                     link_value = XHSDataFormatter.sanitize_note_url(str(value)) if value not in (None, "") else ""
-                    fields[key] = {"link": link_value, "text": "查看原文"} if link_value else None
+                    fields[key] = {"link": link_value, "text": link_value} if link_value else None
             elif field_type == 5:
                 timestamp = detect_timestamp(value)
                 fields[key] = timestamp

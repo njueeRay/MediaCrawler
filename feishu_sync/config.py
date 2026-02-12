@@ -148,7 +148,7 @@ class FeishuReadConfig:
     PAGE_SIZE = 100
     OUTPUT_CSV = ""
     LOG_LEVEL = "INFO"
-    LINK_FIELD_NAMES = ["笔记链接", "链接", "link"]
+    LINK_FIELD_NAMES = ["笔记链接", "文章链接", "链接", "link", "note_url", "url"]
 
 # 便捷访问函数
 def get_config() -> FeishuConfig:

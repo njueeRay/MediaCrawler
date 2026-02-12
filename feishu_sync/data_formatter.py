@@ -116,7 +116,7 @@ class XHSDataFormatter:
                 "搜索关键词": raw_data.get('source_keyword', ''),
                 "笔记链接": {
                     "link": sanitized_note_url,
-                    "text": "查看原文"
+                    "text": sanitized_note_url
                 } if sanitized_note_url else None,
                 "热度评分": heat_score,
                 "爬取时间": crawl_time
@@ -549,7 +549,7 @@ class WeChatDataFormatter(XHSDataFormatter):
                 if csv_key == "item_show_type":
                     value = type_text
                 elif csv_key == "link":
-                    value = {"link": article_link, "text": "查看原文"} if article_link else None
+                    value = {"link": article_link, "text": article_link} if article_link else None
                 elif csv_key == "title":
                     value = self.clean_text(str(value))[:FeishuConfig.MAX_TITLE_LENGTH]
                 elif csv_key == "digest":

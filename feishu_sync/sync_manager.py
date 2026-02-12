@@ -344,7 +344,7 @@ class FeishuSyncManager:
             if isinstance(value, dict):
                 return value
             link_value = XHSDataFormatter.sanitize_note_url(str(value)) if value not in (None, "") else ""
-            return {"link": link_value, "text": "查看原文"} if link_value else None
+            return {"link": link_value, "text": link_value} if link_value else None
         if field_type == 17:
             if isinstance(value, (dict, list)):
                 return value
