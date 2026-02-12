@@ -841,30 +841,37 @@ class FeishuSyncManager:
         if not meta:
             return
 
+        def _upload_paths(paths: List[str], target_field: str) -> None:
+            if not paths:
+                return
+
+            items = []
+            for image_path in paths:
+                if not os.path.isfile(image_path):
+                    logger.warning(f"图片文件不存在: {image_path}")
+                    continue
+                try:
+                    token = self.image_uploader.upload_image(image_path)
+                except Exception as exc:
+                    logger.error(f"微信图片上传失败: {image_path} - {exc}")
+                    continue
+                if token:
+                    items.append({
+                        "file_token": token,
+                        "name": os.path.basename(image_path),
+                    })
+
+            if items:
+                record.get("fields", {})[target_field] = items
+                logger.info(f"微信文章图片已绑定: {len(items)} 张 → {target_field}")
+
         local_images = meta.get("local_images", [])
         field_name = meta.get("field_name", "图片")
-        if not local_images:
-            return
+        cover_images = meta.get("cover_images", [])
+        cover_field_name = meta.get("cover_field_name", "封面")
 
-        items = []
-        for image_path in local_images:
-            if not os.path.isfile(image_path):
-                logger.warning(f"图片文件不存在: {image_path}")
-                continue
-            try:
-                token = self.image_uploader.upload_image(image_path)
-            except Exception as exc:
-                logger.error(f"微信图片上传失败: {image_path} - {exc}")
-                continue
-            if token:
-                items.append({
-                    "file_token": token,
-                    "name": os.path.basename(image_path),
-                })
-
-        if items:
-            record.get("fields", {})[field_name] = items
-            logger.info(f"微信文章图片已绑定: {len(items)} 张 → {field_name}")
+        _upload_paths(local_images, field_name)
+        _upload_paths(cover_images, cover_field_name)
     
     def get_sync_status(self) -> Dict:
         """获取同步状态"""

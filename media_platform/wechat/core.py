@@ -33,6 +33,7 @@ from media_platform.wechat.help import (
     sanitize_filename,
 )
 from store.wechat import WechatStoreFactory, update_wechat_article, save_creator
+from tools.async_file_writer import AsyncFileWriter
 from store.wechat.wechat_store_media import WechatMediaStore
 from tools import utils
 from var import crawler_type_var
@@ -120,6 +121,13 @@ class WeChatCrawler(AbstractCrawler):
         finally:
             if self.client:
                 await self.client.close()
+            if config.SAVE_DATA_OPTION == "csv" and getattr(config, "WECHAT_CSV_DEDUP_ON_FINISH", True):
+                try:
+                    writer = AsyncFileWriter(platform="wechat", crawler_type=crawler_type_var.get())
+                    await writer.dedup_latest_csv(item_type="contents", dedup_key="article_id")
+                    utils.logger.info("[WeChatCrawler] CSV 去重完成: article_id")
+                except Exception as exc:
+                    utils.logger.warning(f"[WeChatCrawler] CSV 去重失败: {exc}")
             utils.logger.info("[WeChatCrawler] 爬取结束")
 
     async def search(self) -> None:
@@ -596,6 +604,7 @@ class WeChatCrawler(AbstractCrawler):
                 image_urls=all_download_urls,
                 aid=aid,
                 nickname=account_nickname,
+                cover_url=cover_url,
             )
 
     async def _read_saved_article_content(self, title: str, aid: str, nickname: str) -> str:
@@ -735,6 +744,7 @@ class WeChatCrawler(AbstractCrawler):
         image_urls: List[str],
         aid: str,
         nickname: str,
+        cover_url: str = "",
     ) -> None:
         """从预提取的图片 URL 列表下载所有图片"""
         if not image_urls:
@@ -749,12 +759,14 @@ class WeChatCrawler(AbstractCrawler):
             async with semaphore:
                 img_data = await self.client.download_image(url)
                 if img_data and self.media_store:
+                    is_cover = bool(cover_url and url == cover_url)
                     path = self.media_store.save_image(
                         data=img_data,
                         url=url,
                         article_id=aid,
                         index=idx,
                         nickname=nickname,
+                        is_cover=is_cover,
                     )
                     return path is not None
                 return False

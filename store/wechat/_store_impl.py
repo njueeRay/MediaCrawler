@@ -4,6 +4,7 @@
 import json
 from typing import Dict
 
+import config
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,12 @@ class WechatCsvStoreImplement(AbstractStore):
         self.writer = AsyncFileWriter(platform="wechat", crawler_type=crawler_type_var.get())
 
     async def store_content(self, content_item: Dict):
-        await self.writer.write_to_csv(item_type="contents", item=content_item)
+        await self.writer.write_to_csv_with_dedup(
+            item=content_item,
+            item_type="contents",
+            dedup_key="article_id",
+            replace_on_dup=getattr(config, "WECHAT_CSV_DEDUP_ON_WRITE", True),
+        )
 
     async def store_comment(self, comment_item: Dict):
         await self.writer.write_to_csv(item_type="comments", item=comment_item)

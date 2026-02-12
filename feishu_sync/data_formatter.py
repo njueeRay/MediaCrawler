@@ -7,6 +7,7 @@
 
 import json
 import os
+import re
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -567,11 +568,18 @@ class WeChatDataFormatter(XHSDataFormatter):
             feishu_record: Dict = {"fields": self.sanitize_fields(fields)}
 
             # 查找本地图片文件（data/wechat/images/<nickname>/<article_id>/）
-            local_images = self.find_article_images(article_id, self.image_base_dir)
-            if local_images:
+            cover_url = raw_data.get("cover") or raw_data.get("封面链接") or ""
+            cover_images, local_images = self.collect_and_split_article_images(
+                article_id=article_id,
+                image_base_dir=self.image_base_dir,
+                cover_url=str(cover_url) if cover_url else "",
+            )
+            if cover_images or local_images:
                 feishu_record["_image_meta"] = {
                     "local_images": local_images,
+                    "cover_images": cover_images,
                     "field_name": "图片",
+                    "cover_field_name": "封面",
                 }
 
             return feishu_record
@@ -609,13 +617,131 @@ class WeChatDataFormatter(XHSDataFormatter):
         if not base.exists():
             return []
 
-        # 跨所有公众号子目录查找 article_id 文件夹
+        # 跨所有公众号子目录查找 article_id 文件夹（排除封面图 cover_ 前缀）
         image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
         matches = []
         for p in sorted(base.glob(f"*/{article_id}/*")):
+            if p.is_file() and p.suffix.lower() in image_exts and not p.name.startswith("cover_"):
+                matches.append(str(p.resolve()))
+        return matches
+
+    @staticmethod
+    def find_cover_images(
+        article_id: str,
+        image_base_dir: str = "data/wechat/images",
+    ) -> List[str]:
+        """查找指定文章封面图文件（cover_ 前缀）。"""
+        if not article_id:
+            return []
+        from pathlib import Path
+
+        base = Path(image_base_dir)
+        if not base.exists():
+            return []
+
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+        matches = []
+        for p in sorted(base.glob(f"*/{article_id}/cover_*")):
             if p.is_file() and p.suffix.lower() in image_exts:
                 matches.append(str(p.resolve()))
         return matches
+
+    @staticmethod
+    def _guess_image_ext_from_url(url: str) -> str:
+        """根据图片 URL 推断扩展名（兼容历史转义参数）。"""
+        if not url:
+            return ""
+
+        parsed = urlsplit(url.replace("\\x26", "&"))
+        path_ext = os.path.splitext(parsed.path)[1].lower()
+        allowed_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+        if path_ext in allowed_exts:
+            return path_ext
+
+        query = parsed.query or ""
+        if "wx_fmt=" in query:
+            fmt = query.split("wx_fmt=")[1].split("&")[0]
+            fmt = re.split(r"[^a-zA-Z0-9]", fmt, maxsplit=1)[0].lower()
+            candidate = f".{fmt}" if fmt else ""
+            if candidate in allowed_exts:
+                return candidate
+
+        return ""
+
+    @classmethod
+    def _find_legacy_cover_images_from_links(
+        cls,
+        article_id: str,
+        cover_url: str,
+        local_images: List[str],
+    ) -> List[str]:
+        """
+        历史兼容：旧数据未使用 cover_ 前缀时，按 cover 链接反查封面图。
+
+        旧命名通常为 article_id_001.ext。这里基于 cover_url 推断扩展名，
+        优先命中 article_id_001，再回退到最小序号图片。
+        """
+        if not article_id or not cover_url or not local_images:
+            return []
+
+        ext = cls._guess_image_ext_from_url(cover_url)
+        pattern = re.compile(rf"^{re.escape(str(article_id))}_(\d{{3}})(\.[a-zA-Z0-9]+)$")
+
+        indexed_candidates = []
+        for image_path in local_images:
+            name = os.path.basename(image_path)
+            if name.startswith("cover_"):
+                continue
+            matched = pattern.match(name)
+            if not matched:
+                continue
+            idx = int(matched.group(1))
+            file_ext = matched.group(2).lower()
+            indexed_candidates.append((idx, file_ext, image_path))
+
+        if not indexed_candidates:
+            return []
+
+        indexed_candidates.sort(key=lambda item: item[0])
+
+        if ext:
+            preferred_name = f"{article_id}_001{ext}"
+            for _, _, image_path in indexed_candidates:
+                if os.path.basename(image_path).lower() == preferred_name.lower():
+                    return [image_path]
+
+            ext_candidates = [item for item in indexed_candidates if item[1] == ext]
+            if ext_candidates:
+                return [ext_candidates[0][2]]
+
+        return [indexed_candidates[0][2]]
+
+    @classmethod
+    def collect_and_split_article_images(
+        cls,
+        article_id: str,
+        image_base_dir: str = "data/wechat/images",
+        cover_url: str = "",
+    ) -> tuple[List[str], List[str]]:
+        """收集并拆分文章图片为（封面图列表，正文图列表）。"""
+        local_images = cls.find_article_images(article_id, image_base_dir)
+        cover_images = cls.find_cover_images(article_id, image_base_dir)
+
+        if not cover_images and cover_url:
+            migrated_cover_images = cls._find_legacy_cover_images_from_links(
+                article_id=article_id,
+                cover_url=cover_url,
+                local_images=local_images,
+            )
+            if migrated_cover_images:
+                migrated_set = set(migrated_cover_images)
+                local_images = [path for path in local_images if path not in migrated_set]
+                cover_images = migrated_cover_images
+                logger.info(
+                    f"检测到历史未加 cover_ 的图片，已自动归档到封面字段: article_id={article_id}, count={len(cover_images)}"
+                )
+
+        return cover_images, local_images
 
     # ---------- 飞书表结构定义 ----------
 
@@ -646,6 +772,7 @@ class WeChatDataFormatter(XHSDataFormatter):
             {"field_name": "更新时间", "type": 1},             # 单行文本
             {"field_name": "来源关键词", "type": 1},           # 单行文本
             {"field_name": "爬取时间", "type": 1},             # 单行文本
+            {"field_name": "封面", "type": 17},                # 附件（封面图）
             {"field_name": "图片", "type": 17},                # 附件（本地图片上传）
         ]
 

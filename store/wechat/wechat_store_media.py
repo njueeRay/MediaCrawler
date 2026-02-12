@@ -4,6 +4,7 @@
 # 提供图片去重、路径管理、磁盘写入等能力，供 core.py 的 _download_article_images 调用
 
 import hashlib
+import html
 import os
 import re
 from pathlib import Path
@@ -23,18 +24,33 @@ def _sanitize_filename(name: str, max_length: int = 100) -> str:
     return name or "unnamed"
 
 
-def _build_image_filename(url: str, article_id: str, index: int) -> str:
+def _build_image_filename(url: str, article_id: str, index: int, is_cover: bool = False) -> str:
     """根据 URL 生成图片文件名"""
-    parsed = urlparse(url)
+    normalized_url = html.unescape((url or "").strip())
+    normalized_url = normalized_url.replace("\\x26", "&")
+
+    parsed = urlparse(normalized_url)
     path = parsed.path
     ext = os.path.splitext(path)[1].lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"):
+
+    allowed_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+    if ext not in allowed_exts:
         tp = parsed.query
         if "wx_fmt=" in tp:
             fmt = tp.split("wx_fmt=")[1].split("&")[0]
-            ext = f".{fmt}"
+            # 防止将诸如 "png\\x26amp;from=appmsg" 之类异常片段写入文件扩展名
+            fmt = html.unescape(fmt).replace("\\x26", "&")
+            fmt = re.split(r"[^a-zA-Z0-9]", fmt, maxsplit=1)[0].lower()
+            candidate = f".{fmt}" if fmt else ""
+            ext = candidate if candidate in allowed_exts else ".jpg"
         else:
             ext = ".jpg"
+
+    if ext not in allowed_exts:
+        ext = ".jpg"
+
+    if is_cover:
+        return f"cover_{article_id}_{index:03d}{ext}"
     return f"{article_id}_{index:03d}{ext}"
 
 
@@ -97,6 +113,7 @@ class WechatMediaStore:
         article_id: str,
         index: int,
         nickname: str = "",
+        is_cover: bool = False,
     ) -> Optional[str]:
         """
         保存一张图片到磁盘，支持去重
@@ -107,6 +124,7 @@ class WechatMediaStore:
             article_id: 文章 ID
             index: 图片在文章中的序号（从 1 开始）
             nickname: 公众号昵称
+            is_cover: 是否为封面图（True 时文件名将加 cover_ 前缀）
 
         Returns:
             保存路径（如果重复则返回 None）
@@ -123,7 +141,7 @@ class WechatMediaStore:
 
         # 构建路径
         save_dir = self.get_image_save_dir(nickname, article_id)
-        filename = _build_image_filename(url, article_id, index)
+        filename = _build_image_filename(url, article_id, index, is_cover=is_cover)
         filepath = os.path.join(save_dir, filename)
 
         # 检查文件是否已存在

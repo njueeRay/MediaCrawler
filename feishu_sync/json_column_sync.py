@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Set
 from .config import FeishuConfig
 from .data_formatter import XHSDataFormatter
 
-from read_from_feishu import FeishuReadConfig
+from .read_from_feishu import FeishuReadConfig
 
 if TYPE_CHECKING:
     from .sync_manager import FeishuSyncManager

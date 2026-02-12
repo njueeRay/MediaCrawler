@@ -77,7 +77,13 @@ WECHAT_RETRY_BASE_DELAY_SEC = _env_float("WECHAT_RETRY_BASE_DELAY_SEC", 2.0)
 WECHAT_CREATOR_ID_LIST: list[str] = [
     # "MzA3NzAyMzMyMA==",  # 铁路12306
     "Mzk0NDc0ODg4Ng==", # 杭州AI工坊
-    "MzkzNDg1Njc4OA=="  # NewEvent 新活儿
+    "MzkzNDg1Njc4OA==",  # NewEvent 新活儿
+    "MzU4Mjk1MTI2NA==", # OpenBuild
+    "MzUxMTkzNDM3Ng==", # HOH水分子
+    "MzYzMzA2MDM4NA==", # 去探索
+    "MzkyMDY5MTEyNA==", # SpakLab
+    "Mzg5MDg2ODkwNg==", # 深圳科创学院
+    "MzkzODkyMTU5Mg==", # Rebuild-Z
 ]
 
 # 外部创作者列表文件（JSON 格式，可选，非空时优先于 WECHAT_CREATOR_ID_LIST）
@@ -144,6 +150,14 @@ WECHAT_IMAGE_SAVE_DIR = _os.environ.get("WECHAT_IMAGE_SAVE_DIR", "wechat/images"
 
 # 文章内容保存目录（相对于 data/ 目录）
 WECHAT_CONTENT_SAVE_DIR = _os.environ.get("WECHAT_CONTENT_SAVE_DIR", "wechat/articles")
+
+# ==================== CSV 去重配置 ====================
+
+# CSV 写入时按 article_id 覆盖写
+WECHAT_CSV_DEDUP_ON_WRITE = _env_bool("WECHAT_CSV_DEDUP_ON_WRITE", True)
+
+# 爬取结束后对当天 CSV 再做一次去重兜底
+WECHAT_CSV_DEDUP_ON_FINISH = _env_bool("WECHAT_CSV_DEDUP_ON_FINISH", True)
 
 
 # ==================== 辅助函数（内部使用） ====================

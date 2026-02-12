@@ -10,6 +10,7 @@
 """
 
 import argparse
+import asyncio
 import csv
 import json
 import logging
@@ -19,6 +20,13 @@ from datetime import datetime
 from glob import glob
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
+
+from database.db_session import get_async_engine
+from database import models as db_models
 
 from feishu_sync.sync_manager import FeishuSyncManager
 from feishu_sync.data_formatter import XHSDataFormatter, WeChatDataFormatter
@@ -74,6 +82,66 @@ def load_csv(file_path: str) -> List[Dict]:
         for row in reader:
             data.append(row)
     logger.info(f"📄 加载CSV文件: {len(data)} 条记录 - {file_path}")
+    return data
+
+
+def _normalize_db_type(db_type: str) -> str:
+    if not db_type:
+        return ""
+    normalized = db_type.strip().lower()
+    if normalized == "mysql":
+        return "db"
+    return normalized
+
+
+def _row_to_dict(row) -> Dict:
+    if row is None:
+        return {}
+    data = {}
+    for key, value in vars(row).items():
+        if key.startswith("_sa_"):
+            continue
+        data[key] = value
+    return data
+
+
+async def _load_from_db(
+    platform: str,
+    data_type: str,
+    db_type: str,
+    limit: int = 0,
+    offset: int = 0,
+    since_id: int = 0,
+) -> List[Dict]:
+    engine = get_async_engine(db_type)
+    if not engine:
+        raise RuntimeError("数据库引擎不可用，请检查 SAVE_DATA_OPTION 或 --db-type")
+
+    AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    model = None
+    if platform == "wechat":
+        model = db_models.WechatArticle
+    elif platform == "xhs":
+        model = db_models.XhsNoteComment if data_type == "comment" else db_models.XhsNote
+    else:
+        raise ValueError(f"DB 同步暂不支持平台: {platform}")
+
+    async with AsyncSessionFactory() as session:
+        stmt = select(model)
+        if since_id > 0:
+            stmt = stmt.where(model.id > since_id)
+        stmt = stmt.order_by(model.id.desc())
+        if offset > 0:
+            stmt = stmt.offset(offset)
+        if limit > 0:
+            stmt = stmt.limit(limit)
+
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        data = [_row_to_dict(row) for row in rows]
+
+    logger.info(f"🗄️  从数据库加载 {len(data)} 条记录 (platform={platform}, type={data_type})")
     return data
 
 
@@ -214,7 +282,14 @@ def _build_append_records(
             if manager.platform == "wechat":
                 article_id = fields.get("文章ID")
                 if article_id:
-                    local_images = WeChatDataFormatter.find_article_images(str(article_id))
+                    cover_url = ""
+                    if isinstance(row, dict):
+                        cover_url = row.get("cover") or row.get("封面链接") or ""
+
+                    cover_images, local_images = WeChatDataFormatter.collect_and_split_article_images(
+                        article_id=str(article_id),
+                        cover_url=str(cover_url) if cover_url else "",
+                    )
                     items = []
                     for img_path in local_images:
                         if not os.path.isfile(img_path):
@@ -227,6 +302,20 @@ def _build_append_records(
                             logger.error(f"图片上传失败: {img_path} - {exc}")
                     if items:
                         fields["图片"] = items
+
+                    if "封面" in allowed_fields:
+                        cover_items = []
+                        for img_path in cover_images:
+                            if not os.path.isfile(img_path):
+                                continue
+                            try:
+                                token = manager.image_uploader.upload_image(img_path)
+                                if token:
+                                    cover_items.append({"file_token": token, "name": os.path.basename(img_path)})
+                            except Exception as exc:
+                                logger.error(f"封面上传失败: {img_path} - {exc}")
+                        if cover_items:
+                            fields["封面"] = cover_items
             else:
                 note_id = fields.get("笔记ID")
                 if note_id:
@@ -565,6 +654,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--file", help="同步单个 JSON/CSV 文件")
     group.add_argument("--dir", help="同步目录下的所有 JSON/CSV 文件")
+    group.add_argument("--db", action="store_true", help="从数据库读取数据同步")
 
     parser.add_argument("--pattern", default="*.json", help="文件匹配模式 (默认: *.json)")
     parser.add_argument("--batch-size", type=int, default=50, help="批量上传大小 (默认: 50)")
@@ -597,6 +687,13 @@ def main():
     parser.add_argument("--range-end", type=int, default=0, help="上传范围结束（包含该条）")
     parser.add_argument("--platform", default="xhs", choices=["xhs", "wechat"],
                         help="数据平台（可选）；若与输入数据不一致会自动按数据字段切换")
+    parser.add_argument("--data-type", default="note", choices=["note", "comment", "article"],
+                        help="数据类型（DB 模式使用；xhs: note/comment, wechat: article）")
+    parser.add_argument("--db-type", default="", choices=["sqlite", "db", "mysql", "postgres"],
+                        help="数据库类型（默认读取 SAVE_DATA_OPTION）")
+    parser.add_argument("--db-limit", type=int, default=0, help="DB 读取条数限制（0 表示不限制）")
+    parser.add_argument("--db-offset", type=int, default=0, help="DB 读取偏移量")
+    parser.add_argument("--db-since-id", type=int, default=0, help="仅读取 id 大于该值的记录")
 
     args = parser.parse_args()
 
@@ -615,7 +712,43 @@ def main():
         json_columns = _parse_column_list_arg(args.json_columns) or None
         json_keep_columns = _parse_column_list_arg(args.json_keep_columns) or None
 
-        if args.file:
+        if args.db:
+            resolved_db_type = _normalize_db_type(
+                args.db_type or os.environ.get("SAVE_DATA_OPTION", "")
+            )
+            if not resolved_db_type:
+                raise RuntimeError("未指定数据库类型，请设置 SAVE_DATA_OPTION 或 --db-type")
+
+            db_data_type = args.data_type
+            if args.platform == "wechat":
+                db_data_type = "article"
+
+            raw_data = asyncio.run(
+                _load_from_db(
+                    platform=args.platform,
+                    data_type=db_data_type,
+                    db_type=resolved_db_type,
+                    limit=args.db_limit,
+                    offset=args.db_offset,
+                    since_id=args.db_since_id,
+                )
+            )
+
+            if not raw_data:
+                raise RuntimeError("数据库无可同步数据")
+
+            ensure_manager_platform(manager, args.platform)
+
+            if args.platform == "xhs":
+                manager.formatter.get_table_fields = lambda: XHSDataFormatter.get_table_fields(db_data_type)
+            else:
+                manager.formatter.get_table_fields = lambda: WeChatDataFormatter.get_table_fields("article")
+
+            FeishuConfig.BATCH_SIZE = args.batch_size
+            result = manager.sync_data(raw_data)
+            if result.get("success", 0) == 0:
+                raise RuntimeError(f"同步失败: {result}")
+        elif args.file:
             result = sync_file(
                 manager,
                 args.file,
