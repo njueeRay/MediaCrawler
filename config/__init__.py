@@ -27,3 +27,34 @@ except ImportError:
 
 from .base_config import *
 from .db_config import *
+
+
+def reload_from_env():
+    """重新从 .env 和 os.environ 加载配置到 config 模块。
+    WebUI 修改 .env 后调用此函数使改动立即生效。
+    """
+    import importlib
+    import config as _config_mod
+
+    # 1. 重新加载 .env 到 os.environ (override=True 覆盖已有值)
+    try:
+        from dotenv import load_dotenv as _ld
+        _ld(override=True)
+    except ImportError:
+        pass
+
+    # 2. 重新加载 base_config (会重新执行 _env() 读取 os.environ)
+    from config import base_config as _base
+    importlib.reload(_base)
+
+    # 3. 重新加载 db_config (已经使用 os.getenv)
+    from config import db_config as _db
+    importlib.reload(_db)
+
+    # 4. 同步到 config 模块命名空间
+    for name in dir(_base):
+        if not name.startswith('_'):
+            setattr(_config_mod, name, getattr(_base, name))
+    for name in dir(_db):
+        if not name.startswith('_'):
+            setattr(_config_mod, name, getattr(_db, name))

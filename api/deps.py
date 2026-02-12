@@ -24,3 +24,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 detail="数据库未配置 (当前存储模式为 CSV/JSON, 请先在配置管理中切换到 DB)",
             )
         yield session
+
+
+async def get_db_optional() -> AsyncGenerator[Optional[AsyncSession], None]:
+    """
+    FastAPI 依赖：尝试获取 DB Session，不可用时返回 None 而非报错。
+    用于配置管理等不强制依赖 DB 的端点（变更历史仅在 DB 可用时记录）。
+    """
+    async with get_session() as session:
+        yield session  # None when CSV/JSON mode

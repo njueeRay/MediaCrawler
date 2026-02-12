@@ -83,6 +83,28 @@ const historyPageCount = ref(1)
 // Groups that support "test connection"
 const testableGroups = ['feishu', 'database', 'wechat']
 
+/** 将后端字符串值转为前端组件需要的类型 */
+function coerceValue(field: any, raw: string): any {
+  if (field.type === 'switch') {
+    if (raw === '' || raw === undefined || raw === null) return false
+    return ['true', '1', 'yes', 'on'].includes(String(raw).toLowerCase())
+  }
+  if (field.type === 'number') {
+    if (raw === '' || raw === undefined || raw === null) return null
+    const n = Number(raw)
+    return isNaN(n) ? null : n
+  }
+  return raw ?? ''
+}
+
+/** 将前端组件值转回字符串写入 .env */
+function serializeValue(field: any, val: any): string | null {
+  if (val === undefined || val === null) return null
+  if (field.type === 'switch') return val ? 'true' : 'false'
+  if (field.sensitive && val === '****') return null // 不覆盖敏感值
+  return String(val)
+}
+
 const historyColumns: DataTableColumn[] = [
   { title: '配置项', key: 'config_key' },
   { title: '旧值', key: 'old_value', width: 180, ellipsis: { tooltip: true } },
@@ -101,7 +123,7 @@ async function loadConfig() {
     configGroups.value = data.data?.groups || []
     for (const group of configGroups.value) {
       for (const field of group.fields) {
-        formValues.value[field.key] = field.value
+        formValues.value[field.key] = coerceValue(field, field.value)
       }
     }
     if (configGroups.value.length && !activeTab.value) {
@@ -118,9 +140,19 @@ async function saveConfig() {
   saving.value = true
   try {
     const configs: Record<string, string> = {}
+    // 构造 field lookup 以获取类型信息
+    const fieldMap: Record<string, any> = {}
+    for (const group of configGroups.value) {
+      for (const field of group.fields) {
+        fieldMap[field.key] = field
+      }
+    }
     for (const [key, value] of Object.entries(formValues.value)) {
-      if (value !== undefined && value !== null && value !== '****') {
-        configs[key] = String(value)
+      const field = fieldMap[key]
+      if (!field) continue
+      const serialized = serializeValue(field, value)
+      if (serialized !== null) {
+        configs[key] = serialized
       }
     }
     const { data } = await http.put('/config', { configs })

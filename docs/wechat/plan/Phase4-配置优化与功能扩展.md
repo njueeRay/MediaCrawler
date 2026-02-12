@@ -1,7 +1,9 @@
 # Phase 4 — 配置优化与功能扩展设计文档
 
-> 创建日期：2026-02-09
-> 状态：实施中
+> 创建日期：2026-02-09  
+> 状态：已完成（后续在 Phase 5 中进一步精简模型）
+
+> **⚠️ 注意**：本文档为原始设计文档，保留以记录设计过程。实际实现中，WechatArticle 模型已在 Phase 5 精简为 15 列（移除了 appmsgid、itemidx、content_format、content_length、is_pay_subscribe、copyright_type、last_modify_ts、raw create_time/update_time 等冗余字段），并新增了 content（完整内容）和 cover（封面图）字段。详见 `docs/wechat/plan/todo.md` 的变更日志。
 
 ---
 

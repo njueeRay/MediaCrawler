@@ -186,3 +186,45 @@
 - [x] `vite build` — 生产构建成功 (19.98s, 15 个 chunk)
 
 ---
+
+## 2026-02-12 — Phase 4: 配置系统修复 + E2E 集成测试
+
+### 配置系统根本性修复 ✅
+
+**根因诊断：**
+1. `base_config.py` ~30 个变量全部硬编码为字面量，不读取 `os.getenv()`，导致 `.env` 修改无效
+2. `PUT /api/config` 使用 `Depends(get_db)` — 在 CSV/JSON 模式下直接返回 400，形成**死循环**：用户无法通过 WebUI 切换到 DB 模式，因为保存配置本身就需要 DB
+3. ConfigManager.vue 中 switch/number 类型字段未做类型转换，后端返回字符串值但前端组件期望 boolean/number
+
+**修复清单：**
+
+- [x] `config/base_config.py` — 新增 `_env()` 辅助函数，全部 ~30 个变量改用 `_env("VAR", default, type_fn)` 从 `os.getenv()` 读取
+- [x] `config/__init__.py` — 新增 `reload_from_env()` 热重载函数，通过 `importlib.reload()` 重载 base_config + db_config 并同步到 config 命名空间
+- [x] `api/deps.py` — 新增 `get_db_optional()` 依赖，不可用时返回 None 而非 400
+- [x] `api/routers/config.py` — `PUT /config` 和 `GET /config/history` 改用 `get_db_optional`，打破 CSV→DB 切换的死循环
+- [x] `api/services/config_service.py` — 新增 `_hot_reload_config()` + `_auto_init_db()`，扩展 CONFIG_GROUPS 至 6 组 ~35 个字段
+- [x] `webui-src/src/views/ConfigManager.vue` — 新增 `coerceValue()` / `serializeValue()` 类型转换函数，修复 switch 和 number 字段的双向绑定
+- [x] `webui-src/src/components/common/DbRequiredAlert.vue` — 提示文案更新（无需重启服务）
+
+### .env.example 重写 ✅
+
+- 覆盖全部 65+ 个环境变量，分 10 个配置组，含详细注释
+- 删除旧版仅含飞书配置的 .env.example
+
+### E2E 集成测试 ✅
+
+- 新增 `test/test_e2e_config.py` — 25 个测试用例覆盖完整生命周期：
+  - Phase A (CSV 模式): config groups / subscribe 400 / scheduler 400 / **PUT config 在 CSV 模式下可用** / config history 200 / dashboard / data files
+  - Phase B (切换 SQLite): PUT config → db_switched=true
+  - Phase C (SQLite 模式): subscribe CRUD / scheduler CRUD / mapping schemes / feishu status / config test / config history with DB
+  - Phase D (切换回 CSV): 验证 DB 端点恢复 400
+- **结果: 25/25 passed**
+
+### 验证
+
+- [x] Python AST 语法检查 — 5 个后端文件全部通过
+- [x] `vue-tsc --noEmit` — TypeScript 类型检查通过
+- [x] `vite build` — 生产构建成功 (43s, 15 个 chunk)
+- [x] E2E 集成测试 — 25/25 通过
+
+---

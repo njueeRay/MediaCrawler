@@ -3,7 +3,7 @@
     当前存储模式为 CSV/JSON，此页面的功能需要数据库支持。
     请前往
     <n-button text type="primary" size="small" @click="router.push({ name: 'ConfigManager' })">配置管理</n-button>
-    页面，将存储模式切换到 DB (SQLite / MySQL / PostgreSQL)，然后重启服务。
+    页面，将存储模式切换到 DB (SQLite / MySQL / PostgreSQL) 并保存，然后刷新本页面。
   </n-alert>
 </template>
 

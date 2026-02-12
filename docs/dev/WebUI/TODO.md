@@ -79,10 +79,22 @@
 - [x] 3.8 构建验证 (Python AST + vue-tsc + vite build)
 - [x] 3.9 DEVLOG/TODO 文档更新
 
-## Phase 4: 待办 (后续推进)
-- [ ] 4.1 Dashboard 更多图表（时间趋势、采集频率折线图）
-- [ ] 4.2 生产部署文档 / README 更新
-- [ ] 4.3 E2E 测试 / API 集成测试 (pytest)
-- [ ] 4.4 小红书/抖音/快手搜索支持（需 cookie/浏览器会话）
-- [ ] 4.5 订阅触发采集 (`POST /subscribe/{id}/crawl`) 对接 CrawlerManager
-- [ ] 4.6 字段映射预览功能实现
+## Phase 4: 配置系统修复 + E2E 测试 ✅
+
+- [x] 4.0 诊断 WebUI 配置切换死循环 (PUT /config 依赖 get_db 在 CSV 模式返回 400)
+- [x] 4.1 base_config.py 全量 _env() 环境变量支持
+- [x] 4.2 config/__init__.py reload_from_env() 热重载
+- [x] 4.3 api/deps.py get_db_optional 依赖 (无 DB 时返回 None)
+- [x] 4.4 api/routers/config.py PUT/history 改用 get_db_optional
+- [x] 4.5 ConfigManager.vue switch/number 类型转换修复
+- [x] 4.6 .env.example 重写 (65+ 环境变量, 10 配置组)
+- [x] 4.7 test/test_e2e_config.py E2E 集成测试 (25/25 passed)
+- [x] 4.8 构建验证 (Python AST + vue-tsc + vite build)
+- [x] 4.9 DEVLOG/TODO 文档更新
+
+## Phase 5: 待办 (后续推进)
+- [ ] 5.1 Dashboard 更多图表（时间趋势、采集频率折线图）
+- [ ] 5.2 生产部署文档 / README 更新
+- [ ] 5.3 小红书/抖音/快手搜索支持（需 cookie/浏览器会话）
+- [ ] 5.4 订阅触发采集 (`POST /subscribe/{id}/crawl`) 对接 CrawlerManager
+- [ ] 5.5 字段映射预览功能实现

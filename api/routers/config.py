@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_db
+from api.deps import get_db, get_db_optional
 from api.schemas.common import ok, fail, page_ok
 from api.services.config_service import config_service
 
@@ -23,16 +23,24 @@ async def get_config_groups():
 @router.put("")
 async def update_configs(
     body: dict,
-    session: AsyncSession = Depends(get_db),
+    session: Optional[AsyncSession] = Depends(get_db_optional),
 ):
-    """批量更新配置项"""
+    """批量更新配置项（不依赖 DB，CSV/JSON 模式下跳过变更历史记录）"""
     configs = body.get("configs", {})
     if not configs:
         return fail(400, "未提供任何配置项")
     updated = await config_service.update_configs(configs, session)
+
+    # 判断是否涉及数据库切换
+    db_switched = "SAVE_DATA_OPTION" in updated
+    import config as _cfg
+    msg = f"配置已更新，共修改 {len(updated)} 项"
+    if db_switched:
+        msg += f" (存储已切换为 {_cfg.SAVE_DATA_OPTION}，表已自动创建)"
+
     return ok(
-        {"updated": updated, "reload_required": False},
-        message=f"配置已更新，共修改 {len(updated)} 项",
+        {"updated": updated, "reload_required": False, "db_switched": db_switched},
+        message=msg,
     )
 
 
@@ -85,9 +93,11 @@ async def test_connection(body: dict):
 async def get_config_history(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    session: AsyncSession = Depends(get_db),
+    session: Optional[AsyncSession] = Depends(get_db_optional),
 ):
     """获取配置变更历史"""
+    if session is None:
+        return page_ok([], 0, page, size)
     items, total = await config_service.get_history(session, page, size)
     rows = [
         {
