@@ -124,6 +124,15 @@ FONT_PATH = _env("FONT_PATH", "./docs/STZHONGS.TTF")
 # 爬取间隔时间
 CRAWLER_MAX_SLEEP_SEC = _env("CRAWLER_MAX_SLEEP_SEC", 2, int)
 
+# 平台 Cookie（可通过 WebUI 配置）
+XHS_COOKIES = _env("XHS_COOKIES", "")
+DY_COOKIES = _env("DY_COOKIES", "")
+BILI_COOKIES = _env("BILI_COOKIES", "")
+WB_COOKIES = _env("WB_COOKIES", "")
+KS_COOKIES = _env("KS_COOKIES", "")
+TIEBA_COOKIES = _env("TIEBA_COOKIES", "")
+ZHIHU_COOKIES = _env("ZHIHU_COOKIES", "")
+
 from .bilibili_config import *
 from .xhs_config import *
 from .dy_config import *
@@ -132,3 +141,4 @@ from .weibo_config import *
 from .tieba_config import *
 from .zhihu_config import *
 from .wechat_config import *
+from .feishu_config import *

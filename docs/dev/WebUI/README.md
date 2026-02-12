@@ -2,7 +2,7 @@
 
 > 项目: MediaCrawler 统一 Web 控制台
 > 日期: 2026-02-12
-> 状态: **Phase 4 完成** — 配置系统修复 + E2E 集成测试通过
+> 状态: **Phase 5 进行中** — 订阅闭环推进 + WS/DB 回归补强
 
 ---
 
@@ -60,6 +60,7 @@ Phase 1 (5d)   ████████ ✅              前端-后端全面对�
 Phase 2 (5d)   ████████ ✅              增强与完善
 Phase 3        ████████ ✅              创作者搜索 + WS进度
 Phase 4        ████████ ✅              配置系统修复 + E2E测试
+Phase 5        ████████ 🚧              订阅闭环 + DB数据可视化 + 回归补强
 ```
 
 ---
@@ -81,6 +82,18 @@ uv run uvicorn api.main:app --port 8080
 cd webui-src
 yarn install
 yarn dev   # -> http://localhost:3000 (代理 API 到 8080)
+
+---
+
+## 回归入口（推荐）
+
+服务启动后（默认 8080）：
+
+```bash
+uv run python test/test_webui_smoke_suite.py
+uv run python test/test_ws_logs_smoke.py
+uv run python test/test_db_browse_e2e.py
+```
 ```
 
 ---

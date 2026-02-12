@@ -228,3 +228,104 @@ async def get_data_stats():
                 continue
 
     return stats
+
+
+# -------------------- DB data browsing (sqlite/db/postgres) --------------------
+
+
+def _is_db_mode(save_option: str) -> bool:
+    return save_option in ("sqlite", "db", "postgres")
+
+
+@router.get("/db/tables")
+async def list_db_tables(platform: Optional[str] = None):
+    """列出数据库表及记录数（仅在 DB 模式可用）。"""
+    import config
+    if not _is_db_mode(getattr(config, "SAVE_DATA_OPTION", "csv")):
+        raise HTTPException(status_code=400, detail="数据库未配置")
+
+    from sqlalchemy import select, func
+    from database.db_session import get_session
+    from database.models import Base
+    import database.webui_models  # noqa: F401
+
+    tables = Base.metadata.tables
+
+    # 默认仅返回主要内容表，避免 WebUI 表干扰
+    platform_to_table = {
+        "xhs": "xhs_note",
+        "dy": "douyin_aweme",
+        "ks": "kuaishou_video",
+        "bili": "bilibili_video",
+        "wb": "weibo_note",
+        "tieba": "tieba_note",
+        "zhihu": "zhihu_content",
+        "wechat": "wechat_article",
+    }
+
+    selected = []
+    if platform:
+        tname = platform_to_table.get(platform)
+        if tname:
+            selected = [tname]
+    if not selected:
+        selected = list(platform_to_table.values())
+
+    result = []
+    async with get_session() as session:
+        if session is None:
+            raise HTTPException(status_code=400, detail="数据库未配置")
+
+        for tname in selected:
+            table = tables.get(tname)
+            if table is None:
+                continue
+            try:
+                total = (await session.execute(select(func.count()).select_from(table))).scalar() or 0
+            except Exception:
+                total = 0
+            result.append({"table": tname, "count": total})
+
+    return {"code": 0, "data": {"items": result}}
+
+
+@router.get("/db/records")
+async def get_db_records(table: str, limit: int = 100, offset: int = 0):
+    """读取指定表的记录预览（仅在 DB 模式可用）。"""
+    import config
+    if not _is_db_mode(getattr(config, "SAVE_DATA_OPTION", "csv")):
+        raise HTTPException(status_code=400, detail="数据库未配置")
+
+    if not table or not table.replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="invalid table")
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+
+    from sqlalchemy import select
+    from database.db_session import get_session
+    from database.models import Base
+    import database.webui_models  # noqa: F401
+
+    tbl = Base.metadata.tables.get(table)
+    if tbl is None:
+        raise HTTPException(status_code=404, detail="table not found")
+
+    async with get_session() as session:
+        if session is None:
+            raise HTTPException(status_code=400, detail="数据库未配置")
+        rows = (await session.execute(select(tbl).offset(offset).limit(limit))).mappings().all()
+        records = [dict(r) for r in rows]
+        return {"code": 0, "data": {"records": records, "table": table, "limit": limit, "offset": offset}}
+
+
+@router.get("/db/stats")
+async def get_db_stats():
+    """数据库数据概览（仅在 DB 模式可用）。"""
+    import config
+    if not _is_db_mode(getattr(config, "SAVE_DATA_OPTION", "csv")):
+        raise HTTPException(status_code=400, detail="数据库未配置")
+
+    items = (await list_db_tables())
+    rows = items.get("data", {}).get("items", [])
+    total = sum((r.get("count") or 0) for r in rows)
+    return {"code": 0, "data": {"total_records": total, "by_table": rows}}

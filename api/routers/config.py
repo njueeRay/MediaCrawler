@@ -6,9 +6,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_db, get_db_optional
+from api.deps import get_db_optional
 from api.schemas.common import ok, fail, page_ok
 from api.services.config_service import config_service
+from config.config_meta import CONFIG_GROUPS
 
 router = APIRouter(prefix="/config", tags=["配置管理"])
 
@@ -18,6 +19,44 @@ async def get_config_groups():
     """获取所有配置分组及其配置项（敏感值脱敏）"""
     groups = config_service.get_all_groups()
     return ok({"groups": groups})
+
+
+@router.get("/validate")
+async def validate_config():
+    """配置自检：返回缺失必填项与常见模式依赖项。"""
+    env = config_service._read_env_file()
+
+    required_keys = []
+    for g in CONFIG_GROUPS:
+        for f in g["fields"]:
+            if f.get("required"):
+                required_keys.append(f["key"])
+
+    missing_required = [k for k in required_keys if not env.get(k)]
+
+    warnings = []
+    save_option = env.get("SAVE_DATA_OPTION", "csv")
+    if save_option in ("db", "mysql"):
+        for k in ("MYSQL_DB_HOST", "MYSQL_DB_USER", "MYSQL_DB_NAME"):
+            if not env.get(k):
+                warnings.append(f"MySQL 模式建议配置 {k}")
+    if save_option == "postgres":
+        for k in ("POSTGRES_DB_HOST", "POSTGRES_DB_USER", "POSTGRES_DB_NAME"):
+            if not env.get(k):
+                warnings.append(f"PostgreSQL 模式建议配置 {k}")
+
+    # 微信模式：search/creator 需要 auth-key
+    if env.get("PLATFORM") == "wechat":
+        if not env.get("WECHAT_API_BASE_URL"):
+            warnings.append("微信采集建议配置 WECHAT_API_BASE_URL")
+        if env.get("CRAWLER_TYPE") in ("search", "creator") and not env.get("WECHAT_AUTH_KEY"):
+            warnings.append("微信 search/creator 模式需要配置 WECHAT_AUTH_KEY")
+
+    return ok({
+        "missing_required": missing_required,
+        "warnings": warnings,
+        "save_data_option": save_option,
+    })
 
 
 @router.put("")
@@ -51,6 +90,11 @@ async def test_connection(body: dict):
     if conn_type == "feishu":
         from api.services.feishu_service import feishu_service
         result = await feishu_service.check_connection()
+        # 兼容历史 key: FEISHU_APP_TOKEN
+        if not result.get("has_bitable_token"):
+            env = config_service._read_env_file()
+            if env.get("FEISHU_APP_TOKEN"):
+                result["has_bitable_token"] = True
         return ok({"success": result.get("connected", False), **result})
 
     if conn_type == "database":
@@ -72,7 +116,7 @@ async def test_connection(body: dict):
             import httpx
             from api.services.config_service import config_service
             env = config_service._read_env_file()
-            url = env.get("WECHAT_ARTICLE_EXPORTER_URL", "")
+            url = env.get("WECHAT_API_BASE_URL", "")
             if not url:
                 return ok({"success": False, "error": "微信源 URL 未配置"})
             async with httpx.AsyncClient(timeout=10) as client:

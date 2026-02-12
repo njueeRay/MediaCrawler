@@ -79,6 +79,15 @@
     <n-card title="我的订阅" size="small">
       <template #header-extra>
         <n-space>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="!checkedRowKeys.length"
+            :loading="batchCrawling"
+            @click="batchTriggerCrawl"
+          >
+            批量采集({{ checkedRowKeys.length }})
+          </n-button>
           <n-select
             v-model:value="filterPlatform"
             :options="[{ label: '全部平台', value: '' }, ...platformOptions]"
@@ -93,6 +102,8 @@
         <n-data-table
           :columns="columns"
           :data="subscriptions"
+          :row-key="(row: any) => row.id"
+          v-model:checked-row-keys="checkedRowKeys"
           :pagination="pagination"
           :remote="true"
           @update:page="handlePageChange"
@@ -132,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted } from 'vue'
+import { ref, h, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import http, { isDbError } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
@@ -143,6 +154,11 @@ const searching = ref(false)
 const adding = ref(false)
 const showAdd = ref(false)
 const dbNotReady = ref(false)
+const batchCrawling = ref(false)
+
+const checkedRowKeys = ref<number[]>([])
+const crawlStatusMap = ref<Record<number, { status: string; message: string; updated_at: string }>>({})
+let crawlStatusTimer: any = null
 
 const searchPlatform = ref('bili')
 const searchKeyword = ref('')
@@ -179,12 +195,33 @@ const platformLabels: Record<string, string> = Object.fromEntries(
 
 const columns = [
   {
+    type: 'selection',
+    key: 'selection',
+    width: 50,
+  },
+  {
     title: '平台',
     key: 'platform',
     width: 80,
     render: (row: any) => h(NTag, { type: 'info', size: 'small' }, () => platformLabels[row.platform] || row.platform),
   },
   { title: '创作者', key: 'creator_name', ellipsis: { tooltip: true } },
+  {
+    title: '采集状态',
+    key: 'crawl_status',
+    width: 120,
+    render: (row: any) => {
+      const st = crawlStatusMap.value[row.id]
+      if (!st) return h('span', { class: 'text-xs text-gray-400' }, '—')
+      const typeMap: Record<string, any> = {
+        queued: 'warning',
+        running: 'info',
+        success: 'success',
+        failed: 'error',
+      }
+      return h(NTag, { size: 'small', type: typeMap[st.status] || 'default' }, () => st.status)
+    },
+  },
   { title: '内容数', key: 'content_count', width: 80 },
   {
     title: '状态',
@@ -220,11 +257,43 @@ async function loadSubscriptions() {
     const { data } = await http.get('/subscribe', { params })
     subscriptions.value = data.data?.items || []
     pagination.value.itemCount = data.data?.total || 0
+    // 每次加载列表后刷新一次状态
+    await loadCrawlStatuses()
   } catch (e: any) {
     if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadCrawlStatuses() {
+  const ids = subscriptions.value.map((s: any) => s.id).filter((x: any) => typeof x === 'number')
+  if (!ids.length) return
+  try {
+    const { data } = await http.get('/subscribe/crawl/status', { params: { ids: ids.join(',') } })
+    const items = data.data?.items || []
+    const next: any = { ...crawlStatusMap.value }
+    for (const it of items) {
+      next[it.sub_id] = { status: it.status, message: it.message, updated_at: it.updated_at }
+    }
+    crawlStatusMap.value = next
+  } catch {
+    // ignore
+  }
+}
+
+async function batchTriggerCrawl() {
+  if (!checkedRowKeys.value.length) return
+  batchCrawling.value = true
+  try {
+    const { data } = await http.post('/subscribe/crawl/batch', { ids: checkedRowKeys.value })
+    message.success(data.message || '已入队')
+    await loadCrawlStatuses()
+  } catch (e: any) {
+    message.error(e.message || '批量采集失败')
+  } finally {
+    batchCrawling.value = false
   }
 }
 
@@ -343,5 +412,17 @@ async function deleteSub(id: number) {
 onMounted(() => {
   loadSubscriptions()
   loadStats()
+
+  // 轮询采集队列状态（轻量）
+  crawlStatusTimer = setInterval(() => {
+    loadCrawlStatuses()
+  }, 2000)
+})
+
+onBeforeUnmount(() => {
+  if (crawlStatusTimer) {
+    clearInterval(crawlStatusTimer)
+    crawlStatusTimer = null
+  }
 })
 </script>

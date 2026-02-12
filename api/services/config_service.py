@@ -4,172 +4,25 @@
 修改配置后自动热重载 config 模块，切换数据库时自动建表。
 """
 
-import asyncio
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.config_meta import (
+    CONFIG_GROUPS,
+    get_group_key_by_field,
+    get_sensitive_keys,
+)
 from database.webui_models import ConfigHistory
 
 # Project .env path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = PROJECT_ROOT / ".env"
 
-# ---------- 配置分组定义 ----------
-
-CONFIG_GROUPS: List[dict] = [
-    {
-        "key": "feishu",
-        "label": "飞书配置",
-        "icon": "feishu",
-        "fields": [
-            {"key": "FEISHU_APP_ID", "label": "App ID", "type": "text", "required": True,
-             "help": "飞书开放平台应用 ID", "sensitive": False},
-            {"key": "FEISHU_APP_SECRET", "label": "App Secret", "type": "password", "required": True,
-             "help": "飞书开放平台应用密钥", "sensitive": True},
-            {"key": "FEISHU_BITABLE_APP_TOKEN", "label": "多维表格 App Token", "type": "text",
-             "help": "飞书多维表格 App Token"},
-            {"key": "FEISHU_BATCH_SIZE", "label": "批量写入条数", "type": "number",
-             "help": "每次写入飞书的记录数（默认 500）"},
-        ],
-    },
-    {
-        "key": "database",
-        "label": "数据库配置",
-        "icon": "database",
-        "fields": [
-            {"key": "SAVE_DATA_OPTION", "label": "存储方式", "type": "select",
-             "options": [
-                 {"value": "json", "label": "JSON 文件"},
-                 {"value": "csv", "label": "CSV 文件"},
-                 {"value": "excel", "label": "Excel 文件"},
-                 {"value": "sqlite", "label": "SQLite"},
-                 {"value": "db", "label": "MySQL"},
-                 {"value": "postgres", "label": "PostgreSQL"},
-             ],
-             "help": "数据持久化方式 (切换到 SQLite/MySQL/PostgreSQL 后会自动创建表)"},
-            {"key": "MYSQL_DB_HOST", "label": "MySQL 主机", "type": "text",
-             "help": "MySQL 服务器地址"},
-            {"key": "MYSQL_DB_PORT", "label": "MySQL 端口", "type": "number",
-             "help": "默认 3306"},
-            {"key": "MYSQL_DB_USER", "label": "MySQL 用户名", "type": "text"},
-            {"key": "MYSQL_DB_PWD", "label": "MySQL 密码", "type": "password", "sensitive": True},
-            {"key": "MYSQL_DB_NAME", "label": "MySQL 数据库名", "type": "text",
-             "help": "默认 media_crawler"},
-            {"key": "POSTGRES_DB_HOST", "label": "PostgreSQL 主机", "type": "text",
-             "help": "PostgreSQL 服务器地址"},
-            {"key": "POSTGRES_DB_PORT", "label": "PostgreSQL 端口", "type": "number",
-             "help": "默认 5432"},
-            {"key": "POSTGRES_DB_USER", "label": "PostgreSQL 用户名", "type": "text"},
-            {"key": "POSTGRES_DB_PWD", "label": "PostgreSQL 密码", "type": "password", "sensitive": True},
-            {"key": "POSTGRES_DB_NAME", "label": "PostgreSQL 数据库名", "type": "text",
-             "help": "默认 media_crawler"},
-        ],
-    },
-    {
-        "key": "crawler",
-        "label": "爬虫通用配置",
-        "icon": "spider",
-        "fields": [
-            {"key": "PLATFORM", "label": "目标平台", "type": "select",
-             "options": [
-                 {"value": "xhs", "label": "小红书"},
-                 {"value": "dy", "label": "抖音"},
-                 {"value": "bili", "label": "B站"},
-                 {"value": "wb", "label": "微博"},
-                 {"value": "ks", "label": "快手"},
-                 {"value": "tieba", "label": "贴吧"},
-                 {"value": "zhihu", "label": "知乎"},
-                 {"value": "wechat", "label": "微信"},
-             ],
-             "help": "当前要采集的平台"},
-            {"key": "CRAWLER_TYPE", "label": "采集方式", "type": "select",
-             "options": [
-                 {"value": "search", "label": "关键词搜索"},
-                 {"value": "detail", "label": "帖子详情"},
-                 {"value": "creator", "label": "创作者主页"},
-             ],
-             "help": "爬取类型"},
-            {"key": "KEYWORDS", "label": "搜索关键词", "type": "text",
-             "help": "以英文逗号分隔多个关键词"},
-            {"key": "CRAWLER_MAX_NOTES_COUNT", "label": "最大采集数", "type": "number",
-             "help": "单次采集最大笔记/视频数量"},
-            {"key": "MAX_CONCURRENCY_NUM", "label": "并发数", "type": "number",
-             "help": "并发爬虫数量"},
-            {"key": "CRAWLER_MAX_SLEEP_SEC", "label": "采集间隔(秒)", "type": "number",
-             "help": "每次请求间的休眠时间"},
-            {"key": "ENABLE_GET_COMMENTS", "label": "采集评论", "type": "switch",
-             "help": "是否开启评论采集"},
-            {"key": "ENABLE_GET_SUB_COMMENTS", "label": "采集子评论", "type": "switch",
-             "help": "是否开启子评论采集"},
-            {"key": "CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES", "label": "单帖最大评论数", "type": "number",
-             "help": "每个帖子采集的评论上限"},
-            {"key": "ENABLE_GET_MEIDAS", "label": "下载媒体", "type": "switch",
-             "help": "是否下载图片/视频资源"},
-            {"key": "ENABLE_IP_PROXY", "label": "启用 IP 代理", "type": "switch",
-             "help": "是否使用 IP 代理池"},
-            {"key": "IP_PROXY_PROVIDER_NAME", "label": "代理供应商", "type": "text",
-             "help": "代理服务商名称 (kuaidaili / wandouhttp)"},
-        ],
-    },
-    {
-        "key": "browser",
-        "label": "浏览器配置",
-        "icon": "browser",
-        "fields": [
-            {"key": "HEADLESS", "label": "无头模式", "type": "switch",
-             "help": "不显示浏览器窗口"},
-            {"key": "ENABLE_CDP_MODE", "label": "CDP 模式", "type": "switch",
-             "help": "使用用户已有的 Chrome/Edge 浏览器"},
-            {"key": "CDP_DEBUG_PORT", "label": "CDP 端口", "type": "number",
-             "help": "CDP 调试端口号"},
-            {"key": "CUSTOM_BROWSER_PATH", "label": "浏览器路径", "type": "text",
-             "help": "自定义浏览器可执行文件路径（留空自动检测）"},
-            {"key": "LOGIN_TYPE", "label": "登录方式", "type": "select",
-             "options": [
-                 {"value": "qrcode", "label": "扫码登录"},
-                 {"value": "phone", "label": "手机号登录"},
-                 {"value": "cookie", "label": "Cookie 登录"},
-             ],
-             "help": "平台登录方式"},
-            {"key": "SAVE_LOGIN_STATE", "label": "保存登录状态", "type": "switch",
-             "help": "下次启动时跳过登录"},
-        ],
-    },
-    {
-        "key": "wechat",
-        "label": "微信采集配置",
-        "icon": "wechat",
-        "fields": [
-            {"key": "WECHAT_ARTICLE_EXPORTER_URL", "label": "微信源 URL", "type": "text",
-             "help": "wechat-article-exporter 服务地址"},
-        ],
-    },
-    {
-        "key": "platform_cookies",
-        "label": "平台 Cookie",
-        "icon": "cookie",
-        "fields": [
-            {"key": "XHS_COOKIES", "label": "小红书 Cookie", "type": "password", "sensitive": True},
-            {"key": "DY_COOKIES", "label": "抖音 Cookie", "type": "password", "sensitive": True},
-            {"key": "BILI_COOKIES", "label": "B站 Cookie", "type": "password", "sensitive": True},
-            {"key": "WB_COOKIES", "label": "微博 Cookie", "type": "password", "sensitive": True},
-            {"key": "KS_COOKIES", "label": "快手 Cookie", "type": "password", "sensitive": True},
-            {"key": "TIEBA_COOKIES", "label": "贴吧 Cookie", "type": "password", "sensitive": True},
-            {"key": "ZHIHU_COOKIES", "label": "知乎 Cookie", "type": "password", "sensitive": True},
-        ],
-    },
-]
-
-# 所有敏感 key
-_SENSITIVE_KEYS = set()
-for _g in CONFIG_GROUPS:
-    for _f in _g["fields"]:
-        if _f.get("sensitive"):
-            _SENSITIVE_KEYS.add(_f["key"])
+# 所有敏感 key（来源于 config_meta）
+_SENSITIVE_KEYS = get_sensitive_keys()
 
 
 class ConfigService:
@@ -225,6 +78,8 @@ class ConfigService:
     def get_all_groups(self) -> List[dict]:
         """获取所有配置分组 (值脱敏)"""
         env = self._read_env_file()
+        if "FEISHU_BITABLE_APP_TOKEN" not in env and "FEISHU_APP_TOKEN" in env:
+            env["FEISHU_BITABLE_APP_TOKEN"] = env["FEISHU_APP_TOKEN"]
         groups = []
         for group in CONFIG_GROUPS:
             fields = []
@@ -241,6 +96,10 @@ class ConfigService:
         """批量更新配置并记录历史，然后热重载 config 模块。
         如果 SAVE_DATA_OPTION 切换到了数据库类型，自动创建表。"""
         env = self._read_env_file()
+        if "FEISHU_APP_TOKEN" in env and "FEISHU_BITABLE_APP_TOKEN" not in env:
+            env["FEISHU_BITABLE_APP_TOKEN"] = env["FEISHU_APP_TOKEN"]
+        if "FEISHU_APP_TOKEN" in configs and "FEISHU_BITABLE_APP_TOKEN" not in configs:
+            configs["FEISHU_BITABLE_APP_TOKEN"] = configs["FEISHU_APP_TOKEN"]
         updated: List[str] = []
 
         for key, new_value in configs.items():
@@ -319,11 +178,7 @@ class ConfigService:
 
     @staticmethod
     def _find_group(key: str) -> str:
-        for g in CONFIG_GROUPS:
-            for f in g["fields"]:
-                if f["key"] == key:
-                    return g["key"]
-        return "unknown"
+        return get_group_key_by_field(key)
 
 
 config_service = ConfigService()

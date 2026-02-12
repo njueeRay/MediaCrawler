@@ -14,8 +14,59 @@ from api.schemas.subscription import (
     SubscriptionUpdateRequest,
 )
 from api.services.subscription_service import subscription_service
+from api.services.subscription_crawl_manager import subscription_crawl_manager
 
 router = APIRouter(prefix="/subscribe", tags=["订阅管理"])
+
+
+@router.post("/crawl/batch")
+async def batch_trigger_crawl(body: dict, session: AsyncSession = Depends(get_db)):
+    """批量触发订阅采集（串行队列）。
+
+    body: {"ids": [1,2,3]}
+    """
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not all(isinstance(x, int) for x in ids):
+        return fail(400, "ids 必须是 int 数组")
+    if not ids:
+        return fail(400, "未提供任何订阅 id")
+
+    # 校验订阅存在（避免队列中混入无效 id）
+    valid_ids = []
+    missing = []
+    for sub_id in ids:
+        sub = await subscription_service.get_by_id(session, sub_id)
+        if sub:
+            valid_ids.append(sub_id)
+        else:
+            missing.append(sub_id)
+
+    if not valid_ids:
+        return fail(404, "订阅不存在")
+
+    result = await subscription_crawl_manager.enqueue(valid_ids)
+    return ok({**result, "missing": missing}, message=f"已入队 {len(result['queued'])} 个订阅")
+
+
+@router.get("/crawl/status")
+async def get_crawl_status(
+    ids: Optional[str] = None,
+    session: AsyncSession = Depends(get_db),
+):
+    """获取订阅采集队列状态。
+
+    可选参数 ids=1,2,3 仅返回指定订阅。
+    session 参数仅用于保持该端点与订阅功能一致的 DB 依赖（不直接使用）。
+    """
+    sub_ids: Optional[list[int]] = None
+    if ids:
+        try:
+            sub_ids = [int(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            return fail(400, "ids 参数格式错误，应为逗号分隔整数")
+
+    status = subscription_crawl_manager.get_status(sub_ids)
+    return ok(status)
 
 
 @router.post("/search")

@@ -2,6 +2,7 @@
 
 > 记录 WebUI 系统从设计到实现的全过程
 
+
 ---
 
 ## 2026-02-11 — Phase 0: 基础设施搭建
@@ -226,5 +227,161 @@
 - [x] `vue-tsc --noEmit` — TypeScript 类型检查通过
 - [x] `vite build` — 生产构建成功 (43s, 15 个 chunk)
 - [x] E2E 集成测试 — 25/25 通过
+
+---
+
+## 2026-02-12 — Phase 5 (P0 第一轮): 订阅运行阻塞修复 + 配置对齐
+
+### 订阅“真运行”硬阻塞修复 ✅
+
+- `api/schemas/crawler.py`
+  - `PlatformEnum` 新增 `WECHAT = "wechat"`
+  - `SaveDataOptionEnum` 新增 `POSTGRES = "postgres"`
+- 影响：修复订阅管理 / 调度传入 `platform=wechat` 时的 schema 校验阻塞，避免触发采集直接失败。
+
+### 配置变量首轮对齐 ✅
+
+- `api/services/config_service.py`
+  - 飞书 token 主键从 `FEISHU_APP_TOKEN` 对齐为 `FEISHU_BITABLE_APP_TOKEN`
+  - 新增 `FEISHU_TABLE_ID` 配置项
+  - 微信分组补齐细粒度配置项：
+    - `WECHAT_AUTH_KEY`
+    - `WECHAT_APP_SECRET`
+    - `WECHAT_CREATOR_LIST_FILE`
+    - `WECHAT_MAX_RETRY_COUNT`
+    - `WECHAT_RETRY_BASE_DELAY_SEC`
+    - `WECHAT_MAX_ARTICLES_PER_CREATOR`
+    - `WECHAT_REQUEST_INTERVAL_SEC`
+    - `WECHAT_ARTICLE_DATE_START` / `WECHAT_ARTICLE_DATE_END`
+    - `WECHAT_CRAWL_TAG`
+    - `WECHAT_SKIP_PAYWALL_ARTICLES`
+    - `WECHAT_DOWNLOAD_FORMAT`
+    - `WECHAT_DOWNLOAD_IMAGES`
+    - `WECHAT_ALLOWED_IMAGE_FORMATS`
+    - `WECHAT_IMAGE_DOWNLOAD_CONCURRENCY`
+    - `WECHAT_IMAGE_SAVE_DIR` / `WECHAT_CONTENT_SAVE_DIR`
+  - 增加飞书历史键兼容逻辑：`FEISHU_APP_TOKEN` → `FEISHU_BITABLE_APP_TOKEN`
+
+- `api/routers/config.py`
+  - 移除未使用依赖导入：`get_db`
+  - `POST /config/test` 飞书检测增加历史 key 兼容逻辑
+
+### 微信配置可热更新改造 ✅
+
+- `config/wechat_config.py`
+  - 新增 `_env_bool/_env_int/_env_float` 辅助函数
+  - 原硬编码参数改为环境变量驱动：
+    - `WECHAT_MAX_RETRY_COUNT`
+    - `WECHAT_RETRY_BASE_DELAY_SEC`
+    - `WECHAT_MAX_ARTICLES_PER_CREATOR`
+    - `WECHAT_REQUEST_INTERVAL_SEC`
+    - `WECHAT_SKIP_PAYWALL_ARTICLES`
+    - `WECHAT_DOWNLOAD_FORMAT`
+    - `WECHAT_DOWNLOAD_IMAGES`
+    - `WECHAT_IMAGE_DOWNLOAD_CONCURRENCY`
+    - `WECHAT_IMAGE_SAVE_DIR`
+    - `WECHAT_CONTENT_SAVE_DIR`
+  - 新增 `WECHAT_APP_SECRET`（预留字段，便于 WebUI 对齐）
+
+### `.env.example` 同步更新 ✅
+
+- 飞书：`FEISHU_BITABLE_APP_TOKEN` 作为主键，保留 `FEISHU_APP_TOKEN` 兼容注释
+- 新增 `FEISHU_TABLE_ID`
+- 微信：补齐并启用全部细粒度配置示例（含 `WECHAT_AUTH_KEY`、`WECHAT_APP_SECRET` 等）
+
+### 状态
+
+- 已完成：P0 第一轮（核心阻塞修复 + 变量对齐 + 示例配置补齐）
+- 待推进：订阅维度任务模板、批量触发与执行可视化、配置元数据中心化（`config_meta.py`）
+
+---
+
+## 2026-02-12 — Phase 5 (P0 第二轮): 配置单一真源 + 最小 E2E
+
+### 配置单一真源落地 ✅
+
+- 新增 `config/config_meta.py`
+  - 承载 WebUI 全量配置分组与字段元数据
+  - 提供 `get_sensitive_keys()` / `get_all_config_keys()` / `get_group_key_by_field()`
+- `api/services/config_service.py`
+  - 移除内嵌大段 `CONFIG_GROUPS` 定义
+  - 改为从 `config_meta` 读取配置元数据
+  - `_find_group()` 改为调用 `get_group_key_by_field()`
+
+### 自动化校验与回归脚本 ✅
+
+- 新增 `test/test_config_consistency.py`
+  - 校验 `config_meta` 与 `config/*.py` 消费键一致
+  - 校验 `config_meta` 与 `.env.example` 键覆盖一致
+- 新增 `test/test_subscription_wechat_e2e.py`
+  - 最小端到端验证：微信订阅触发采集不再返回 422（schema 拒绝）
+
+### 当前效果
+
+- 配置新增/调整入口从“散落多文件”收敛到 `config_meta` + `base_config` 双点维护
+- 为后续接入 CI 提供可执行的一致性门禁脚本
+
+### 验证
+
+- [x] `uv run python test/test_config_consistency.py` 通过
+- [x] `uv run python test/test_subscription_wechat_e2e.py` 通过（微信订阅触发采集 status=200）
+
+---
+
+## 2026-02-12 — Phase 5 (P0 第三轮): 批量采集 + 状态可视化 + 配置自检
+
+### 订阅批量采集（队列）✅
+
+- 新增 `api/services/subscription_crawl_manager.py`
+  - 内存队列：按订阅 ID 串行触发（适配单实例 CrawlerManager）
+  - 状态：queued/running/success/failed（用于 WebUI 展示）
+- `api/routers/subscription.py`
+  - `POST /subscribe/crawl/batch` 批量入队
+  - `GET /subscribe/crawl/status` 查询状态
+
+### WebUI 状态可视化 ✅
+
+- `webui-src/src/views/Subscription.vue`
+  - DataTable 增加 selection 勾选
+  - 增加“批量采集”按钮
+  - 增加“采集状态”列 + 2s 轮询状态接口（卸载时清理 timer）
+
+### 配置自检接口 ✅
+
+- `api/routers/config.py`
+  - 新增 `GET /config/validate`：缺失必填项 + 存储模式依赖项 + 微信模式提示
+
+### 最小回归脚本 ✅
+
+- 新增 `test/test_subscription_batch_crawl_e2e.py`：验证批量入队/状态查询/validate
+
+---
+
+## 2026-02-12 — Phase 5 (P1): 全面回归补强（WS + DB 数据可视化）
+
+### 开发模式 WS 日志回归 ✅
+
+- `webui-src/vite.config.ts`
+  - `/api` proxy 增加 `ws: true`，确保开发模式下 WebSocket `/api/ws/logs` 可用
+- 新增 `test/test_ws_logs_smoke.py`
+  - 验证：连接 `/api/ws/logs` 后 `ping → pong`
+
+### 一键 smoke 套件 ✅
+
+- 新增 `test/test_webui_smoke_suite.py`
+  - 一键检查关键 HTTP/WS 端点，并按 `save_data_option` 自动断言 DB/CSV 分支行为
+
+### DB 模式数据浏览闭环 ✅
+
+- `api/routers/data.py`
+  - 新增 DB 浏览端点：
+    - `GET /api/data/db/tables`
+    - `GET /api/data/db/records`
+    - `GET /api/data/db/stats`
+- `webui-src/src/views/DataExplorer.vue`
+  - 通过 `GET /api/config/validate` 识别 `SAVE_DATA_OPTION`
+  - DB 模式下展示“表列表 + 记录数 + 预览记录”
+- 新增 `test/test_db_browse_e2e.py`
+  - 验证：CSV 模式 DB 端点返回 400；切到 sqlite 后 tables/records 200
 
 ---

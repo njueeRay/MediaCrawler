@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.webui_models import ScheduledTask, TaskExecution
+from database.webui_models import ScheduledTask, TaskExecution, Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,25 @@ def _get_scheduler():
 
 class SchedulerService:
     """任务调度管理"""
+
+    @staticmethod
+    async def _wait_crawler_done(timeout_seconds: int = 1800) -> None:
+        """等待 CrawlerManager 结束（单任务串行），超时抛错。"""
+        from api.services.crawler_manager import crawler_manager
+
+        for _ in range(max(1, int(timeout_seconds))):
+            await asyncio.sleep(1)
+            s = crawler_manager.get_status()
+            if s.get("status") != "running":
+                return
+        raise TimeoutError(f"爬虫执行超时（>{timeout_seconds}s）")
+
+    @staticmethod
+    def _parse_csv_ids(value: str) -> list[str]:
+        if not value:
+            return []
+        parts = [p.strip() for p in str(value).split(",")]
+        return [p for p in parts if p]
 
     # ------ Task CRUD ------
 
@@ -248,8 +267,76 @@ class SchedulerService:
         start_time = datetime.now()
         status = "success"
         error_message = None
+        result_summary: Dict = {}
 
         try:
+            if task_type in ("subscription_crawl", "subscription_combo"):
+                if not platform:
+                    raise ValueError("subscription_* 任务必须指定 platform")
+
+                from database.db_session import get_session
+                from api.services.crawler_manager import crawler_manager
+                from api.schemas import CrawlerStartRequest
+
+                only_creator_ids = set(SchedulerService._parse_csv_ids(task_config.get("only_creator_ids", "")))
+                limit = int(task_config.get("limit", 0) or 0)
+                timeout_seconds = int(task_config.get("timeout_seconds", 1800) or 1800)
+
+                async with get_session() as session:
+                    if not session:
+                        raise RuntimeError("数据库不可用")
+
+                    q = select(Subscription).where(
+                        Subscription.platform == platform,
+                        Subscription.is_active == True,  # noqa: E712
+                        Subscription.auto_crawl == True,  # noqa: E712
+                    ).order_by(Subscription.updated_at.desc())
+                    subs = (await session.execute(q)).scalars().all()
+
+                    if only_creator_ids:
+                        subs = [s for s in subs if s.creator_id in only_creator_ids]
+                    if limit and limit > 0:
+                        subs = subs[:limit]
+
+                    crawled = 0
+                    skipped_running = 0
+                    for sub in subs:
+                        # 避免并发：已有爬虫运行则失败/跳过
+                        crawler_status = crawler_manager.get_status()
+                        if crawler_status.get("status") == "running":
+                            skipped_running += 1
+                            raise RuntimeError("另一个爬虫任务正在运行")
+
+                        crawl_config = dict(task_config.get("crawl_config") or {})
+                        if sub.crawl_config:
+                            crawl_config.update(sub.crawl_config)
+
+                        start_request = CrawlerStartRequest(
+                            platform=sub.platform,
+                            login_type=crawl_config.get("login_type", "cookie"),
+                            crawler_type="creator",
+                            creator_ids=sub.creator_id,
+                            save_option=crawl_config.get("save_option", "json"),
+                            headless=crawl_config.get("headless", True),
+                        )
+
+                        started = await crawler_manager.start(start_request)
+                        if not started:
+                            raise RuntimeError(f"爬虫启动失败: {sub.creator_name}({sub.creator_id})")
+
+                        await SchedulerService._wait_crawler_done(timeout_seconds=timeout_seconds)
+
+                        sub.last_crawled_at = datetime.now()
+                        await session.flush()
+                        await session.commit()
+                        crawled += 1
+
+                    result_summary.update({
+                        "subscription_total": len(subs),
+                        "subscription_crawled": crawled,
+                        "subscription_skipped_running": skipped_running,
+                    })
+
             if task_type in ("crawl", "combo"):
                 # 调用 CrawlerManager
                 from api.services.crawler_manager import crawler_manager
@@ -279,19 +366,29 @@ class SchedulerService:
                     if s.get("status") != "running":
                         break
 
-            if task_type in ("sync", "combo"):
+            if task_type in ("sync", "combo", "subscription_combo"):
                 # 调用飞书同步
                 from api.services.feishu_service import feishu_service
                 from database.db_session import get_session
 
                 async with get_session() as session:
                     if session:
-                        await feishu_service.start_sync(session, {
+                        data_type = task_config.get(
+                            "data_type",
+                            "article" if platform == "wechat" else "note",
+                        )
+                        history = await feishu_service.start_sync(session, {
                             "platform": platform,
-                            "data_type": task_config.get("data_type", "note"),
+                            "data_type": data_type,
                             "trigger_type": "scheduled",
+                            "task_execution_id": execution_id,
                         })
                         await session.commit()
+
+                        result_summary.update({
+                            "sync_history_id": getattr(history, "id", None),
+                            "sync_data_type": data_type,
+                        })
 
         except Exception as e:
             status = "failed"
@@ -312,6 +409,7 @@ class SchedulerService:
                         record.error_message = error_message
                         record.finished_at = datetime.now()
                         record.duration_seconds = round(duration, 1)
+                        record.result_summary = result_summary or {}
 
                     # 更新关联 task 的失败计数
                     if status == "failed" and record and record.task_id:

@@ -17,6 +17,33 @@
 import os as _os
 import json as _json
 
+
+def _env_bool(key: str, default: bool) -> bool:
+    val = _os.environ.get(key)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(key: str, default: int) -> int:
+    val = _os.environ.get(key)
+    if val is None or val == "":
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    val = _os.environ.get(key)
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
 # ==================== 服务连接配置 ====================
 
 # wechat-article-exporter 服务地址（必填）
@@ -29,13 +56,16 @@ WECHAT_API_BASE_URL = _os.environ.get("WECHAT_API_BASE_URL", "https://down.mptex
 # 或者调用 /api/public/v1/authkey 接口验证
 WECHAT_AUTH_KEY = _os.environ.get("WECHAT_AUTH_KEY", "3a7a1612d29f479ea2f3647a4640544e")
 
+# 预留微信扩展场景的 Secret（当前采集流程可为空）
+WECHAT_APP_SECRET = _os.environ.get("WECHAT_APP_SECRET", "")
+
 # ==================== 请求重试配置 ====================
 
 # 请求失败最大重试次数
-WECHAT_MAX_RETRY_COUNT = 3
+WECHAT_MAX_RETRY_COUNT = _env_int("WECHAT_MAX_RETRY_COUNT", 3)
 
 # 重试基础等待时间（秒），实际等待 = base * 2^(retry-1)
-WECHAT_RETRY_BASE_DELAY_SEC = 2.0
+WECHAT_RETRY_BASE_DELAY_SEC = _env_float("WECHAT_RETRY_BASE_DELAY_SEC", 2.0)
 
 # ==================== 爬取目标配置 ====================
 
@@ -64,10 +94,10 @@ WECHAT_SPECIFIED_ARTICLE_URL_LIST: list[str] = [
 # ==================== 爬取行为配置 ====================
 
 # 每个公众号最多爬取的文章数量（0 表示不限制）
-WECHAT_MAX_ARTICLES_PER_CREATOR = 10
+WECHAT_MAX_ARTICLES_PER_CREATOR = _env_int("WECHAT_MAX_ARTICLES_PER_CREATOR", 10)
 
 # API 请求间隔（秒），避免请求过快被限流
-WECHAT_REQUEST_INTERVAL_SEC = 3
+WECHAT_REQUEST_INTERVAL_SEC = _env_float("WECHAT_REQUEST_INTERVAL_SEC", 3.0)
 
 # ==================== 过滤配置 ====================
 
@@ -82,7 +112,7 @@ WECHAT_ARTICLE_DATE_END = _os.environ.get("WECHAT_ARTICLE_DATE_END", "")       #
 WECHAT_ARTICLE_KEYWORD_FILTER: list[str] = []
 
 # 是否跳过付费订阅文章
-WECHAT_SKIP_PAYWALL_ARTICLES = True
+WECHAT_SKIP_PAYWALL_ARTICLES = _env_bool("WECHAT_SKIP_PAYWALL_ARTICLES", True)
 
 # ==================== 爬取标签 ====================
 
@@ -94,10 +124,10 @@ WECHAT_CRAWL_TAG = _os.environ.get("WECHAT_CRAWL_TAG", "")
 # ==================== 内容下载配置 ====================
 
 # 文章内容下载格式: html / markdown / text / json
-WECHAT_DOWNLOAD_FORMAT = "markdown"
+WECHAT_DOWNLOAD_FORMAT = _os.environ.get("WECHAT_DOWNLOAD_FORMAT", "markdown")
 
 # 是否下载文章中的图片资源
-WECHAT_DOWNLOAD_IMAGES = True
+WECHAT_DOWNLOAD_IMAGES = _env_bool("WECHAT_DOWNLOAD_IMAGES", True)
 
 # 允许下载/保存的图片格式（小写；只保留这些格式的图片，其余忽略）
 # 支持环境变量覆盖，格式为逗号分隔: WECHAT_ALLOWED_IMAGE_FORMATS="jpg,jpeg,png,gif"
@@ -107,13 +137,13 @@ WECHAT_ALLOWED_IMAGE_FORMATS: set[str] = set(
 )
 
 # 图片下载并发数
-WECHAT_IMAGE_DOWNLOAD_CONCURRENCY = 3
+WECHAT_IMAGE_DOWNLOAD_CONCURRENCY = _env_int("WECHAT_IMAGE_DOWNLOAD_CONCURRENCY", 3)
 
 # 图片保存目录（相对于 data/ 目录）
-WECHAT_IMAGE_SAVE_DIR = "wechat/images"
+WECHAT_IMAGE_SAVE_DIR = _os.environ.get("WECHAT_IMAGE_SAVE_DIR", "wechat/images")
 
 # 文章内容保存目录（相对于 data/ 目录）
-WECHAT_CONTENT_SAVE_DIR = "wechat/articles"
+WECHAT_CONTENT_SAVE_DIR = _os.environ.get("WECHAT_CONTENT_SAVE_DIR", "wechat/articles")
 
 
 # ==================== 辅助函数（内部使用） ====================

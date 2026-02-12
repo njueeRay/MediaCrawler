@@ -93,6 +93,7 @@ class FeishuService:
             mapping_scheme_id=request.get("mapping_scheme_id"),
             mapping_scheme_name=request.get("mapping_scheme_name", ""),
             trigger_type=request.get("trigger_type", "manual"),
+            task_execution_id=request.get("task_execution_id"),
             status="running",
         )
         session.add(history)
