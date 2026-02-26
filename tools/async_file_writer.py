@@ -18,10 +18,11 @@
 
 import asyncio
 import csv
+import io
 import json
 import os
 import pathlib
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import aiofiles
 import config
 from tools.utils import utils
@@ -63,6 +64,98 @@ class AsyncFileWriter:
                 if not file_exists or await f.tell() == 0:
                     await writer.writeheader()
                 await writer.writerow(item)
+
+    async def write_to_csv_with_dedup(
+        self,
+        item: Dict,
+        item_type: str,
+        dedup_key: Optional[str] = None,
+        replace_on_dup: bool = False,
+    ) -> None:
+        """写入 CSV，并在指定 key 上做覆盖写（replace）。"""
+        if not dedup_key or not replace_on_dup:
+            await self.write_to_csv(item=item, item_type=item_type)
+            return
+
+        file_path = self._get_file_path('csv', item_type)
+
+        async with self.lock:
+            rows, fieldnames = await self._read_csv_rows(file_path)
+
+            dedup_value = str(item.get(dedup_key, ""))
+            replaced = False
+            if dedup_value:
+                for idx, row in enumerate(rows):
+                    if str(row.get(dedup_key, "")) == dedup_value:
+                        rows[idx] = item
+                        replaced = True
+                        break
+
+            if not replaced:
+                rows.append(item)
+
+            fieldnames = self._merge_fieldnames(fieldnames, list(item.keys()))
+            await self._write_csv_rows(file_path, rows, fieldnames)
+
+    async def dedup_latest_csv(self, item_type: str, dedup_key: str) -> None:
+        """对当前日期/关键词生成的 CSV 做一次去重覆盖（保留最新）。"""
+        file_path = self._get_file_path('csv', item_type)
+        await self._dedup_csv_file(file_path, dedup_key)
+
+    async def _read_csv_rows(self, file_path: str) -> Tuple[List[Dict], List[str]]:
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            return [], []
+
+        async with aiofiles.open(file_path, 'r', encoding='utf-8-sig') as f:
+            content = await f.read()
+        if not content:
+            return [], []
+
+        buffer = io.StringIO(content)
+        reader = csv.DictReader(buffer)
+        rows = [row for row in reader]
+        fieldnames = reader.fieldnames or []
+        return rows, fieldnames
+
+    async def _write_csv_rows(self, file_path: str, rows: List[Dict], fieldnames: List[str]) -> None:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+        async with aiofiles.open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
+            await f.write(buffer.getvalue())
+
+    @staticmethod
+    def _merge_fieldnames(existing: List[str], incoming: List[str]) -> List[str]:
+        merged = list(existing or [])
+        for name in incoming:
+            if name not in merged:
+                merged.append(name)
+        return merged
+
+    async def _dedup_csv_file(self, file_path: str, dedup_key: str) -> None:
+        if not dedup_key:
+            return
+
+        rows, fieldnames = await self._read_csv_rows(file_path)
+        if not rows:
+            return
+
+        last_index: Dict[str, int] = {}
+        for idx, row in enumerate(rows):
+            last_index[str(row.get(dedup_key, ""))] = idx
+
+        deduped = []
+        for idx, row in enumerate(rows):
+            if last_index.get(str(row.get(dedup_key, ""))) == idx:
+                deduped.append(row)
+
+        if len(deduped) == len(rows):
+            return
+
+        await self._write_csv_rows(file_path, deduped, fieldnames)
 
     async def write_single_item_to_json(self, item: Dict, item_type: str):
         file_path = self._get_file_path('json', item_type)

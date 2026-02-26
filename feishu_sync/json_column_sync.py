@@ -11,11 +11,12 @@ import ast
 import csv
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Set
 
 from .config import FeishuConfig
-from .data_formatter import XHSDataFormatter
+from .data_formatter import XHSDataFormatter, WeChatDataFormatter
 
 from .read_from_feishu import FeishuReadConfig
 
@@ -234,6 +235,8 @@ def sync_rows_json_column(
     flatten_sep: str = ".",
     batch_size: Optional[int] = None,
     keep_columns: Optional[List[str]] = None,
+    attach_wechat_cover: bool = False,
+    wechat_cover_field_name: str = "图片",
 ) -> Dict[str, Any]:
     """从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。"""
     if not rows:
@@ -276,6 +279,14 @@ def sync_rows_json_column(
         resolved_primary_field,
         field_type_map=existing_type_map,
     )
+
+    if attach_wechat_cover:
+        _attach_wechat_cover_images_by_article_id(
+            manager,
+            formatted_records,
+            cover_target_field=wechat_cover_field_name,
+        )
+
     result = manager._batch_create_records_with_sdk(formatted_records)
 
     return {
@@ -429,6 +440,60 @@ def format_records(
     return formatted
 
 
+def _resolve_article_id_from_fields(fields: Dict[str, Any]) -> str:
+    for key in ("文章ID", "article_id"):
+        value = fields.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _attach_wechat_cover_images_by_article_id(
+    manager: "FeishuSyncManager",
+    formatted_records: List[Dict[str, Any]],
+    cover_target_field: str = "图片",
+) -> None:
+    if not formatted_records:
+        return
+
+    manager.create_field_if_missing({"field_name": cover_target_field, "type": 17})
+
+    for record in formatted_records:
+        fields = record.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+
+        article_id = _resolve_article_id_from_fields(fields)
+        if not article_id:
+            continue
+
+        cover_images = WeChatDataFormatter.find_cover_images(str(article_id))
+        if not cover_images:
+            continue
+
+        items = []
+        for image_path in cover_images:
+            if not os.path.isfile(image_path):
+                continue
+            try:
+                token = manager.image_uploader.upload_image(image_path)
+            except Exception as exc:
+                logger.error(f"封面上传失败: {image_path} - {exc}")
+                continue
+            if token:
+                items.append({"file_token": token, "name": os.path.basename(image_path)})
+
+        if items:
+            existing = fields.get(cover_target_field)
+            if isinstance(existing, list):
+                fields[cover_target_field] = existing + items
+            else:
+                fields[cover_target_field] = items
+
+
 def ensure_table_and_fields(manager: "FeishuSyncManager", table_name: str, fields_config: List[Dict[str, Any]]) -> None:
     """创建表或补齐字段（若表已存在）。"""
     manager.formatter.get_table_fields = lambda: fields_config
@@ -449,6 +514,8 @@ def sync_csv_json_column(
     flatten_sep: str = ".",
     batch_size: Optional[int] = None,
     keep_columns: Optional[List[str]] = None,
+    attach_wechat_cover: bool = False,
+    wechat_cover_field_name: str = "图片",
 ) -> Dict[str, Any]:
     """
     从 CSV 指定列读取 JSON 并写入飞书。
@@ -477,4 +544,6 @@ def sync_csv_json_column(
         flatten_sep=flatten_sep,
         batch_size=batch_size,
         keep_columns=keep_columns,
+        attach_wechat_cover=attach_wechat_cover,
+        wechat_cover_field_name=wechat_cover_field_name,
     )

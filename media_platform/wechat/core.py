@@ -433,6 +433,16 @@ class WeChatCrawler(AbstractCrawler):
 
                 # 4) 增量爬取：检查文章内容文件是否已存在
                 if self._article_file_exists(title, aid, nickname):
+                    # 仍需补齐当前存储介质中的记录（例如切换 csv -> db）
+                    existing_content = self._read_existing_article_content(title, aid, nickname)
+                    summary_item = self._build_article_store_item(
+                        article_info=article,
+                        account_nickname=nickname,
+                        fakeid=fakeid,
+                        content=existing_content,
+                        image_urls=[],
+                    )
+                    await update_wechat_article(summary_item)
                     utils.logger.info(
                         f"[WeChatCrawler] [{nickname}] [{idx}/{len(articles)}] 跳过已存在: {title}"
                     )
@@ -473,6 +483,63 @@ class WeChatCrawler(AbstractCrawler):
         filename = build_article_filename(title or aid, aid, ext)
         filepath = os.path.join(save_dir, filename)
         return os.path.exists(filepath)
+
+    def _read_existing_article_content(self, title: str, aid: str, nickname: str) -> str:
+        """读取已落盘文章内容，用于在跳过下载时回填存储记录。"""
+        download_format = config.WECHAT_DOWNLOAD_FORMAT
+        ext_map = {"html": ".html", "markdown": ".md", "text": ".txt", "json": ".json"}
+        ext = ext_map.get(download_format, ".txt")
+
+        safe_nickname = sanitize_filename(nickname) if nickname else "unknown"
+        save_dir = os.path.join("data", config.WECHAT_CONTENT_SAVE_DIR, safe_nickname)
+        filename = build_article_filename(title or aid, aid, ext)
+        filepath = os.path.join(save_dir, filename)
+
+        if not os.path.exists(filepath):
+            return ""
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as file_obj:
+                return file_obj.read()
+        except Exception:
+            return ""
+
+    def _resolve_source_keyword(self, account_nickname: str) -> str:
+        crawl_tag = getattr(config, 'WECHAT_CRAWL_TAG', '')
+        if crawl_tag:
+            return crawl_tag
+        if config.CRAWLER_TYPE == "search":
+            return config.KEYWORDS.split(",")[0].strip() if config.KEYWORDS else ""
+        return account_nickname
+
+    def _build_article_store_item(
+        self,
+        article_info: Dict,
+        account_nickname: str,
+        fakeid: str,
+        content: str,
+        image_urls: List[str],
+    ) -> Dict:
+        title = article_info.get("title", "")
+        article_url = article_info.get("link", "")
+        aid = article_info.get("aid", "")
+        return {
+            "article_id": aid,
+            "fakeid": fakeid,
+            "title": title or "无标题",
+            "link": article_url,
+            "digest": article_info.get("digest", ""),
+            "content": content,
+            "author_name": article_info.get("author_name", ""),
+            "account_nickname": account_nickname,
+            "cover": article_info.get("cover", ""),
+            "item_show_type": format_item_show_type(article_info.get("item_show_type", 0)),
+            "create_time_str": format_timestamp(article_info.get("create_time", 0)),
+            "update_time_str": format_timestamp(article_info.get("update_time", 0)),
+            "image_list": ",".join(image_urls),
+            "source_keyword": self._resolve_source_keyword(account_nickname),
+            "add_ts": format_timestamp(int(utils.get_current_timestamp())),
+        }
 
     async def _download_and_store_article(
         self,
@@ -523,33 +590,14 @@ class WeChatCrawler(AbstractCrawler):
             if html_for_images:
                 image_urls = extract_image_urls_from_html(html_for_images)
 
-        # 3. 确定 source_keyword
-        crawl_tag = getattr(config, 'WECHAT_CRAWL_TAG', '')
-        if crawl_tag:
-            source_keyword = crawl_tag
-        elif config.CRAWLER_TYPE == "search":
-            source_keyword = config.KEYWORDS.split(",")[0].strip() if config.KEYWORDS else ""
-        else:
-            source_keyword = account_nickname
-
-        # 4. 构建存储数据项（仅保留必要字段）
-        local_db_item = {
-            "article_id": aid,
-            "fakeid": fakeid,
-            "title": title or "无标题",
-            "link": article_url,
-            "digest": article_info.get("digest", ""),
-            "content": content,
-            "author_name": article_info.get("author_name", ""),
-            "account_nickname": account_nickname,
-            "cover": article_info.get("cover", ""),
-            "item_show_type": format_item_show_type(article_info.get("item_show_type", 0)),
-            "create_time_str": format_timestamp(article_info.get("create_time", 0)),
-            "update_time_str": format_timestamp(article_info.get("update_time", 0)),
-            "image_list": ",".join(image_urls),
-            "source_keyword": source_keyword,
-            "add_ts": format_timestamp(int(utils.get_current_timestamp())),
-        }
+        # 3. 构建存储数据项（仅保留必要字段）
+        local_db_item = self._build_article_store_item(
+            article_info=article_info,
+            account_nickname=account_nickname,
+            fakeid=fakeid,
+            content=content,
+            image_urls=image_urls,
+        )
 
         await update_wechat_article(local_db_item)
 

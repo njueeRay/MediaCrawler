@@ -447,7 +447,7 @@ class WeChatClient:
                     ct = a.get("create_time", 0)
                     if ct and ct < date_start_ts:
                         hit_date_boundary = True
-                        break
+                        continue
                     filtered_batch.append(a)
                 valid_articles = filtered_batch
 

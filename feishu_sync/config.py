@@ -131,8 +131,8 @@ class FeishuReadConfig:
     """读取多维表格配置（read_from_feishu.py 使用）"""
 
     TABLE_ID = "tblErW6O0gLGViIy"
-    VIEW_ID = "vewT7xrAZ5"
-    SELECT_FIELDS = "AI文本分析, 笔记ID, 笔记链接, 信息质量评估, type"
+    VIEW_ID = ""  # 默认不指定视图（读全量），XHS示例: "vewT7xrAZ5"
+    SELECT_FIELDS = ""  # 默认读取全部字段；XHS示例: "AI文本分析, 笔记ID, 笔记链接, 信息质量评估, type"
     FILTER_FIELD = ""
     FILTER_OPERATOR = ""
     FILTER_VALUES = ""

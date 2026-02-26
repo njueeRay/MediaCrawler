@@ -168,6 +168,78 @@ def _apply_range(data: List[Dict], range_start: int, range_end: int) -> List[Dic
     return sliced
 
 
+def _parse_datetime_to_unix_seconds(text: str) -> int:
+    if not text:
+        return 0
+    value = str(text).strip()
+    if not value:
+        return 0
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return int(datetime.strptime(value, fmt).timestamp())
+        except Exception:
+            continue
+    return 0
+
+
+def _apply_wechat_upload_date_filter(
+    data: List[Dict],
+    date_start_text: str,
+    date_end_text: str,
+) -> List[Dict]:
+    start_ts = _parse_datetime_to_unix_seconds(date_start_text)
+    end_ts = _parse_datetime_to_unix_seconds(date_end_text)
+
+    # 日期仅给到 YYYY-MM-DD 时，扩展到当天末尾
+    if end_ts and isinstance(date_end_text, str) and len(date_end_text.strip()) == 10:
+        end_ts += 86399
+
+    if not start_ts and not end_ts:
+        return data
+
+    def _extract_create_ts(row: Dict) -> int:
+        # 优先用数值时间戳字段
+        for ts_key in ("create_time", "time"):
+            raw = row.get(ts_key)
+            if raw in (None, ""):
+                continue
+            try:
+                ts = int(float(raw))
+                if ts > 9999999999:
+                    ts //= 1000
+                return ts
+            except Exception:
+                continue
+
+        # 回退用字符串时间字段
+        for text_key in ("create_time_str", "发布时间", "发布时间字符串"):
+            text = row.get(text_key)
+            ts = _parse_datetime_to_unix_seconds(str(text) if text is not None else "")
+            if ts:
+                return ts
+
+        return 0
+
+    filtered: List[Dict] = []
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+
+        create_ts = _extract_create_ts(row)
+        if not create_ts:
+            filtered.append(row)
+            continue
+
+        if start_ts and create_ts < start_ts:
+            continue
+        if end_ts and create_ts > end_ts:
+            continue
+        filtered.append(row)
+
+    logger.info(f"📅 上传阶段微信日期过滤后: {len(filtered)}/{len(data)} 条")
+    return filtered
+
+
 def _detect_timestamp(value) -> int | None:
     if value is None or value == "":
         return None
@@ -472,6 +544,8 @@ def sync_file(
     extra_field_options: str = "",
     range_start: int = 0,
     range_end: int = 0,
+    upload_date_start: str = "",
+    upload_date_end: str = "",
 ) -> Dict:
     logger.info(f"🚀 开始同步文件: {file_path}")
 
@@ -483,6 +557,34 @@ def sync_file(
                 resolved_json_columns.append(name)
 
     ext = Path(file_path).suffix.lower()
+
+    # JSON 列展开路径：优先级高于普通 append 路径。
+    # 支持 --append-table-id 指定目标表2，支持 range / 日期过滤。
+    if ext == ".csv" and resolved_json_columns:
+        if append_table_id:
+            manager.table_id = append_table_id
+        raw_data = load_csv(file_path)
+        raw_data = _apply_range(raw_data, range_start, range_end)
+        detected_platform = detect_platform(raw_data, manager.platform)
+        ensure_manager_platform(manager, detected_platform)
+        if detected_platform == "wechat":
+            raw_data = _apply_wechat_upload_date_filter(
+                raw_data, upload_date_start, upload_date_end,
+            )
+        table_name = json_table_name or build_table_name(file_path, manager.platform)
+        return sync_rows_json_column(
+            manager,
+            raw_data,
+            json_columns=resolved_json_columns,
+            keep_columns=json_keep_columns,
+            table_name=table_name,
+            primary_field=json_primary,
+            flatten_sep=json_flatten_sep,
+            batch_size=batch_size,
+            attach_wechat_cover=(manager.platform == "wechat"),
+            wechat_cover_field_name="image",
+        )
+
     if ext in {".csv", ".json"} and (
         append_table_id or extra_field_name or extra_field_type or extra_field_value or extra_field_options
     ):
@@ -495,6 +597,13 @@ def sync_file(
 
         detected_platform = detect_platform(raw_data, manager.platform)
         ensure_manager_platform(manager, detected_platform)
+
+        if detected_platform == "wechat":
+            raw_data = _apply_wechat_upload_date_filter(
+                raw_data,
+                upload_date_start,
+                upload_date_end,
+            )
 
         if append_table_id:
             manager.table_id = append_table_id
@@ -535,19 +644,6 @@ def sync_file(
             "table_id": manager.table_id,
             "app_token": manager.app_token,
         }
-
-    if ext == ".csv" and resolved_json_columns:
-        table_name = json_table_name or build_table_name(file_path, manager.platform)
-        return sync_csv_json_column(
-            manager,
-            file_path,
-            json_columns=resolved_json_columns,
-            keep_columns=json_keep_columns,
-            table_name=table_name,
-            primary_field=json_primary,
-            flatten_sep=json_flatten_sep,
-            batch_size=batch_size,
-        )
     if ext == ".json":
         raw_data = load_json(file_path)
     elif ext == ".csv":
@@ -559,6 +655,13 @@ def sync_file(
 
     detected_platform = detect_platform(raw_data, manager.platform)
     ensure_manager_platform(manager, detected_platform)
+
+    if detected_platform == "wechat":
+        raw_data = _apply_wechat_upload_date_filter(
+            raw_data,
+            upload_date_start,
+            upload_date_end,
+        )
 
     data_type = (
         detect_data_type(raw_data)
@@ -605,6 +708,8 @@ def sync_directory(
     extra_field_options: str = "",
     range_start: int = 0,
     range_end: int = 0,
+    upload_date_start: str = "",
+    upload_date_end: str = "",
 ) -> Dict:
     logger.info(f"📂 开始同步目录: {dir_path}")
     search_pattern = os.path.join(dir_path, pattern)
@@ -636,6 +741,8 @@ def sync_directory(
             extra_field_options=extra_field_options,
             range_start=range_start,
             range_end=range_end,
+            upload_date_start=upload_date_start,
+            upload_date_end=upload_date_end,
         )
         results.append(result)
         total_success += result.get("success", 0)
@@ -700,6 +807,8 @@ def main():
     parser.add_argument("--db-limit", type=int, default=0, help="DB 读取条数限制（0 表示不限制）")
     parser.add_argument("--db-offset", type=int, default=0, help="DB 读取偏移量")
     parser.add_argument("--db-since-id", type=int, default=0, help="仅读取 id 大于该值的记录")
+    parser.add_argument("--upload-date-start", default=os.environ.get("WECHAT_ARTICLE_DATE_START", ""), help="上传阶段日期起点（微信，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
+    parser.add_argument("--upload-date-end", default=os.environ.get("WECHAT_ARTICLE_DATE_END", ""), help="上传阶段日期终点（微信，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
 
     args = parser.parse_args()
 
@@ -740,6 +849,12 @@ def main():
                 )
             )
             raw_data = _apply_range(raw_data, args.range_start, args.range_end)
+            if args.platform == "wechat":
+                raw_data = _apply_wechat_upload_date_filter(
+                    raw_data,
+                    args.upload_date_start,
+                    args.upload_date_end,
+                )
 
             if not raw_data:
                 raise RuntimeError("数据库无可同步数据")
@@ -766,10 +881,12 @@ def main():
                     primary_field=args.json_primary,
                     flatten_sep=args.json_flatten_sep,
                     batch_size=args.batch_size,
+                    attach_wechat_cover=(manager.platform == "wechat"),
+                    wechat_cover_field_name="图片",
                 )
-                if result.get("success", 0) == 0:
+                if result.get("failed", 0) > 0:
                     raise RuntimeError(f"同步失败: {result}")
-                logger.info("🎉 程序执行完成!")
+                logger.info(f"🎉 程序执行完成! 成功={result.get('success',0)}, 跳过(去重)={result.get('total',0) - result.get('success',0) - result.get('failed',0)}")
                 return
 
             if args.platform == "xhs":
@@ -779,7 +896,7 @@ def main():
 
             FeishuConfig.BATCH_SIZE = args.batch_size
             result = manager.sync_data(raw_data)
-            if result.get("success", 0) == 0:
+            if result.get("failed", 0) > 0:
                 raise RuntimeError(f"同步失败: {result}")
         elif args.file:
             result = sync_file(
@@ -799,8 +916,10 @@ def main():
                 extra_field_options=args.append_extra_options,
                 range_start=args.range_start,
                 range_end=args.range_end,
+                upload_date_start=args.upload_date_start,
+                upload_date_end=args.upload_date_end,
             )
-            if result.get("success", 0) == 0:
+            if result.get("failed", 0) > 0:
                 raise RuntimeError(f"同步失败: {result}")
         else:
             sync_directory(
@@ -821,6 +940,8 @@ def main():
                 extra_field_options=args.append_extra_options,
                 range_start=args.range_start,
                 range_end=args.range_end,
+                upload_date_start=args.upload_date_start,
+                upload_date_end=args.upload_date_end,
             )
 
         logger.info("🎉 程序执行完成!")
