@@ -31,6 +31,10 @@
         <n-button type="primary" @click="searchCreators" :loading="searching">搜索</n-button>
         <n-button @click="showAdd = true">手动添加</n-button>
       </n-space>
+
+      <div v-if="searchPlatform === 'wechat'" class="mt-2 text-xs text-gray-500">
+        微信创作者搜索依赖 wechat-article-exporter（已登录）以及配置项：WECHAT_API_BASE_URL、WECHAT_AUTH_KEY。
+      </div>
     </n-card>
 
     <!-- Search Results -->
@@ -58,6 +62,9 @@
                 <span v-if="item.meta.followers_count" class="ml-3 text-xs">粉丝: {{ item.meta.followers_count }}</span>
                 <span v-if="item.meta.videos" class="ml-3 text-xs">视频: {{ item.meta.videos }}</span>
               </template>
+              <div v-if="item.meta?.signature" class="mt-1 text-xs text-gray-500 line-clamp-2">
+                {{ item.meta.signature }}
+              </div>
             </template>
           </n-thing>
           <template #suffix>
@@ -145,7 +152,7 @@
 <script setup lang="ts">
 import { ref, h, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
-import http, { isDbError } from '@/api'
+import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
@@ -255,8 +262,9 @@ async function loadSubscriptions() {
     const params: any = { page: pagination.value.page, size: pagination.value.pageSize }
     if (filterPlatform.value) params.platform = filterPlatform.value
     const { data } = await http.get('/subscribe', { params })
-    subscriptions.value = data.data?.items || []
-    pagination.value.itemCount = data.data?.total || 0
+    const payload = unwrapApiData<any>(data) || {}
+    subscriptions.value = payload.items || []
+    pagination.value.itemCount = payload.total || 0
     // 每次加载列表后刷新一次状态
     await loadCrawlStatuses()
   } catch (e: any) {
@@ -272,7 +280,8 @@ async function loadCrawlStatuses() {
   if (!ids.length) return
   try {
     const { data } = await http.get('/subscribe/crawl/status', { params: { ids: ids.join(',') } })
-    const items = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    const items = payload.items || []
     const next: any = { ...crawlStatusMap.value }
     for (const it of items) {
       next[it.sub_id] = { status: it.status, message: it.message, updated_at: it.updated_at }
@@ -300,7 +309,7 @@ async function batchTriggerCrawl() {
 async function loadStats() {
   try {
     const { data } = await http.get('/subscribe/stats')
-    subStats.value = data.data || {}
+    subStats.value = unwrapApiData<any>(data) || {}
   } catch (e: any) {
     if (isDbError(e)) dbNotReady.value = true
   }
@@ -320,7 +329,8 @@ async function searchCreators() {
       platform: searchPlatform.value,
       keyword: searchKeyword.value,
     })
-    const items = (data.data?.items || []).map((it: any) => ({
+    const payload = unwrapApiData<any>(data) || {}
+    const items = (payload.items || []).map((it: any) => ({
       ...it,
       _subscribed: false,
       _subscribing: false,

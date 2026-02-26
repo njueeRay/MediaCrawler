@@ -73,7 +73,7 @@
 import { ref, h, onMounted, computed } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http from '@/api'
+import http, { unwrapApiData } from '@/api'
 
 const message = useMessage()
 const loading = ref(false)
@@ -183,13 +183,15 @@ async function loadData() {
       const params: any = {}
       if (platform.value) params.platform = platform.value
       const { data } = await http.get('/data/db/tables', { params })
-      dataFiles.value = data.data?.items || []
+      const payload = unwrapApiData<any>(data) || {}
+      dataFiles.value = payload.items || []
     } else {
       const params: any = {}
       if (platform.value) params.platform = platform.value
       if (fileType.value) params.file_type = fileType.value
       const { data } = await http.get('/data/files', { params })
-      dataFiles.value = data.files || data.data?.files || []
+      const payload = unwrapApiData<any>(data) || {}
+      dataFiles.value = payload.files || []
     }
   } catch (e: any) {
     message.error(e.message || '加载失败')
@@ -203,10 +205,10 @@ async function loadStats() {
   try {
     if (isDbMode.value) {
       const { data } = await http.get('/data/db/stats')
-      stats.value = data.data || {}
+      stats.value = unwrapApiData<any>(data) || {}
     } else {
       const { data } = await http.get('/data/stats')
-      stats.value = data.stats || data.data || data || {}
+      stats.value = unwrapApiData<any>(data) || {}
     }
   } catch {
     // silent
@@ -235,7 +237,7 @@ async function previewData(row: any) {
 
   try {
     const { data } = await http.get(`/data/files/${encodeURIComponent(row.path)}`, { params: { preview: true } })
-    const content = data.data || data
+    const content = unwrapApiData<any>(data)
 
     if (Array.isArray(content)) {
       previewRows.value = content.slice(0, 100)
@@ -278,7 +280,8 @@ async function previewDb(row: any) {
 
   try {
     const { data } = await http.get('/data/db/records', { params: { table: row.table, limit: 100 } })
-    const records = data.data?.records || []
+    const payload = unwrapApiData<any>(data) || {}
+    const records = payload.records || []
     previewRows.value = records
     if (records.length > 0) {
       previewColumns.value = Object.keys(records[0]).map(k => ({

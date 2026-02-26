@@ -74,12 +74,26 @@
           </n-space>
         </n-card>
       </n-gi>
+      <n-gi span="2 m:1">
+        <n-card title="订阅采集队列" size="small">
+          <n-descriptions bordered :column="1" size="small">
+            <n-descriptions-item label="运行中">{{ queueStats.running }}</n-descriptions-item>
+            <n-descriptions-item label="排队中">{{ queueStats.queued }}</n-descriptions-item>
+            <n-descriptions-item label="成功">{{ queueStats.success }}</n-descriptions-item>
+            <n-descriptions-item label="失败">{{ queueStats.failed }}</n-descriptions-item>
+            <n-descriptions-item label="队列长度">{{ queueStats.queue_size }}</n-descriptions-item>
+          </n-descriptions>
+        </n-card>
+      </n-gi>
     </n-grid>
 
     <!-- Recent Logs -->
     <n-card title="最近日志" size="small" class="mt-4">
       <template #header-extra>
-        <n-button size="small" text @click="$router.push({ name: 'Logs' })">查看全部</n-button>
+        <n-space size="small">
+          <span class="text-xs text-gray-400">{{ lastRefreshText }}</span>
+          <n-button size="small" text @click="$router.push({ name: 'Logs' })">查看全部</n-button>
+        </n-space>
       </template>
       <div class="bg-gray-900 text-gray-100 p-3 rounded font-mono text-xs leading-5 max-h-48 overflow-y-auto">
         <div v-for="log in recentLogs" :key="log.timestamp + log.message">
@@ -111,7 +125,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import http from '@/api'
+import http, { unwrapApiData } from '@/api'
 
 const message = useMessage()
 
@@ -123,6 +137,8 @@ const dashboard = ref({
 })
 
 const recentLogs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
+const queueStats = ref({ queue_size: 0, running: 0, queued: 0, success: 0, failed: 0 })
+const lastRefreshAt = ref('')
 
 const platformLabels: Record<string, string> = {
   xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博', wechat: '微信', tieba: '贴吧', zhihu: '知乎',
@@ -146,6 +162,7 @@ const crawlerBadgeType = computed(() => {
   const m: Record<string, string> = { idle: 'default', running: 'success', stopping: 'warning', error: 'error' }
   return (m[dashboard.value.crawler.status] || 'default') as any
 })
+const lastRefreshText = computed(() => lastRefreshAt.value ? `刷新于 ${lastRefreshAt.value}` : '未刷新')
 
 function formatSize(bytes: number): string {
   if (!bytes) return '0 B'
@@ -176,7 +193,7 @@ async function stopCrawler() {
 async function loadDashboard() {
   try {
     const { data } = await http.get('/dashboard')
-    const d = data.data || data
+    const d = unwrapApiData<any>(data) || {}
     dashboard.value.crawler = d.crawler || dashboard.value.crawler
     dashboard.value.data = d.data || dashboard.value.data
     dashboard.value.subscriptions = d.subscriptions || dashboard.value.subscriptions
@@ -194,8 +211,27 @@ async function loadDashboard() {
 async function loadLogs() {
   try {
     const { data } = await http.get('/crawler/logs', { params: { limit: 20 } })
-    const logs = data.data?.logs || data.logs || []
+    const payload = unwrapApiData<any>(data)
+    const logs = Array.isArray(payload) ? payload : (payload?.logs || [])
     recentLogs.value = logs.slice(-20)
+  } catch {
+    // silent
+  }
+}
+
+async function loadQueueStats() {
+  try {
+    const { data } = await http.get('/subscribe/crawl/status')
+    const payload = unwrapApiData<any>(data) || {}
+    const items = payload.items || []
+    const next = { queue_size: payload.queue_size || 0, running: 0, queued: 0, success: 0, failed: 0 }
+    for (const item of items) {
+      if (item.status === 'running') next.running += 1
+      else if (item.status === 'queued') next.queued += 1
+      else if (item.status === 'success') next.success += 1
+      else if (item.status === 'failed') next.failed += 1
+    }
+    queueStats.value = next
   } catch {
     // silent
   }
@@ -206,8 +242,15 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   loadDashboard()
   loadLogs()
+  loadQueueStats()
+  lastRefreshAt.value = new Date().toLocaleTimeString()
   // Auto-refresh every 30s
-  refreshTimer = setInterval(() => { loadDashboard(); loadLogs() }, 30000)
+  refreshTimer = setInterval(() => {
+    loadDashboard()
+    loadLogs()
+    loadQueueStats()
+    lastRefreshAt.value = new Date().toLocaleTimeString()
+  }, 30000)
 })
 
 onUnmounted(() => {

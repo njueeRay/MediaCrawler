@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import http from '@/api'
+import http, { unwrapApiData } from '@/api'
 
 interface LogItem {
   id: number
@@ -139,7 +139,7 @@ async function loadHistoryLogs() {
   loadingHistory.value = true
   try {
     const res = await http.get('/crawler/logs', { params: { limit: 200 } })
-    const entries: Array<{ level: string; message: string; timestamp?: string }> = res.data?.data ?? res.data ?? []
+    const entries: Array<{ level: string; message: string; timestamp?: string }> = unwrapApiData(res.data) || []
     const historyItems: LogItem[] = entries.map((e) => ({
       id: ++logId,
       timestamp: e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '--',

@@ -30,7 +30,7 @@
         </template>
         <template #header-extra>
           <n-space>
-            <n-button size="small" @click="showPreview = true" :disabled="!activeScheme.items?.length">预览效果</n-button>
+            <n-button size="small" @click="openPreview" :disabled="!activeScheme.items?.length">预览效果</n-button>
             <n-button size="small" type="primary" @click="saveSchemeItems" :loading="saving">保存</n-button>
           </n-space>
         </template>
@@ -60,8 +60,35 @@
     <!-- Preview Modal -->
     <n-modal v-model:show="showPreview" title="映射预览" preset="card" style="width: 80vw; max-width: 900px">
       <n-spin :show="previewing">
-        <n-data-table v-if="previewData.length" :columns="previewColumns" :data="previewData" size="small" :max-height="400" />
-        <n-empty v-else description="暂无预览数据（需要先有采集数据）" />
+        <n-tabs type="line" animated>
+          <n-tab-pane name="mapped" tab="映射结果">
+            <n-data-table
+              v-if="previewData.length"
+              :columns="previewColumns"
+              :data="previewData"
+              size="small"
+              :max-height="420"
+            />
+            <n-empty v-else description="暂无预览数据（需要先有采集数据或 DB 中有样本记录）" />
+          </n-tab-pane>
+
+          <n-tab-pane name="details" tab="转换明细">
+            <n-data-table
+              v-if="previewDetails.length"
+              :columns="detailColumns"
+              :data="previewDetails"
+              size="small"
+              :max-height="420"
+            />
+            <n-empty v-else description="暂无转换明细" />
+          </n-tab-pane>
+
+          <n-tab-pane name="original" tab="原始样本">
+            <div class="max-h-[420px] overflow-auto">
+              <pre class="text-xs">{{ previewOriginal }}</pre>
+            </div>
+          </n-tab-pane>
+        </n-tabs>
       </n-spin>
     </n-modal>
   </div>
@@ -69,9 +96,9 @@
 
 <script setup lang="ts">
 import { ref, h, onMounted } from 'vue'
-import { NTag, NButton, NInput, NSelect, NSwitch, NSpace, useMessage } from 'naive-ui'
+import { NTag, NButton, NInput, NSelect, NSwitch, NSpace, NTabs, NTabPane, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http, { isDbError } from '@/api'
+import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
@@ -89,6 +116,8 @@ const activeScheme = ref<any>(null)
 const editItems = ref<any[]>([])
 const previewData = ref<any[]>([])
 const previewColumns = ref<DataTableColumn[]>([])
+const previewDetails = ref<any[]>([])
+const previewOriginal = ref('')
 
 const platformOptions = [
   { label: '全部', value: '' },
@@ -171,6 +200,15 @@ const itemColumns: DataTableColumn[] = [
   },
 ]
 
+const detailColumns: DataTableColumn[] = [
+  { title: '源字段', key: 'source_field', width: 160, ellipsis: { tooltip: true } },
+  { title: '显示名', key: 'display_name', width: 140, ellipsis: { tooltip: true } },
+  { title: '转换', key: 'transform', width: 120 },
+  { title: '飞书类型', key: 'feishu_type', width: 100 },
+  { title: '原值', key: 'raw_value', ellipsis: { tooltip: true } },
+  { title: '转换后', key: 'transformed_value', ellipsis: { tooltip: true } },
+]
+
 async function loadSchemes() {
   loading.value = true
   try {
@@ -178,7 +216,8 @@ async function loadSchemes() {
     if (platform.value) params.platform = platform.value
     if (dataType.value) params.data_type = dataType.value
     const { data } = await http.get('/mapping/schemes', { params })
-    schemes.value = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    schemes.value = payload.items || []
   } catch (e: any) {
     if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
@@ -190,7 +229,7 @@ async function loadSchemes() {
 async function openSchemeDetail(id: number) {
   try {
     const { data } = await http.get(`/mapping/schemes/${id}`)
-    activeScheme.value = data.data || {}
+    activeScheme.value = unwrapApiData<any>(data) || {}
     editItems.value = (activeScheme.value.items || []).map((item: any, idx: number) => ({
       source_field: item.source_field,
       display_name: item.display_name,
@@ -202,6 +241,42 @@ async function openSchemeDetail(id: number) {
     }))
   } catch (e: any) {
     message.error(e.message || '加载方案详情失败')
+  }
+}
+
+async function openPreview() {
+  if (!activeScheme.value) return
+  showPreview.value = true
+  previewing.value = true
+  previewData.value = []
+  previewColumns.value = []
+  previewDetails.value = []
+  previewOriginal.value = ''
+
+  try {
+    const { data } = await http.post('/mapping/preview', { scheme_id: activeScheme.value.id, limit: 1 })
+    const payload = unwrapApiData<any>(data) || {}
+    const mapped = payload.mapped || []
+    const original = payload.original || []
+    const details = payload.details || []
+
+    previewData.value = mapped
+    previewOriginal.value = JSON.stringify(original?.[0] ?? null, null, 2)
+    previewDetails.value = (details?.[0] || [])
+
+    if (mapped.length > 0) {
+      const keys = Object.keys(mapped[0] || {})
+      previewColumns.value = keys.map((k) => ({
+        title: k,
+        key: k,
+        width: 160,
+        ellipsis: { tooltip: true },
+      }))
+    }
+  } catch (e: any) {
+    message.error(e.message || '预览失败')
+  } finally {
+    previewing.value = false
   }
 }
 

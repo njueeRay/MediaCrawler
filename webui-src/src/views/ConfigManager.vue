@@ -65,7 +65,7 @@
 import { ref, h, onMounted, watch } from 'vue'
 import { NTag, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http, { isDbError } from '@/api'
+import http, { isDbError, unwrapApiData } from '@/api'
 
 const message = useMessage()
 const loading = ref(false)
@@ -120,7 +120,8 @@ async function loadConfig() {
   loading.value = true
   try {
     const { data } = await http.get('/config/groups')
-    configGroups.value = data.data?.groups || []
+    const payload = unwrapApiData<any>(data) || {}
+    configGroups.value = payload.groups || []
     for (const group of configGroups.value) {
       for (const field of group.fields) {
         formValues.value[field.key] = coerceValue(field, field.value)
@@ -169,10 +170,11 @@ async function testConnection(type: string) {
   testing.value = true
   try {
     const { data } = await http.post('/config/test', { type })
-    if (data.data?.success) {
+    const payload = unwrapApiData<any>(data) || {}
+    if (payload.success) {
       message.success(`${type} 连接成功`)
     } else {
-      message.warning(data.data?.error || `${type} 连接失败`)
+      message.warning(payload.error || `${type} 连接失败`)
     }
   } catch (e: any) {
     message.error(e.message || '测试失败')
@@ -185,8 +187,9 @@ async function loadHistory() {
   historyLoading.value = true
   try {
     const { data } = await http.get('/config/history', { params: { page: historyPage.value, size: 20 } })
-    historyItems.value = data.data?.items || []
-    const total = data.data?.total || 0
+    const payload = unwrapApiData<any>(data) || {}
+    historyItems.value = payload.items || []
+    const total = payload.total || 0
     historyPageCount.value = Math.max(1, Math.ceil(total / 20))
   } catch (e: any) {
     if (isDbError(e)) historyItems.value = [{ config_key: '提示', old_value: '-', new_value: '需要数据库支持', group: '-', changed_at: '-' }]

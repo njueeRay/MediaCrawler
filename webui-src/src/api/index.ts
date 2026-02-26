@@ -37,4 +37,16 @@ export function isDbError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'isDbNotConfigured' in err && (err as any).isDbNotConfigured === true
 }
 
+/**
+ * 统一解包后端响应数据。
+ * - 标准: { code, message, data }
+ * - 旧版: 直接返回业务对象
+ */
+export function unwrapApiData<T = any>(body: any): T {
+  if (body && typeof body === 'object' && 'data' in body) {
+    return body.data as T
+  }
+  return body as T
+}
+
 export default http

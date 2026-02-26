@@ -74,7 +74,7 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NTag, useMessage } from 'naive-ui'
-import http, { isDbError } from '@/api'
+import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
@@ -241,9 +241,10 @@ async function checkConnection() {
   checking.value = true
   try {
     const { data } = await http.get('/feishu/status')
-    feishuConnected.value = data.data?.connected || false
+    const payload = unwrapApiData<any>(data) || {}
+    feishuConnected.value = payload.connected || false
     if (!feishuConnected.value) {
-      message.warning(data.data?.error || '飞书未连接，请先配置 App ID 和 Secret')
+      message.warning(payload.error || '飞书未连接，请先配置 App ID 和 Secret')
     } else {
       message.success('飞书连接正常')
     }
@@ -260,7 +261,8 @@ async function loadSchemes() {
     if (syncForm.value.platform) params.platform = syncForm.value.platform
     if (syncForm.value.data_type) params.data_type = syncForm.value.data_type
     const { data } = await http.get('/mapping/schemes', { params })
-    const items = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    const items = payload.items || []
     schemeOptions.value = items.map((s: any) => ({ label: s.name, value: s.id }))
     const dft = items.find((s: any) => s.is_default)
     if (dft) syncForm.value.mapping_scheme_id = dft.id
@@ -297,7 +299,8 @@ async function loadHistory() {
   loading.value = true
   try {
     const { data } = await http.get('/feishu/history')
-    histories.value = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    histories.value = payload.items || []
   } catch (e: any) {
     if (isDbError(e)) dbNotReady.value = true
   } finally {

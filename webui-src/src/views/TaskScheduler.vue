@@ -45,6 +45,22 @@
       </n-tab-pane>
     </n-tabs>
 
+    <!-- Execution Log Modal -->
+    <n-modal v-model:show="showExecLog" title="执行日志" preset="dialog" style="width: 860px">
+      <n-space vertical :size="10">
+        <div class="text-xs text-gray-500">
+          <span v-if="execLogMeta.execution_id">执行ID: {{ execLogMeta.execution_id }}</span>
+          <span v-if="execLogMeta.status" class="ml-3">状态: {{ execLogMeta.status }}</span>
+          <span v-if="execLogMeta.started_at" class="ml-3">开始: {{ execLogMeta.started_at }}</span>
+          <span v-if="execLogMeta.finished_at" class="ml-3">结束: {{ execLogMeta.finished_at }}</span>
+        </div>
+        <n-log :log="execLogText" language="text" :rows="20" />
+      </n-space>
+      <template #action>
+        <n-button @click="showExecLog = false">关闭</n-button>
+      </template>
+    </n-modal>
+
     <!-- Create Modal -->
     <n-modal v-model:show="showCreate" title="新建定时任务" preset="dialog" style="width: 520px">
       <n-form label-placement="left" label-width="100">
@@ -77,9 +93,9 @@
 
 <script setup lang="ts">
 import { ref, h, onMounted } from 'vue'
-import { NTag, NButton, NSpace, useMessage } from 'naive-ui'
+import { NTag, NButton, NSpace, useMessage, NLog } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
-import http, { isDbError } from '@/api'
+import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
@@ -87,6 +103,9 @@ const loading = ref(false)
 const execLoading = ref(false)
 const showCreate = ref(false)
 const dbNotReady = ref(false)
+const showExecLog = ref(false)
+const execLogText = ref('')
+const execLogMeta = ref<{ execution_id?: number; status?: string; started_at?: string; finished_at?: string }>({})
 
 const schedulerStatus = ref({ running: false, active_tasks: 0, total_executions: 0, next_run: '' })
 const tasks = ref<any[]>([])
@@ -144,6 +163,24 @@ const columns: DataTableColumn[] = [
   { title: '执行次数', key: 'run_count', width: 80 },
   { title: '失败次数', key: 'fail_count', width: 80 },
   { title: '上次执行', key: 'last_run_at', width: 160 },
+  { title: '下次执行', key: 'next_run_at', width: 160 },
+  {
+    title: '调度',
+    key: 'schedule',
+    width: 160,
+    ellipsis: { tooltip: true },
+    render: (row: any) => {
+      if (!row.schedule_type) return '-'
+      if (row.schedule_type === 'interval') {
+        const h = row.schedule_config?.hours
+        return `每 ${h || '-'} 小时`
+      }
+      if (row.schedule_type === 'cron') {
+        return row.schedule_config?.cron || 'cron'
+      }
+      return row.schedule_type
+    },
+  },
   {
     title: '操作', key: 'actions', width: 200,
     render: (row: any) =>
@@ -172,12 +209,37 @@ const execColumns: DataTableColumn[] = [
   { title: '结束', key: 'finished_at', width: 160 },
   { title: '耗时(秒)', key: 'duration_seconds', width: 80 },
   { title: '错误', key: 'error_message', ellipsis: { tooltip: true } },
+  {
+    title: '日志',
+    key: 'log',
+    width: 80,
+    render: (row: any) => h(NButton, { size: 'tiny', onClick: () => openExecutionLog(row.id) }, () => '查看'),
+  },
 ]
+
+async function openExecutionLog(executionId: number) {
+  execLogText.value = ''
+  execLogMeta.value = { execution_id: executionId }
+  showExecLog.value = true
+  try {
+    const { data } = await http.get(`/scheduler/executions/${executionId}/logs`)
+    const payload = unwrapApiData<any>(data) || {}
+    execLogText.value = payload.log || ''
+    execLogMeta.value = {
+      execution_id: payload.execution_id,
+      status: payload.status,
+      started_at: payload.started_at,
+      finished_at: payload.finished_at,
+    }
+  } catch (e: any) {
+    execLogText.value = `加载失败: ${e.message || e}`
+  }
+}
 
 async function loadStatus() {
   try {
     const { data } = await http.get('/scheduler/status')
-    schedulerStatus.value = data.data || {}
+    schedulerStatus.value = unwrapApiData<any>(data) || {}
   } catch (e: any) {
     if (isDbError(e)) dbNotReady.value = true
   }
@@ -187,7 +249,8 @@ async function loadTasks() {
   loading.value = true
   try {
     const { data } = await http.get('/scheduler/tasks')
-    tasks.value = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    tasks.value = payload.items || []
   } catch (e: any) {
     if (isDbError(e)) { dbNotReady.value = true; return }
     message.error(e.message || '加载失败')
@@ -202,7 +265,8 @@ async function loadExecutions() {
     const params: any = { size: 50 }
     if (execFilter.value.status) params.status = execFilter.value.status
     const { data } = await http.get('/scheduler/executions', { params })
-    executions.value = data.data?.items || []
+    const payload = unwrapApiData<any>(data) || {}
+    executions.value = payload.items || []
   } catch (e: any) {
     message.error(e.message || '加载失败')
   } finally {
