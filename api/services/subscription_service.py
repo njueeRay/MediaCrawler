@@ -12,6 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.webui_models import Subscription
 
 
+class CreatorSearchError(RuntimeError):
+    """用于将“搜索失败原因”上抛到 router，避免被吞掉导致前端误以为无结果。"""
+
+
+class WechatSourceUnavailable(CreatorSearchError):
+    pass
+
+
+class WechatSourceAuthInvalid(CreatorSearchError):
+    pass
+
+
 class SubscriptionService:
     """订阅管理"""
 
@@ -120,20 +132,14 @@ class SubscriptionService:
           1. 关键词搜索 (bilibili, wechat)
           2. ID/URL 精确查找 (所有平台)
         """
-        try:
-            if platform == "bili":
-                return await self._search_bilibili(keyword)
-            elif platform == "wechat":
-                return await self._search_wechat(keyword)
-            elif platform == "wb":
-                return await self._search_weibo(keyword)
-            else:
-                # 其他平台暂不支持关键词搜索，返回提示
-                return []
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return []
+        if platform == "bili":
+            return await self._search_bilibili(keyword)
+        if platform == "wechat":
+            return await self._search_wechat(keyword)
+        if platform == "wb":
+            return await self._search_weibo(keyword)
+        # 其他平台暂不支持关键词搜索
+        return []
 
     async def _search_bilibili(self, keyword: str) -> List[dict]:
         """B站用户搜索 — 通过 Web Search API (无需登录)"""
@@ -176,25 +182,64 @@ class SubscriptionService:
         """微信公众号搜索 — 通过 wechat-article-exporter 的 public API"""
         import httpx
 
-        # 尝试连接 wechat-article-exporter 服务 (通常在本地运行)
-        base_urls = [
+        from config import wechat_config
+
+        configured_base_url = (getattr(wechat_config, "WECHAT_API_BASE_URL", "") or "").strip().rstrip("/")
+        base_urls: List[str] = []
+        if configured_base_url:
+            base_urls.append(configured_base_url)
+        # 常见本地端口（便于开箱即用）
+        base_urls.extend([
             "http://localhost:3000",
             "http://localhost:8088",
-        ]
+        ])
+
+        auth_key = (getattr(wechat_config, "WECHAT_AUTH_KEY", "") or "").strip()
+        headers = {"X-Auth-Key": auth_key} if auth_key else {}
+
+        last_network_error: Optional[str] = None
+        last_auth_error: Optional[str] = None
 
         for base_url in base_urls:
             try:
-                url = f"{base_url}/api/public/v1/account"
+                url = f"{base_url.rstrip('/')}/api/public/v1/account"
                 async with httpx.AsyncClient() as client:
-                    resp = await client.get(url, params={"keyword": keyword, "size": 10}, timeout=10)
+                    resp = await client.get(
+                        url,
+                        params={"keyword": keyword, "size": 10, "begin": 0},
+                        headers=headers,
+                        timeout=10,
+                    )
+
+                try:
                     data = resp.json()
+                except Exception:
+                    last_network_error = f"微信源返回非 JSON: {base_url}"
+                    continue
+
+                # wechat-article-exporter: { base_resp: { ret, err_msg }, list: [...] }
+                if isinstance(data, dict) and isinstance(data.get("base_resp"), dict):
+                    ret = data["base_resp"].get("ret")
+                    if ret not in (0, "0", None):
+                        last_auth_error = data["base_resp"].get("err_msg") or "认证信息无效"
+                        continue
+
+                # 其他服务兜底: { code, msg, data }
+                if isinstance(data, dict) and "code" in data and data.get("code") not in (0, "0", None):
+                    last_auth_error = data.get("msg") or "认证信息无效"
+                    continue
 
                 results = []
-                for item in (data.get("list", []) or []):
+                for item in ((data.get("list", []) if isinstance(data, dict) else None) or []):
+                    avatar = (item.get("round_head_img", "") or "")
+                    if avatar.startswith("//"):
+                        avatar = "https:" + avatar
+                    elif avatar.startswith("http://"):
+                        avatar = "https://" + avatar[len("http://"):]
                     results.append({
                         "creator_id": item.get("fakeid", ""),
                         "creator_name": item.get("nickname", ""),
-                        "creator_avatar": item.get("round_head_img", ""),
+                        "creator_avatar": avatar,
                         "creator_url": "",
                         "meta": {
                             "service_type": item.get("service_type", ""),
@@ -202,9 +247,21 @@ class SubscriptionService:
                         },
                     })
                 return results
-            except Exception:
+            except httpx.HTTPError as e:
+                last_network_error = f"微信源不可达: {base_url} ({e.__class__.__name__})"
                 continue
-        return []
+            except Exception as e:
+                last_network_error = f"微信源请求失败: {base_url} ({e.__class__.__name__})"
+                continue
+
+        if last_auth_error:
+            raise WechatSourceAuthInvalid(
+                f"微信源认证无效：{last_auth_error}。请先在 wechat-article-exporter 登录并配置 WECHAT_AUTH_KEY（或在 WebUI 配置管理中填入）。"
+            )
+        raise WechatSourceUnavailable(
+            last_network_error
+            or "微信源不可达：请确认 wechat-article-exporter 已启动，并检查 WECHAT_API_BASE_URL 配置。"
+        )
 
     async def _search_weibo(self, keyword: str) -> List[dict]:
         """微博用户搜索 — 通过 Web API"""

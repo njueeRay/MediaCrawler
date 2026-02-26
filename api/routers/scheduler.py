@@ -3,13 +3,20 @@
 
 from typing import Optional
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from api.deps import get_db
 from api.schemas.common import ok, fail, page_ok
 from api.schemas.scheduler import ScheduledTaskCreate, ScheduledTaskUpdate
 from api.services.scheduler_service import scheduler_service
+from database.db_session import get_session
+from database.webui_models import TaskExecution
 
 router = APIRouter(prefix="/scheduler", tags=["任务调度"])
 
@@ -153,3 +160,81 @@ async def list_executions(
         for e in execs
     ]
     return page_ok(rows, total, page, size)
+
+
+@router.get("/executions/{execution_id}/logs")
+async def get_execution_logs(
+    execution_id: int,
+    tail: int = Query(8000, ge=0, le=200000),
+    session: AsyncSession = Depends(get_db),
+):
+    """获取单次执行的日志（从 DB 的 log_output 字段读取）。"""
+    result = await session.execute(
+        select(TaskExecution).where(TaskExecution.id == execution_id)
+    )
+    record = result.scalars().first()
+    if not record:
+        raise HTTPException(404, "执行记录不存在")
+
+    text = record.log_output or ""
+    if tail and len(text) > tail:
+        text = text[-tail:]
+
+    return ok({
+        "execution_id": record.id,
+        "status": record.status,
+        "started_at": str(record.started_at) if record.started_at else None,
+        "finished_at": str(record.finished_at) if record.finished_at else None,
+        "log": text,
+    })
+
+
+@router.get("/executions/{execution_id}/logs/stream")
+async def stream_execution_logs(execution_id: int):
+    """SSE 流式输出执行日志，便于 Web 端实时监控。"""
+
+    async def event_generator():
+        last_len = 0
+        idle_rounds = 0
+
+        while True:
+            async with get_session() as session:
+                if session is None:
+                    yield "event: error\ndata: \"数据库未配置\"\n\n"
+                    return
+
+                result = await session.execute(
+                    select(TaskExecution).where(TaskExecution.id == execution_id)
+                )
+                record = result.scalars().first()
+                if not record:
+                    yield "event: error\ndata: \"执行记录不存在\"\n\n"
+                    return
+
+                log_text = record.log_output or ""
+                status = record.status or ""
+
+            if len(log_text) > last_len:
+                chunk = log_text[last_len:]
+                last_len = len(log_text)
+                idle_rounds = 0
+                payload = json.dumps({"chunk": chunk, "status": status}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+            else:
+                idle_rounds += 1
+                yield ": keep-alive\n\n"
+
+            if status and status != "running" and idle_rounds >= 2:
+                yield "event: done\ndata: {}\n\n"
+                return
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

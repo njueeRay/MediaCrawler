@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.webui_models import ScheduledTask, TaskExecution, Subscription
+from api.services.scheduler_snapshot import dump_tasks_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,32 @@ class SchedulerService:
     """任务调度管理"""
 
     @staticmethod
+    async def append_execution_log(execution_id: int, line: str) -> None:
+        """追加一行执行日志到 TaskExecution.log_output（尽力而为，不影响主流程）。"""
+        if not execution_id or not line:
+            return
+        try:
+            from database.db_session import get_session
+
+            async with get_session() as session:
+                if not session:
+                    return
+                result = await session.execute(
+                    select(TaskExecution).where(TaskExecution.id == execution_id)
+                )
+                record = result.scalars().first()
+                if not record:
+                    return
+
+                stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                new_line = f"[{stamp}] {str(line).rstrip()}"
+                existing = record.log_output or ""
+                record.log_output = existing + ("\n" if existing else "") + new_line
+                await session.flush()
+        except Exception:
+            return
+
+    @staticmethod
     async def _wait_crawler_done(timeout_seconds: int = 1800) -> None:
         """等待 CrawlerManager 结束（单任务串行），超时抛错。"""
         from api.services.crawler_manager import crawler_manager
@@ -74,6 +101,8 @@ class SchedulerService:
         # 注册到 APScheduler
         if task.is_active:
             self._register_job(task)
+
+        await dump_tasks_snapshot(session)
         return task
 
     async def get_task(self, session: AsyncSession, task_id: int) -> Optional[ScheduledTask]:
@@ -125,6 +154,8 @@ class SchedulerService:
         elif task.is_active:
             self._remove_job(task.id)
             self._register_job(task)
+
+        await dump_tasks_snapshot(session)
         return task
 
     async def delete_task(self, session: AsyncSession, task_id: int) -> bool:
@@ -133,6 +164,9 @@ class SchedulerService:
             return False
         self._remove_job(task_id)
         await session.delete(task)
+
+        await session.flush()
+        await dump_tasks_snapshot(session)
         return True
 
     # ------ APScheduler 注册/移除 ------
@@ -270,6 +304,10 @@ class SchedulerService:
         result_summary: Dict = {}
 
         try:
+            await SchedulerService.append_execution_log(
+                execution_id,
+                f"start task_type={task_type} platform={platform}",
+            )
             if task_type in ("subscription_crawl", "subscription_combo"):
                 if not platform:
                     raise ValueError("subscription_* 任务必须指定 platform")
@@ -301,11 +339,19 @@ class SchedulerService:
                     crawled = 0
                     skipped_running = 0
                     for sub in subs:
-                        # 避免并发：已有爬虫运行则失败/跳过
+                        await SchedulerService.append_execution_log(
+                            execution_id,
+                            f"crawl creator {sub.creator_name}({sub.creator_id})",
+                        )
+                        # 避免并发：已有爬虫运行则跳过本条订阅（不中断整批任务）
                         crawler_status = crawler_manager.get_status()
                         if crawler_status.get("status") == "running":
                             skipped_running += 1
-                            raise RuntimeError("另一个爬虫任务正在运行")
+                            await SchedulerService.append_execution_log(
+                                execution_id,
+                                f"skip {sub.creator_id}: 爬虫正忙，稍后重试",
+                            )
+                            continue  # P1-1 FIX: 原为 raise，会导致整批任务失败
 
                         crawl_config = dict(task_config.get("crawl_config") or {})
                         if sub.crawl_config:
@@ -325,6 +371,11 @@ class SchedulerService:
                             raise RuntimeError(f"爬虫启动失败: {sub.creator_name}({sub.creator_id})")
 
                         await SchedulerService._wait_crawler_done(timeout_seconds=timeout_seconds)
+
+                        await SchedulerService.append_execution_log(
+                            execution_id,
+                            f"crawl done creator {sub.creator_id}",
+                        )
 
                         sub.last_crawled_at = datetime.now()
                         await session.flush()
@@ -385,6 +436,11 @@ class SchedulerService:
                         })
                         await session.commit()
 
+                        await SchedulerService.append_execution_log(
+                            execution_id,
+                            f"feishu sync triggered history_id={getattr(history, 'id', None)}",
+                        )
+
                         result_summary.update({
                             "sync_history_id": getattr(history, "id", None),
                             "sync_data_type": data_type,
@@ -393,6 +449,7 @@ class SchedulerService:
         except Exception as e:
             status = "failed"
             error_message = str(e)
+            await SchedulerService.append_execution_log(execution_id, f"error: {error_message}")
 
         # 更新执行记录
         duration = (datetime.now() - start_time).total_seconds()
@@ -410,6 +467,11 @@ class SchedulerService:
                         record.finished_at = datetime.now()
                         record.duration_seconds = round(duration, 1)
                         record.result_summary = result_summary or {}
+
+                    await SchedulerService.append_execution_log(
+                        execution_id,
+                        f"done status={status} duration={round(duration,1)}s",
+                    )
 
                     # 更新关联 task 的失败计数
                     if status == "failed" and record and record.task_id:

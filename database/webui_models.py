@@ -232,3 +232,22 @@ class ConfigHistory(Base):
     changed_at = Column(DateTime, default=func.now())
     change_source = Column(String(20), default="webui")
     # webui | api | file
+
+
+# ---------------------------------------------------------------------------
+# 6. SubscriptionCrawlStatus — 订阅采集状态（持久化）
+# ---------------------------------------------------------------------------
+class SubscriptionCrawlStatus(Base):
+    """订阅采集运行状态（用于重启恢复与状态追踪）"""
+    __tablename__ = "webui_subscription_crawl_status"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subscription_id = Column(Integer, nullable=False, unique=True, index=True)
+
+    status = Column(String(20), nullable=False, default="queued")
+    # queued | running | success | failed
+    message = Column(Text, default="")
+
+    last_started_at = Column(DateTime, nullable=True)
+    last_finished_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

@@ -35,7 +35,7 @@ class FeishuService:
         try:
             app_id = self._get_env("FEISHU_APP_ID")
             app_secret = self._get_env("FEISHU_APP_SECRET")
-            app_token = self._get_env("FEISHU_BITABLE_APP_TOKEN")
+            app_token = self._get_env("FEISHU_APP_TOKEN")  # FIX: was FEISHU_BITABLE_APP_TOKEN (naming mismatch)
 
             if not app_id or not app_secret:
                 return {
@@ -251,6 +251,20 @@ class FeishuService:
 
         platform = request.get("platform", "xhs")
         data_type = request.get("data_type", "note")
+
+        save_option = os.environ.get("SAVE_DATA_OPTION", "").strip().lower()
+        if save_option == "mysql":
+            save_option = "db"
+
+        if save_option in {"db", "sqlite", "postgres"}:
+            cmd.append("--db")
+            cmd.extend(["--db-type", save_option])
+            cmd.extend(["--platform", platform])
+            cmd.extend(["--data-type", data_type])
+            batch_size = request.get("batch_size", 500)
+            if batch_size != 500:
+                cmd.extend(["--batch-size", str(batch_size)])
+            return cmd
 
         # 查找对应平台数据目录下最新的文件
         data_dir = PROJECT_ROOT / "data" / self._platform_dir(platform)

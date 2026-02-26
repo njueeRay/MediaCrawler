@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""订阅采集队列管理（批量触发 + 状态可视化）
+"""订阅采集队列管理（批量触发 + 状态可视化 + 持久化）
 
 说明：
 - 由于 CrawlerManager 以“单子进程”运行，天然只支持单任务并发。
 - 本管理器提供一个轻量队列：按订阅 ID 逐个触发采集，并在内存中维护状态。
-- 状态不落库（进程重启会丢失），用于 WebUI 的运行态可视化。
+- 状态会落库到 `webui_subscription_crawl_status`，进程重启后可恢复。
 """
 
 from __future__ import annotations
@@ -14,11 +14,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from api.schemas import CrawlerStartRequest
 from api.services.crawler_manager import crawler_manager
 from api.services.subscription_service import subscription_service
+from database.webui_models import SubscriptionCrawlStatus
+import config as _cfg
 
 
 @dataclass
@@ -37,6 +39,7 @@ class SubscriptionCrawlManager:
         self._worker_task: Optional[asyncio.Task] = None
         self._monitor_task: Optional[asyncio.Task] = None
         self._running_sub_id: Optional[int] = None
+        self._restored = False
 
     def _now(self) -> str:
         return datetime.now().isoformat(timespec="seconds")
@@ -47,8 +50,87 @@ class SubscriptionCrawlManager:
         if self._monitor_task is None or self._monitor_task.done():
             self._monitor_task = asyncio.create_task(self._monitor())
 
+    async def _restore_from_db(self) -> None:
+        if self._restored:
+            return
+
+        from database.db_session import get_session
+
+        try:
+            async with get_session() as session:
+                if session is None:
+                    self._restored = True
+                    return
+
+                result = await session.execute(select(SubscriptionCrawlStatus))
+                rows = result.scalars().all()
+                for row in rows:
+                    status = row.status
+                    message = row.message or ""
+
+                    if status == "running":
+                        status = "failed"
+                        message = "服务重启，采集任务中断"
+                        row.status = status
+                        row.message = message
+                        row.last_finished_at = datetime.now()
+
+                    if status == "queued":
+                        message = "服务重启后恢复入队"
+                        row.message = message
+                        await self._queue.put(row.subscription_id)
+
+                    self._statuses[row.subscription_id] = CrawlStatus(
+                        sub_id=row.subscription_id,
+                        status=status,
+                        message=message,
+                        updated_at=self._now(),
+                    )
+        except Exception:
+            # 表不存在或数据库不可用时退化为纯内存模式
+            pass
+
+        self._restored = True
+
+        self._ensure_tasks()
+
+    async def _save_status(
+        self,
+        sub_id: int,
+        status: str,
+        message: str,
+        *,
+        started: bool = False,
+        finished: bool = False,
+    ) -> None:
+        from database.db_session import get_session
+
+        try:
+            async with get_session() as session:
+                if session is None:
+                    return
+
+                result = await session.execute(
+                    select(SubscriptionCrawlStatus).where(SubscriptionCrawlStatus.subscription_id == sub_id)
+                )
+                row = result.scalars().first()
+                if not row:
+                    row = SubscriptionCrawlStatus(subscription_id=sub_id)
+                    session.add(row)
+
+                row.status = status
+                row.message = message
+                now = datetime.now()
+                if started:
+                    row.last_started_at = now
+                if finished:
+                    row.last_finished_at = now
+        except Exception:
+            return
+
     async def enqueue(self, sub_ids: List[int]) -> Dict[str, List[int]]:
         """入队。已在队列/运行中的订阅会跳过。"""
+        await self._restore_from_db()
         queued: List[int] = []
         skipped: List[int] = []
 
@@ -64,6 +146,7 @@ class SubscriptionCrawlManager:
                     message="已加入队列",
                     updated_at=self._now(),
                 )
+                await self._save_status(sub_id, "queued", "已加入队列")
                 await self._queue.put(sub_id)
                 queued.append(sub_id)
 
@@ -71,7 +154,9 @@ class SubscriptionCrawlManager:
 
         return {"queued": queued, "skipped": skipped}
 
-    def get_status(self, sub_ids: Optional[List[int]] = None) -> dict:
+    async def get_status(self, sub_ids: Optional[List[int]] = None) -> dict:
+        await self._restore_from_db()
+
         if sub_ids is None:
             items = list(self._statuses.values())
         else:
@@ -109,6 +194,7 @@ class SubscriptionCrawlManager:
                 s.status = "running"
                 s.message = "正在启动采集"
                 s.updated_at = self._now()
+                await self._save_status(sub_id, "running", "正在启动采集", started=True)
 
                 # 真正触发采集（必须依赖 DB session，所以这里延迟到 monitor 中进行更稳）
                 # worker 只负责调度，实际启动交给 _start_one()
@@ -117,6 +203,7 @@ class SubscriptionCrawlManager:
                     s.status = "failed"
                     s.message = "启动采集失败"
                     s.updated_at = self._now()
+                    await self._save_status(sub_id, "failed", "启动采集失败", finished=True)
                     self._running_sub_id = None
 
             except asyncio.CancelledError:
@@ -143,9 +230,11 @@ class SubscriptionCrawlManager:
                         if "exited with code" in tail.lower() or "failed" in tail.lower():
                             s.status = "failed"
                             s.message = tail or "采集结束（失败）"
+                            await self._save_status(sub_id, "failed", s.message, finished=True)
                         else:
                             s.status = "success"
                             s.message = tail or "采集结束（成功）"
+                            await self._save_status(sub_id, "success", s.message, finished=True)
                         s.updated_at = self._now()
                     self._running_sub_id = None
 
@@ -174,12 +263,19 @@ class SubscriptionCrawlManager:
 
             crawl_config = sub.crawl_config or {}
 
+            configured_save_option = str(getattr(_cfg, "SAVE_DATA_OPTION", "json") or "json").lower()
+            save_option = configured_save_option
+            if save_option == "mysql":
+                save_option = "db"
+            if save_option not in {"csv", "db", "json", "sqlite", "mongodb", "excel", "postgres"}:
+                save_option = configured_save_option if configured_save_option in {"csv", "db", "json", "sqlite", "mongodb", "excel", "postgres"} else "json"
+
             start_request = CrawlerStartRequest(
                 platform=sub.platform,
                 login_type=crawl_config.get("login_type", "cookie"),
                 crawler_type="creator",
                 creator_ids=sub.creator_id,
-                save_option=crawl_config.get("save_option", "json"),
+                save_option=save_option,
                 enable_comments=crawl_config.get("enable_comments", False),
                 enable_sub_comments=crawl_config.get("enable_sub_comments", False),
                 headless=crawl_config.get("headless", True),

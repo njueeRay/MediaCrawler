@@ -45,15 +45,23 @@ app = FastAPI(
 # Get webui static files directory
 WEBUI_DIR = os.path.join(os.path.dirname(__file__), "webui")
 
-# CORS configuration - allow frontend dev server access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# CORS configuration
+# 生产环境请在 .env 中设置 ALLOWED_ORIGINS（逗号分隔），例如:
+# ALLOWED_ORIGINS=http://your-server:8080,https://your-domain.com
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+_cors_origins: list[str] = (
+    [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if _raw_origins
+    else [
         "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",  # Backup port
+        "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
-    ],
+    ]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,10 +82,19 @@ app.include_router(scheduler_router, prefix="/api")
 
 @app.on_event("startup")
 async def webui_startup():
-    """WebUI 首次启动: 注入默认字段映射方案"""
+    """WebUI 首次启动:
+    1. 建表 + 注入默认字段映射方案
+    2. 启动 APScheduler 并恢复全部激活的定时任务
+    """
+    # ── 1. 建表 + 种子数据 ──────────────────────────────────────────
     try:
-        from database.db_session import get_session
+        import config as _cfg
+        from database.db_session import get_session, create_tables
         from api.services.webui_init import seed_default_mappings
+
+        if _cfg.SAVE_DATA_OPTION not in ("csv", "json"):
+            await create_tables(_cfg.SAVE_DATA_OPTION)
+
         async with get_session() as session:
             if session is not None:
                 count = await seed_default_mappings(session)
@@ -85,6 +102,36 @@ async def webui_startup():
                     print(f"[WebUI] Seeded {count} default field mapping schemes")
     except Exception as e:
         print(f"[WebUI] Startup seed skipped: {e}")
+
+    # ── 2. 启动 APScheduler + 恢复活跃定时任务 ─────────────────────
+    # P0 FIX: 每次重启后必须重新向 APScheduler 注册数据库中的活跃任务，
+    #         否则任务记录存在于 DB 但实际不会被触发。
+    try:
+        from api.services.scheduler_service import scheduler_service, _get_scheduler
+        from database.db_session import get_session
+        from database.webui_models import ScheduledTask
+        from sqlalchemy import select
+
+        # 确保 APScheduler 已启动
+        _get_scheduler()
+
+        async with get_session() as session:
+            if session is not None:
+                result = await session.execute(
+                    select(ScheduledTask).where(ScheduledTask.is_active == True)  # noqa: E712
+                )
+                active_tasks = result.scalars().all()
+                recovered = 0
+                for task in active_tasks:
+                    try:
+                        scheduler_service._register_job(task)
+                        recovered += 1
+                    except Exception as reg_err:
+                        print(f"[WebUI] Failed to recover task #{task.id} '{task.name}': {reg_err}")
+                if recovered:
+                    print(f"[WebUI] Recovered {recovered} scheduled task(s) from DB")
+    except Exception as e:
+        print(f"[WebUI] APScheduler recovery skipped: {e}")
 
 
 @app.get("/")
@@ -232,6 +279,7 @@ async def get_platforms():
             {"value": "wb", "label": "Weibo", "icon": "message-circle"},
             {"value": "tieba", "label": "Baidu Tieba", "icon": "messages-square"},
             {"value": "zhihu", "label": "Zhihu", "icon": "help-circle"},
+            {"value": "wechat", "label": "微信公众号", "icon": "message-square"},
         ]
     }
 

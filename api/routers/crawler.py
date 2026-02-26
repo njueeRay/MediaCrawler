@@ -18,6 +18,8 @@
 
 from fastapi import APIRouter, HTTPException
 
+from api.schemas.common import ok
+
 from ..schemas import CrawlerStartRequest, CrawlerStatusResponse
 from ..services import crawler_manager
 
@@ -34,7 +36,7 @@ async def start_crawler(request: CrawlerStartRequest):
             raise HTTPException(status_code=400, detail="Crawler is already running")
         raise HTTPException(status_code=500, detail="Failed to start crawler")
 
-    return {"status": "ok", "message": "Crawler started successfully"}
+    return ok({"status": "ok"}, message="Crawler started successfully")
 
 
 @router.post("/stop")
@@ -47,17 +49,17 @@ async def stop_crawler():
             raise HTTPException(status_code=400, detail="No crawler is running")
         raise HTTPException(status_code=500, detail="Failed to stop crawler")
 
-    return {"status": "ok", "message": "Crawler stopped successfully"}
+    return ok({"status": "ok"}, message="Crawler stopped successfully")
 
 
 @router.get("/status", response_model=CrawlerStatusResponse)
 async def get_crawler_status():
     """Get crawler status"""
-    return crawler_manager.get_status()
+    return ok(crawler_manager.get_status())
 
 
 @router.get("/logs")
 async def get_logs(limit: int = 100):
     """Get recent logs"""
     logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
-    return {"logs": [log.model_dump() for log in logs]}
+    return ok([log.model_dump() for log in logs])

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_db_optional
 from api.schemas.common import ok, fail, page_ok
 from api.services.config_service import config_service
-from config.config_meta import CONFIG_GROUPS
+from config.config_meta import CONFIG_GROUPS, get_all_config_keys
 
 router = APIRouter(prefix="/config", tags=["配置管理"])
 
@@ -68,6 +68,12 @@ async def update_configs(
     configs = body.get("configs", {})
     if not configs:
         return fail(400, "未提供任何配置项")
+
+    allowed_keys = set(get_all_config_keys()) | {"FEISHU_APP_TOKEN"}
+    unknown_keys = sorted([k for k in configs.keys() if k not in allowed_keys])
+    if unknown_keys:
+        return fail(400, f"存在未知配置项: {', '.join(unknown_keys)}")
+
     updated = await config_service.update_configs(configs, session)
 
     # 判断是否涉及数据库切换

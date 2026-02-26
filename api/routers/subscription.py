@@ -15,6 +15,10 @@ from api.schemas.subscription import (
 )
 from api.services.subscription_service import subscription_service
 from api.services.subscription_crawl_manager import subscription_crawl_manager
+from api.services.subscription_service import (
+    WechatSourceAuthInvalid,
+    WechatSourceUnavailable,
+)
 
 router = APIRouter(prefix="/subscribe", tags=["订阅管理"])
 
@@ -65,7 +69,7 @@ async def get_crawl_status(
         except ValueError:
             return fail(400, "ids 参数格式错误，应为逗号分隔整数")
 
-    status = subscription_crawl_manager.get_status(sub_ids)
+    status = await subscription_crawl_manager.get_status(sub_ids)
     return ok(status)
 
 
@@ -75,10 +79,17 @@ async def search_creators(
     session: AsyncSession = Depends(get_db),
 ):
     """搜索各平台创作者"""
-    results = await subscription_service.search_creators(
-        session, body.platform, body.keyword
-    )
-    return ok({"items": results})
+    try:
+        results = await subscription_service.search_creators(
+            session, body.platform, body.keyword
+        )
+        return ok({"items": results})
+    except WechatSourceAuthInvalid as e:
+        return fail(401, str(e))
+    except WechatSourceUnavailable as e:
+        return fail(503, str(e))
+    except Exception as e:
+        return fail(500, f"搜索失败：{e}")
 
 
 @router.get("")

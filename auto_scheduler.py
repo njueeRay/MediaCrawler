@@ -1,5 +1,32 @@
 #!/usr/bin/env python3
 """
+[已废弃 / DEPRECATED] — 请勿使用此脚本。
+
+原因：
+  1. 依赖 `feishu_sync_simple.py`（该文件不存在），启动即崩溃。
+  2. 调度能力已由 WebUI 内置的 APScheduler 体系完全覆盖：
+       - 可视化任务管理：[WebUI] → 调度任务
+       - API 端点：/api/scheduler/tasks
+       - 服务入口：uvicorn api.main:app --host 0.0.0.0 --port 8080
+
+迁移指南：
+  - 定时爬虫任务：在 WebUI 中创建 ScheduledTask（task_type=subscription_crawl）
+  - 飞书同步：在 WebUI 中创建 ScheduledTask（task_type=sync 或 subscription_combo）
+  - 单次手动执行：使用 scripts/wechat_feishu_workflow.sh
+
+废弃时间：2026-02-26 (Sprint #002)
+替代方案：api/services/scheduler_service.py + api/main.py (APScheduler)
+"""
+# fmt: off
+# noqa: F401
+raise RuntimeError(
+    "auto_scheduler.py 已废弃，请使用 WebUI APScheduler 体系。"
+    "运行: uvicorn api.main:app --host 0.0.0.0 --port 8080"
+)
+# 以下为原始代码存档，保留供参考，不会被执行。
+# ============================================================
+
+"""
 自动化调度器 - MediaCrawler-飞书同步
 支持定时任务、文件监控、AI数据清洗等自动化流程
 """

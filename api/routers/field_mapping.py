@@ -114,58 +114,165 @@ async def delete_scheme(scheme_id: int, session: AsyncSession = Depends(get_db))
 @router.post("/preview")
 async def preview_mapping(body: dict, session: AsyncSession = Depends(get_db)):
     """
-    使用映射方案预览数据转换效果 — 从数据文件查询样本数据，应用映射后返回。
+    使用映射方案预览数据转换效果。
+
+    - DB 模式：优先从数据库内容表抽样（目前重点支持 xhs/wechat）
+    - 非 DB 模式：回退到 data/ 目录下的最新 JSON 文件抽样
+
+    返回：
+    - original: 原始样本
+    - mapped: 映射后的展示结果（display_name -> value）
+    - details: 每个映射字段的 raw/transformed 明细（含 transform/feishu_type）
+    - feishu_fields: 与 mapped 等价的“最终写入飞书 fields”结构（便于对齐飞书同步）
     """
     scheme_id = body.get("scheme_id")
-    limit = body.get("limit", 5)
+    limit = int(body.get("limit", 5) or 5)
+    limit = max(1, min(limit, 50))
     if not scheme_id:
         return fail(400, "请指定 scheme_id")
     scheme = await field_mapping_service.get_scheme(session, scheme_id)
     if not scheme:
         raise HTTPException(404, "方案不存在")
 
-    # 从数据文件中加载样本数据
-    import json
-    from pathlib import Path
-    data_dir = Path(__file__).resolve().parents[2] / "data"
-    platform_dirs = {
-        "xhs": "xhs", "dy": "douyin", "bili": "bilibili",
-        "wb": "weibo", "wechat": "wechat", "ks": "kuaishou",
-        "tieba": "tieba", "zhihu": "zhihu",
-    }
-    platform_dir = data_dir / platform_dirs.get(scheme.platform, scheme.platform)
+    def _json_safe(v):
+        if v is None:
+            return None
+        if isinstance(v, (str, int, float, bool)):
+            return v
+        if hasattr(v, "isoformat"):
+            try:
+                return v.isoformat()
+            except Exception:
+                return str(v)
+        if isinstance(v, (bytes, bytearray)):
+            try:
+                return v.decode("utf-8", errors="replace")
+            except Exception:
+                return str(v)
+        if isinstance(v, (list, tuple)):
+            return [_json_safe(x) for x in v]
+        if isinstance(v, dict):
+            return {str(k): _json_safe(val) for k, val in v.items()}
+        return str(v)
+
+    def _build_preview(row: dict) -> dict:
+        # 逐字段明细
+        details = []
+        mapped = {}
+        for it in (scheme.items or []):
+            if not it.enabled:
+                continue
+            raw = row.get(it.source_field)
+            transformed = field_mapping_service._transform_value(raw, it.transform, it.transform_config or {})
+            mapped[it.display_name] = transformed
+            details.append({
+                "source_field": it.source_field,
+                "display_name": it.display_name,
+                "raw_value": _json_safe(raw),
+                "transformed_value": _json_safe(transformed),
+                "transform": it.transform or "none",
+                "transform_config": it.transform_config or {},
+                "feishu_type": it.feishu_type,
+            })
+        return {
+            "original": _json_safe(row),
+            "mapped": _json_safe(mapped),
+            "details": details,
+            "feishu_fields": _json_safe(mapped),
+        }
+
+    # -------------------- 1) DB sample (preferred) --------------------
+
+    import config as _cfg
+    save_opt = str(getattr(_cfg, "SAVE_DATA_OPTION", "csv") or "csv").lower()
+    db_mode = save_opt in ("sqlite", "db", "postgres")
 
     original_data = []
-    if platform_dir.exists():
-        # 查找最新的 JSON 文件
-        json_files = sorted(
-            [f for f in platform_dir.rglob("*.json") if f.is_file()],
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-        for jf in json_files[:3]:  # 最多尝试 3 个文件
-            try:
-                with open(jf, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                if isinstance(raw, list) and raw:
-                    original_data = raw[:limit]
-                    break
-                elif isinstance(raw, dict):
-                    original_data = [raw]
-                    break
-            except Exception:
-                continue
-
-    # 应用映射
     mapped_data = []
-    if original_data and scheme.items:
-        for row in original_data:
-            mapped_row = field_mapping_service.apply_mapping(row, scheme.items)
-            mapped_data.append(mapped_row)
+    details_data = []
+    feishu_fields_data = []
+
+    if db_mode:
+        from sqlalchemy import select
+        from database.models import Base
+        import database.webui_models  # noqa: F401
+
+        # 重点支持 xhs/wechat；其余平台后续按需扩展
+        platform_to_table = {
+            "xhs": "xhs_note",
+            "wechat": "wechat_article",
+        }
+
+        tname = platform_to_table.get(str(scheme.platform or "").lower())
+        tbl = Base.metadata.tables.get(tname) if tname else None
+        if tbl is not None:
+            try:
+                rows = (await session.execute(select(tbl).limit(limit))).mappings().all()
+                for r in rows:
+                    d = dict(r)
+                    preview = _build_preview(d)
+                    original_data.append(preview["original"])
+                    mapped_data.append(preview["mapped"])
+                    details_data.append(preview["details"])
+                    feishu_fields_data.append(preview["feishu_fields"])
+            except Exception:
+                # ignore and fallback to file sample
+                original_data = []
+
+    # -------------------- 2) File sample fallback --------------------
+
+    if not original_data:
+        import json
+        from pathlib import Path
+
+        data_dir = Path(__file__).resolve().parents[2] / "data"
+        platform_dirs = {
+            "xhs": "xhs",
+            "dy": "douyin",
+            "bili": "bilibili",
+            "wb": "weibo",
+            "wechat": "wechat",
+            "ks": "kuaishou",
+            "tieba": "tieba",
+            "zhihu": "zhihu",
+        }
+        platform_dir = data_dir / platform_dirs.get(scheme.platform, scheme.platform)
+
+        file_rows: list[dict] = []
+        if platform_dir.exists():
+            json_files = sorted(
+                [f for f in platform_dir.rglob("*.json") if f.is_file()],
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            for jf in json_files[:3]:
+                try:
+                    with open(jf, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    if isinstance(raw, list) and raw:
+                        file_rows = [x for x in raw[:limit] if isinstance(x, dict)]
+                        break
+                    if isinstance(raw, dict):
+                        file_rows = [raw]
+                        break
+                except Exception:
+                    continue
+
+        for r in file_rows:
+            preview = _build_preview(r)
+            original_data.append(preview["original"])
+            mapped_data.append(preview["mapped"])
+            details_data.append(preview["details"])
+            feishu_fields_data.append(preview["feishu_fields"])
 
     return ok({
         "scheme_name": scheme.name,
+        "platform": scheme.platform,
+        "data_type": scheme.data_type,
+        "save_data_option": save_opt,
         "original": original_data,
         "mapped": mapped_data,
+        "details": details_data,
+        "feishu_fields": feishu_fields_data,
         "sample_count": len(original_data),
     })

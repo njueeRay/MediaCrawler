@@ -23,6 +23,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from api.schemas.common import ok
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -62,7 +63,7 @@ def get_file_info(file_path: Path) -> dict:
 async def list_data_files(platform: Optional[str] = None, file_type: Optional[str] = None):
     """Get data file list"""
     if not DATA_DIR.exists():
-        return {"files": []}
+        return ok({"files": []})
 
     files = []
     supported_extensions = {".json", ".csv", ".xlsx", ".xls"}
@@ -92,7 +93,7 @@ async def list_data_files(platform: Optional[str] = None, file_type: Optional[st
     # Sort by modification time (newest first)
     files.sort(key=lambda x: x["modified_at"], reverse=True)
 
-    return {"files": files}
+    return ok({"files": files})
 
 
 @router.get("/files/{file_path:path}")
@@ -119,8 +120,8 @@ async def get_file_content(file_path: str, preview: bool = True, limit: int = 10
                 with open(full_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        return {"data": data[:limit], "total": len(data)}
-                    return {"data": data, "total": 1}
+                        return ok({"data": data[:limit], "total": len(data)})
+                    return ok({"data": data, "total": 1})
             elif full_path.suffix == ".csv":
                 import csv
                 with open(full_path, "r", encoding="utf-8") as f:
@@ -133,7 +134,7 @@ async def get_file_content(file_path: str, preview: bool = True, limit: int = 10
                     # Re-read to get total count
                     f.seek(0)
                     total = sum(1 for _ in f) - 1
-                    return {"data": rows, "total": total}
+                    return ok({"data": rows, "total": total})
             elif full_path.suffix.lower() in (".xlsx", ".xls"):
                 import pandas as pd
                 # Read first limit rows
@@ -143,11 +144,11 @@ async def get_file_content(file_path: str, preview: bool = True, limit: int = 10
                 total = len(df_count)
                 # Convert to list of dictionaries, handle NaN values
                 rows = df.where(pd.notnull(df), None).to_dict(orient='records')
-                return {
+                return ok({
                     "data": rows,
                     "total": total,
                     "columns": list(df.columns)
-                }
+                })
             else:
                 raise HTTPException(status_code=400, detail="Unsupported file type for preview")
         except json.JSONDecodeError:
@@ -191,7 +192,7 @@ async def download_file(file_path: str):
 async def get_data_stats():
     """Get data statistics"""
     if not DATA_DIR.exists():
-        return {"total_files": 0, "total_size": 0, "by_platform": {}, "by_type": {}}
+        return ok({"total_files": 0, "total_size": 0, "by_platform": {}, "by_type": {}})
 
     stats = {
         "total_files": 0,
@@ -227,7 +228,7 @@ async def get_data_stats():
             except Exception:
                 continue
 
-    return stats
+    return ok(stats)
 
 
 # -------------------- DB data browsing (sqlite/db/postgres) --------------------
@@ -286,7 +287,7 @@ async def list_db_tables(platform: Optional[str] = None):
                 total = 0
             result.append({"table": tname, "count": total})
 
-    return {"code": 0, "data": {"items": result}}
+    return ok({"items": result})
 
 
 @router.get("/db/records")
@@ -315,7 +316,7 @@ async def get_db_records(table: str, limit: int = 100, offset: int = 0):
             raise HTTPException(status_code=400, detail="数据库未配置")
         rows = (await session.execute(select(tbl).offset(offset).limit(limit))).mappings().all()
         records = [dict(r) for r in rows]
-        return {"code": 0, "data": {"records": records, "table": table, "limit": limit, "offset": offset}}
+        return ok({"records": records, "table": table, "limit": limit, "offset": offset})
 
 
 @router.get("/db/stats")
@@ -328,4 +329,4 @@ async def get_db_stats():
     items = (await list_db_tables())
     rows = items.get("data", {}).get("items", [])
     total = sum((r.get("count") or 0) for r in rows)
-    return {"code": 0, "data": {"total_records": total, "by_table": rows}}
+    return ok({"total_records": total, "by_table": rows})
