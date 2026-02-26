@@ -1,3 +1,7 @@
+> **说明**：本文档为 Fork 来源 [NanmiCoder/MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 的原版 README，保留作溯源参考。当前项目已在此基础上大量新增自研功能，请以根目录 [README.md](../../README.md) 为准。
+
+---
+
 # 🔥 MediaCrawler - 自媒体平台爬虫 🕷️
 
 <div align="center" markdown="1">

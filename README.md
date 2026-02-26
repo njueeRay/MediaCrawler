@@ -35,10 +35,10 @@
 | 贴吧   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 
 ### 🚀 增强功能（新增）
-| 功能模块 | 飞书同步 | AI数据清洗 | 自动化调度 | 监控告警 | 容器部署 | Web界面 | API服务 |
-| -------- | -------- | ---------- | ---------- | -------- | -------- | ------- | ------- |
-| 当前版本 | ✅        | ⏳         | ⏳         | ⏳       | ⏳       | 📋      | 📋      |
-| 计划版本 | ✅        | ✅          | ✅          | ✅        | ✅        | ✅       | ✅       |
+| 功能模块 | 飞书同步 | WebUI控制台 | API服务 | 任务调度 | Pipeline引擎 | AI数据清洗 | 容器部署 |
+| -------- | -------- | ----------- | ------- | -------- | ----------- | ---------- | -------- |
+| 当前版本 | ✅ | ✅ | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| 说明 | 全链路同步 | Sprint 3 完成 | FastAPI | Cron+手动触发 | 5步骤模块化 | 开发中 | 开发中 |
 
 > ✅ 已完成 | ⏳ 开发中 | 📋 已规划
 
@@ -64,58 +64,69 @@ python main.py --platform xhs --type search --keywords "投资理财"
 cat README_original.md
 ```
 
-### 3. 飞书数据同步（新增功能）
+### 3. 启动 WebUI 控制台（新增功能）
 ```bash
-# 激活虚拟环境
-source venv/bin/activate
+# 启动 API 服务器（端口 8080）
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8080
 
-# 同步单个文件到飞书
-python feishu_sync_simple.py --file data/xhs/json/search_contents_2025-09-05.json
-
-# 批量同步整个目录
-python feishu_sync_simple.py --dir data/xhs/json/ --batch-size 50
+# 浏览器访问 WebUI 控制台
+open http://localhost:8080
 ```
 
-### 4. 自动化调度（智能增强）
+### 4. 飞书数据同步
 ```bash
-# 启动自动化调度器（7x24小时运行）
-./start_scheduler.sh
+# 同步单个 JSON/CSV 文件
+uv run sync_to_feishu.py --file data/xhs/json/search_contents.json
 
-# 单次执行特定任务
-python auto_scheduler.py --mode once --task daily
+# 批量同步整个目录
+uv run sync_to_feishu.py --dir data/xhs/json/ --batch-size 50
+
+# Pipeline 全链路（飞书拉取 → 爬虫 → 飞书推送）
+# 通过 WebUI 控制台的「订阅任务」配置并触发
+```
+
+### 5. 自动化调度
+```bash
+# WebUI 控制台创建定时任务并管理调度
+# 或通过 API 直接触发
+curl -X POST http://localhost:8080/api/scheduler/tasks/{id}/trigger
 ```
 
 ## 📁 项目结构
 
 ```
 MediaCrawler/
-├── 📂 原版爬虫模块/
-│   ├── main.py                   # 主爬虫程序
-│   ├── media_platform/           # 各平台爬虫实现
-│   ├── config/                   # 爬虫配置
-│   └── README_original.md        # 📖 原版完整文档
+├── 📂 爬虫核心
+│   ├── main.py                   # 爬虫入口
+│   ├── media_platform/           # 各平台实现（XHS/抖音/B站/微博等）
+│   └── config/                   # 爬虫配置
 │
-├── 🚀 飞书同步模块/
-│   ├── feishu_sync_simple.py     # 核心同步脚本
-│   ├── feishu_sync/              # 支持模块
-│   │   ├── config.py            # 配置管理
-│   │   └── data_formatter.py    # 数据格式化
-│   └── docs/feishu/             # 📚 飞书文档
+├── 🚀 飞书同步模块
+│   ├── sync_to_feishu.py         # 统一 CLI（同步/追加/JSON展开）
+│   ├── feishu_sync/              # 核心库
+│   │   ├── sync_manager.py       # 建表/建字段/批量写入
+│   │   ├── data_formatter.py     # 数据格式化
+│   │   ├── image_uploader.py     # 图片/附件上传
+│   │   ├── json_column_sync.py   # JSON列展开同步
+│   │   └── read_from_feishu.py   # 飞书数据拉取
+│   └── docs/feishu/              # 飞书相关文档
 │
-├── 🤖 自动化模块/
-│   ├── auto_scheduler.py         # 自动化调度器
-│   ├── ai_processor/             # AI数据处理
-│   └── monitoring/               # 监控模块
+├── 🖥️ WebUI 控制台
+│   ├── api/                      # FastAPI 后端
+│   │   ├── main.py               # API 入口
+│   │   ├── routers/              # 路由（爬虫/调度/订阅/配置）
+│   │   ├── services/             # 业务逻辑（含 pipeline_steps.py）
+│   │   └── webui/                # 前端静态文件
+│   └── webui-src/                # Vue3 前端源码
 │
-├── 🛠️ 部署工具/
-│   ├── setup.sh                  # 一键安装脚本
-│   ├── docker-compose.yml        # 容器编排
-│   └── requirements.txt          # 依赖管理
+├── ⏰ 任务调度
+│   ├── auto_scheduler.py         # 独立调度器
+│   └── api/services/scheduler_service.py  # WebUI 集成调度
 │
-└── 📊 数据存储/
-    ├── data/                     # 爬虫数据
-    ├── logs/                     # 运行日志
-    └── config/                   # 用户配置
+└── 🗄️  数据存储
+    ├── database/                 # ORM 模型（SQLite/MySQL）
+    ├── store/                    # 存储适配层（CSV/JSON/DB/Excel）
+    └── data/                     # 爬取数据输出目录
 ```
 
 ## 🎯 核心优势
@@ -198,38 +209,50 @@ tasks:
 
 ## 🔮 发展规划
 
-### 📅 近期计划 (v1.1 - v1.2)
-- [x] 飞书数据同步功能
-- [ ] AI数据清洗和质量评分
-- [ ] 自动化调度和监控
+### ✅ 已完成
+- [x] 飞书多维表格全链路数据同步
+- [x] WebUI 控制台（Vue3 + FastAPI，Sprint 1~3 验收通过）
+- [x] RESTful API 服务
+- [x] 任务调度系统（Cron + 手动触发）
+- [x] Pipeline 模块化引擎（5步骤：爬取 → 飞书拉取 → 飞书推送 → 数据处理）
+- [x] SQLite 中间层（feishu_record_snapshot）
+
+### 🔮 规划中
+- [ ] AI 数据清洗和质量评分
 - [ ] 容器化部署方案
+- [ ] 多租户 SaaS 模式
+- [ ] 实时数据可视化看板
 
-### 🚀 中期规划 (v2.0)
-- [ ] Web管理界面
-- [ ] RESTful API服务
-- [ ] 多平台数据融合
-- [ ] 实时数据可视化
-
-### 🌟 长期愿景 (v3.0+)
-- [ ] 企业级数据中台
-- [ ] AI驱动的智能分析
-- [ ] 多租户SaaS服务
-- [ ] 开放API生态
-
-详细规划请查看：[📋 完整发展规划](docs/feishu/todo.md)
+详细规划参见：[Feishu Backlog](docs/ops/feishu-backlog.md)
 
 ## 📚 文档索引
 
-### 🔗 核心文档
-- **[原版功能文档](README_original.md)** - 完整的爬虫功能说明
-- **[飞书同步指南](docs/feishu/feishu_README.md)** - 飞书集成实现说明
-- **[开发者文档](docs/feishu/飞书开发说明.md)** - 技术实现详解
-- **[发展规划](docs/feishu/todo.md)** - 完整的项目路线图
+### 🔗 用户指南（`docs/guide/`）
+- [快速开始 / 环境搭建](docs/guide/quickstart.md)
+- [登录方式说明](docs/guide/login.md)
+- [代理IP配置（快代理 / 豌豆HTTP）](docs/guide/proxy.md)
+- [数据存储配置](docs/guide/storage.md)
+- [数据导出（Excel / 词云图）](docs/guide/export.md)
+- [CDP模式使用](docs/guide/cdp.md)
+- [自动化运行任务](docs/guide/automation.md)
+- [常见问题](docs/guide/faq.md)
+
+### 🔗 飞书集成（`docs/feishu/`）
+- [飞书功能概览](docs/feishu/README.md)
+- [开发配置说明](docs/feishu/dev-notes.md)
+
+### 🔗 技术参考（`docs/reference/`）
+- [项目架构总览](docs/reference/01-项目架构总览.md)
+- [平台爬虫模块详解](docs/reference/02-平台爬虫模块详解.md)
+- [数据存储系统详解](docs/reference/03-数据存储系统详解.md)
+- [WebUI API 与可视化系统](docs/reference/06-WebUI-API与可视化系统.md)
+- [全流程调试经验总结](docs/reference/07-全流程调试经验总结.md)
+- [上游原版功能文档](docs/reference/upstream-readme.md)
 
 ### 🎯 快速导航
-- **新用户** → [快速开始](#-快速开始) → [飞书配置](docs/feishu/快速接入多维表格.md)
-- **开发者** → [项目结构](#-项目结构) → [开发文档](docs/feishu/飞书开发说明.md)
-- **企业用户** → [部署指南](#-高级配置) → [商业化规划](docs/feishu/todo.md#-商业化路径)
+- **新用户** → [快速开始](#1-环境准备) → [飞书配置](docs/feishu/dev-notes.md)
+- **开发者** → [技术参考](docs/reference/) → [WebUI开发文档](docs/dev/webui/)
+- **运营团队** → [Team Playbook](docs/ops/team-playbook.md) → [飞书功能概览](docs/feishu/README.md)
 
 ## 🤝 贡献指南
 

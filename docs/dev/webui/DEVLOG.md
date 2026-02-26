@@ -536,3 +536,57 @@
   - 旧数据（无 `cover_*`）：可按 `cover` 链接自动归档至 `封面`
 
 ---
+
+## 2026-02-27 — 文档库全体重整（docs/ 结构化迁移）
+
+### 背景
+
+项目自 fork NanmiCoder/MediaCrawler 以来新增了大量自研模块，但 docs/ 目录长期处于"上游遗留 + 自研内容混存"状态，分类混乱、死档积压、命名不一致，不利于团队协作和新成员快速上手。
+
+本次按 Brain + PM 联合研讨会决议（见 `docs/ops/meetings/2026-02-27-docs-restructure-workshop.md`）执行全量重整。
+
+### 新目录结构
+
+```
+docs/
+├── guide/          用户指南（7个文件，3组内容合并）
+├── reference/      技术参考（原知识库迁移重命名）
+├── dev/webui/      内部设计文档（5份设计文档 + DEVLOG）
+├── ops/            团队运营（playbook / meetings / copilot命令）
+└── feishu/         飞书集成（README + dev-notes，保留 SDK 子目录）
+```
+
+### 主要变更
+
+**迁移（git mv 追踪）：**
+- `docs/知识库/` 01~07 → `docs/reference/`
+- `docs/dev/WebUI/` 设计文档 → `docs/dev/webui/`（小写规范化）
+- 团队运营文档 → `docs/ops/`
+- 会议纪要 → `docs/ops/meetings/`
+- `README_original.md` → `docs/reference/upstream-readme.md`
+
+**内容合并（3组）：**
+- 代理文档 3→1 → `docs/guide/proxy.md`
+- 导出文档 2→1 → `docs/guide/export.md`
+- 飞书说明 2→1 → `docs/feishu/dev-notes.md`
+
+**删除（23项）：**
+- 上游推广文档（作者介绍/知识付费/微信群/开发者咨询/mediacrawlerpro等）
+- 废弃双语 README（`README_en.md`、`README_es.md`）
+- 已完结临时工作单（WebUI/TODO.md 等 6 份）
+- 被知识库覆盖的旧版架构文档（项目架构文档.md、项目代码结构.md）
+
+**保留：**
+- `docs/feishu/Python_SDK/`、`docs/feishu/事件/` 等 SDK 参考子目录（按需保留）
+
+**同步更新：**
+- `README.md`：功能状态表更正（WebUI/调度/Pipeline 标为 ✅）；补充 uvicorn 启动命令；更新文档链接
+- `docs/feishu/README.md`：修正过期链接，更新功能状态
+
+### commit
+
+```
+docs: restructure docs/ into guide/reference/ops/dev/feishu layout
+```
+
+---
