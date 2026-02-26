@@ -359,8 +359,8 @@ class FeishuPushStep(PipelineStep):
 
 class FeishuPullStep(PipelineStep):
     """
-    从飞书表拉取记录（带过滤），保存为本地 CSV（原 Step 3）。
-    输出路径写入 ctx.vars[output]，供后续步骤使用。
+    从飞书表拉取记录（带过滤），默认写入 SQLite feishu_record_snapshot（原 Step 3）。
+    输出引用写入 ctx.vars[output]，供后续步骤使用。
 
     config keys:
       table_id        — 来源飞书表 ID（必填）
@@ -371,7 +371,11 @@ class FeishuPullStep(PipelineStep):
       view_id         — 视图 ID（不填则使用默认视图）
       select_fields   — 返回字段（逗号分隔，不填则返回全部）
       output          — 输出到 ctx.vars 的 key（默认 "feishu_pull_csv"）
-      output_path     — 强制指定 CSV 输出路径（不填则自动生成）
+      output_path     — 强制指定 CSV 输出路径（不填则自动生成，仅 csv/both 模式有效）
+      output_format   — sqlite | csv | both（默认 sqlite）
+                        sqlite: 仅写 feishu_record_snapshot，ctx.vars 存 dict
+                        csv:    仅写 CSV，ctx.vars 存路径字符串（向后兼容）
+                        both:   同时写，ctx.vars 存 dict（含 csv_path）
       platform        — 用于决定输出目录（优先级 > ctx.platform）
     """
 
@@ -385,17 +389,30 @@ class FeishuPullStep(PipelineStep):
             await log("[feishu_pull] ERROR: 缺少 table_id")
             return
 
+        output_format = cfg.get("output_format", "sqlite")  # sqlite | csv | both
         platform = cfg.get("platform") or ctx.platform or "default"
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = PROJECT_ROOT / "data" / platform
-        out_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = cfg.get("output_path") or str(out_dir / f"feishu_pull_{ts}.csv")
+        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        # 生成唯一 dataset 名：用于 SQLite 中间层命名空间
+        safe_tid = table_id[:12].replace("-", "")
+        dataset_name = f"pipe_{safe_tid}_{ts}"
 
         cmd = [
             "uv", "run", "python", "feishu_sync/read_from_feishu.py",
             "--table-id", table_id,
-            "--output-csv", csv_path,
         ]
+
+        # SQLite 输出
+        if output_format in ("sqlite", "both"):
+            cmd += ["--output-db", "--db-type", "sqlite", "--db-dataset", dataset_name]
+
+        # CSV 输出
+        csv_path: str = ""
+        if output_format in ("csv", "both"):
+            out_dir = PROJECT_ROOT / "data" / platform
+            out_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = cfg.get("output_path") or str(out_dir / f"feishu_pull_{ts}.csv")
+            cmd += ["--output-csv", csv_path]
 
         filter_field = cfg.get("filter_field", "")
         filter_values = cfg.get("filter_values", [])
@@ -420,11 +437,28 @@ class FeishuPullStep(PipelineStep):
             await log(f"[feishu_pull] ERROR exit_code={exit_code}")
         else:
             output_key = cfg.get("output", "feishu_pull_csv")
-            ctx.vars[output_key] = csv_path
-            await log(f"[feishu_pull] OK output={output_key} csv_path={csv_path}")
+
+            if output_format == "csv":
+                # 向后兼容：字符串路径
+                ctx.vars[output_key] = csv_path
+                ref_desc = f"csv_path={csv_path}"
+            elif output_format == "both":
+                ctx.vars[output_key] = {
+                    "format": "both",
+                    "dataset": dataset_name,
+                    "csv_path": csv_path,
+                }
+                ref_desc = f"dataset={dataset_name} csv_path={csv_path}"
+            else:  # sqlite（默认）
+                ctx.vars[output_key] = {"format": "sqlite", "dataset": dataset_name}
+                ref_desc = f"dataset={dataset_name}"
+
+            await log(f"[feishu_pull] OK output={output_key} format={output_format} {ref_desc}")
             ctx.step_results.append({
                 "step": "feishu_pull",
                 "status": "ok",
+                "output_format": output_format,
+                "dataset_name": dataset_name,
                 "csv_path": csv_path,
                 "output_key": output_key,
             })
@@ -432,12 +466,13 @@ class FeishuPullStep(PipelineStep):
 
 class FeishuPushJsonStep(PipelineStep):
     """
-    将 CSV 中指定 JSON 列展开后推送到飞书表 2（原 Step 4）。
-    读取上一步（feishu_pull）写入 ctx.vars 的 CSV 路径。
+    将上一步输出（SQLite 快照 或 CSV）中的 JSON 列展开后推送到飞书表（原 Step 4）。
+    自动识别 ctx.vars 中的输入格式：dict → SQLite 快照，str → CSV 路径（向后兼容）。
 
     config keys:
-      input           — 从 ctx.vars 读取 CSV 路径的 key（默认 "feishu_pull_csv"）
-      csv_path        — 直接指定 CSV 路径（优先级 > input）
+      input           — 从 ctx.vars 读取引用的 key（默认 "feishu_pull_csv"）
+      csv_path        — 直接指定 CSV 路径，强制 CSV 模式（优先级 > input）
+      snapshot_dataset — 直接指定 dataset 名，强制 SQLite 模式（优先级 > input）
       table_id        — 目标飞书表 ID（必填）
       json_columns    — 要展开的 JSON 列名（必填，逗号分隔）
       json_primary    — 去重主键列名（默认 "记录ID"）
@@ -452,17 +487,6 @@ class FeishuPushJsonStep(PipelineStep):
     async def run(self, ctx: PipelineContext, log: Callable) -> None:
         cfg = self.config
 
-        # 获取输入 CSV 路径
-        input_key = cfg.get("input", "feishu_pull_csv")
-        csv_path = cfg.get("csv_path") or ctx.vars.get(input_key, "")
-        if not csv_path:
-            ctx.aborted = True
-            await log(
-                f"[feishu_push_json] ERROR: 找不到输入 CSV "
-                f"(key={input_key!r})，请确认 feishu_pull 步骤已执行"
-            )
-            return
-
         table_id = cfg.get("table_id", "")
         json_columns = cfg.get("json_columns", "")
         if not table_id or not json_columns:
@@ -470,13 +494,58 @@ class FeishuPushJsonStep(PipelineStep):
             await log("[feishu_push_json] ERROR: 缺少 table_id 或 json_columns")
             return
 
-        cmd = [
-            "uv", "run", "python", "sync_to_feishu.py",
-            "--file", csv_path,
-            "--json-columns", json_columns,
-            "--append-table-id", table_id,
-        ]
+        # ── 1. 确定输入来源 ──────────────────────────────────────────────────
+        # 优先级：config.snapshot_dataset > config.csv_path > ctx.vars[input]
+        input_key = cfg.get("input", "feishu_pull_csv")
+        input_ref = (
+            cfg.get("snapshot_dataset")
+            or cfg.get("csv_path")
+            or ctx.vars.get(input_key)
+        )
 
+        if not input_ref:
+            ctx.aborted = True
+            await log(
+                f"[feishu_push_json] ERROR: 找不到输入引用 "
+                f"(key={input_key!r})，请确认 feishu_pull 步骤已执行"
+            )
+            return
+
+        # ── 2. 路由到 --snapshot-dataset 或 --file ───────────────────────────
+        if isinstance(input_ref, dict):
+            # SQLite 快照模式（feishu_pull 默认输出）
+            dataset = input_ref.get("dataset", "")
+            if not dataset:
+                ctx.aborted = True
+                await log("[feishu_push_json] ERROR: input_ref 字典中缺少 dataset 字段")
+                return
+            mode = "snapshot"
+            cmd = [
+                "uv", "run", "python", "sync_to_feishu.py",
+                "--snapshot-dataset", dataset,
+                "--json-columns", json_columns,
+                "--append-table-id", table_id,
+            ]
+            await log(f"[feishu_push_json] 使用 SQLite 快照模式 dataset={dataset!r}")
+        elif isinstance(input_ref, str):
+            # CSV 路径模式（向后兼容 / output_format=csv）
+            mode = "csv"
+            cmd = [
+                "uv", "run", "python", "sync_to_feishu.py",
+                "--file", input_ref,
+                "--json-columns", json_columns,
+                "--append-table-id", table_id,
+            ]
+            await log(f"[feishu_push_json] 使用 CSV 模式 path={input_ref!r}")
+        else:
+            ctx.aborted = True
+            await log(
+                f"[feishu_push_json] ERROR: 无法识别的输入类型 {type(input_ref).__name__}，"
+                f"期望 dict（SQLite 快照引用）或 str（CSV 路径）"
+            )
+            return
+
+        # ── 3. 追加可选参数 ──────────────────────────────────────────────────
         if cfg.get("json_primary"):
             cmd += ["--json-primary", cfg["json_primary"]]
         if cfg.get("json_keep_columns"):
@@ -493,10 +562,11 @@ class FeishuPushJsonStep(PipelineStep):
             ctx.aborted = True
             await log(f"[feishu_push_json] ERROR exit_code={exit_code}")
         else:
-            await log("[feishu_push_json] OK")
+            await log(f"[feishu_push_json] OK mode={mode}")
             ctx.step_results.append({
                 "step": "feishu_push_json",
                 "status": "ok",
+                "mode": mode,
                 "table_id": table_id,
             })
 

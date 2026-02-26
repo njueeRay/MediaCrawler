@@ -156,6 +156,44 @@ def _parse_column_list_arg(value: str) -> List[str]:
     return columns
 
 
+async def _load_from_snapshot(dataset_name: str, db_type: str = "sqlite") -> List[Dict]:
+    """
+    从 feishu_record_snapshot 读取指定 dataset 的行数据。
+
+    这是 SQLite 中间层的核心读取函数：
+    feishu_pull (Step 3) 写入 -> feishu_record_snapshot -> feishu_push_json (Step 4) 读取。
+    完全绕过 CSV 文件，所有状态留在数据库里。
+    """
+    from database.models import FeishuRecordSnapshot
+    from sqlalchemy import select as sa_select
+
+    norm_db = _normalize_db_type(db_type) or "sqlite"
+    engine = get_async_engine(norm_db)
+    if not engine:
+        raise RuntimeError(f"数据库引擎不可用 db_type={norm_db!r}")
+
+    AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionFactory() as session:
+        stmt = sa_select(FeishuRecordSnapshot).where(
+            FeishuRecordSnapshot.dataset_name == dataset_name
+        ).order_by(FeishuRecordSnapshot.id.asc())
+        result = await session.execute(stmt)
+        snaps = result.scalars().all()
+
+    rows: List[Dict] = []
+    for snap in snaps:
+        try:
+            rows.append(json.loads(snap.fields_json))
+        except Exception:
+            pass
+
+    logger.info(
+        "🗄️  从 feishu_record_snapshot 加载 %s 条 (dataset=%s, db_type=%s)",
+        len(rows), dataset_name, norm_db,
+    )
+    return rows
+
+
 def _apply_range(data: List[Dict], range_start: int, range_end: int) -> List[Dict]:
     if not data:
         return data
@@ -768,6 +806,16 @@ def main():
     group.add_argument("--file", help="同步单个 JSON/CSV 文件")
     group.add_argument("--dir", help="同步目录下的所有 JSON/CSV 文件")
     group.add_argument("--db", action="store_true", help="从数据库读取数据同步")
+    group.add_argument(
+        "--snapshot-dataset",
+        default="",
+        metavar="DATASET",
+        help=(
+            "从 feishu_record_snapshot 读取指定 dataset 的数据并进行 JSON 列同步。"
+            "这是飞书拉取 (Step 3) → JSON 展开推送 (Step 4) 的 SQLite 中间层模式，"
+            "比 CSV 文件更可靠、更易调试。需配合 --json-columns 和 --append-table-id 使用。"
+        ),
+    )
 
     parser.add_argument("--pattern", default="*.json", help="文件匹配模式 (默认: *.json)")
     parser.add_argument("--batch-size", type=int, default=50, help="批量上传大小 (默认: 50)")
@@ -827,7 +875,62 @@ def main():
         json_columns = _parse_column_list_arg(args.json_columns) or None
         json_keep_columns = _parse_column_list_arg(args.json_keep_columns) or None
 
-        if args.db:
+        if args.snapshot_dataset:
+            # ── SQLite 中间层模式（Step 3 快照 → Step 4 JSON 展开）──
+            snap_db_type = _normalize_db_type(
+                args.db_type or os.environ.get("SAVE_DATA_OPTION", "sqlite")
+            ) or "sqlite"
+
+            rows_from_snap = asyncio.run(
+                _load_from_snapshot(args.snapshot_dataset, db_type=snap_db_type)
+            )
+            if not rows_from_snap:
+                raise RuntimeError(
+                    f"feishu_record_snapshot 中无数据 (dataset={args.snapshot_dataset!r})，"
+                    f"请确认 feishu_pull 步骤已成功执行且 --db-dataset 与此处一致"
+                )
+
+            rows_from_snap = _apply_range(rows_from_snap, args.range_start, args.range_end)
+            ensure_manager_platform(manager, args.platform)
+
+            if args.append_table_id:
+                manager.table_id = args.append_table_id
+
+            resolved_json_columns_snap: List[str] = list(json_columns or [])
+            if args.json_column:
+                for _col in str(args.json_column).split(","):
+                    _name = _col.strip()
+                    if _name and _name not in resolved_json_columns_snap:
+                        resolved_json_columns_snap.append(_name)
+
+            if not resolved_json_columns_snap:
+                raise RuntimeError(
+                    "--snapshot-dataset 模式需要指定 --json-columns"
+                )
+
+            result = sync_rows_json_column(
+                manager,
+                rows_from_snap,
+                json_columns=resolved_json_columns_snap,
+                keep_columns=json_keep_columns,
+                table_name=args.json_table_name or "飞书快照JSON同步",
+                primary_field=args.json_primary,
+                flatten_sep=args.json_flatten_sep,
+                batch_size=args.batch_size,
+                attach_wechat_cover=(manager.platform == "wechat"),
+                wechat_cover_field_name="图片",
+            )
+            failed_snap = result.get("failed", 0)
+            logger.info(
+                "🎉 snapshot 模式完成! success=%s skipped=%s failed=%s",
+                result.get("success", 0),
+                result.get("total", 0) - result.get("success", 0) - failed_snap,
+                failed_snap,
+            )
+            if failed_snap > 0:
+                raise RuntimeError(f"同步失败: {result}")
+
+        elif args.db:
             resolved_db_type = _normalize_db_type(
                 args.db_type or os.environ.get("SAVE_DATA_OPTION", "")
             )
