@@ -104,7 +104,7 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 开发环境
 
-- Python >= 3.11，推荐使用 venv
+- Python >= 3.11，推荐使用 uv run / venv
 - 包管理：`pip install -r requirements.txt`（或 `uv`）
 - 入口命令：`python main.py --platform <platform> --type <search|detail|creator>`
 - 数据库初始化：`python main.py --init_db`
@@ -121,3 +121,104 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 | 飞书同步指南 | `docs/feishu/feishu_README.md` |
 | 项目架构文档（含 Mermaid 图） | `docs/项目架构文档.md` |
 | 代码结构速查 | `docs/项目代码结构.md` |
+| 设计决策归档 | `docs/design-decisions.md` |
+| 变更历史 | `CHANGELOG.md` |
+| 团队作战手册 | `docs/team-playbook.md` |
+| 会议纪要 | `docs/meetings/` |
+
+## 当前迭代状态
+
+> 最后更新：2026-02-26（Sprint #002 全体复盘会后）
+
+**当前 Sprint：** #002 — 缺陷修复 + Linux 服务器部署  
+**Sprint 目标：** 修复 3 个 P0 阻断项，将服务部署到 Linux 服务器，实现订阅驱动的定时爬取 → 飞书同步全流程。  
+**团队状态：** 代码层全部就绪（P0/P1 已修复），等待用户在服务器执行部署步骤 + 端到端验证。DoD 代码部分 ✅，服务器部分 ⏳。
+
+### 已完成
+- [x] Sprint #001: 全员阅读项目上下文，形成统一认知
+- [x] Sprint #001: 交接启动会已召开，纪要存档 (`docs/meetings/2026-02-26-handover-kickoff.md`)
+- [x] Sprint #001: `CHANGELOG.md`、`design-decisions.md`、`copilot-instructions.md` 已优化
+- [x] Sprint #002: **P0-1** 修复——`webui_startup()` 添加 APScheduler 任务恢复循环
+- [x] Sprint #002: **P0-3** 修复——CORS `allow_origins` 改为读取 `ALLOWED_ORIGINS` env var
+- [x] Sprint #002: **P0-4** 修复——`apscheduler` + `lark-oapi` 加入 `pyproject.toml`（全体复盘新发现）
+- [x] Sprint #002: **P1-1** 修复——`subscription_combo` 循环 `raise` → `continue`
+- [x] Sprint #002: **P1-3** 修复——`/api/config/platforms` 添加微信平台
+- [x] Sprint #002: `auto_scheduler.py` 正式废弃（加 RuntimeError 保护 + 迁移说明）
+- [x] Sprint #002: `.env.example` 补充 `ALLOWED_ORIGINS`、服务器部署警告
+- [x] Sprint #002: `deploy/mediacrawler.service` systemd 模板创建
+- [x] Sprint #002: 全体复盘会议纪要更新（P0-4 + 部署路径 + 风险清单）
+
+### 待执行（服务器层——用户按序操作）
+- [ ] `git pull` + `uv sync`（确认输出含 apscheduler + lark-oapi）
+- [ ] 服务器 `.env` 填写关键变量：`SAVE_DATA_OPTION=sqlite`、飞书双表配置、`WECHAT_AUTH_KEY`、`ALLOWED_ORIGINS`（P0-2，最关键）
+- [ ] 修改 systemd 服务文件路径 → 安装并启动服务 → `curl /api/health` 验证
+- [ ] DB 批量插入 Subscription 记录（首次部署必做，SQL 或 WebUI API）
+- [ ] WebUI 创建 ScheduledTask，手动触发 → 验证飞书「表1」有写入
+- [ ] 配置 cron 运行 `wechat_feishu_workflow.sh` 完成表2同步
+
+### 待执行（代码层——团队操作）
+- [ ] WebUI scheduler 增加 table2 配置入口（P1-4，`TABLE2_ID`/`JSON_COLUMNS`）
+- [ ] 迁移 `@app.on_event` → `lifespan`（P1-2，FastAPI deprecated 警告）
+- [ ] `WECHAT_AUTH_KEY` 轮换机制文档化 + cron 模板（每 3 天）
+- [ ] **Sprint #003 P0**：建立 CI 套件（link-check + markdown-lint）——Playbook §7 CI 先行原则，当前项目无任何 CI Workflow
+
+### 已知风险（最高优先级排查）
+- 🔴 `SAVE_DATA_OPTION` 未设为 `sqlite` → WebUI 全部 DB 功能静默失败（无报错）
+- 🔴 `WECHAT_AUTH_KEY` 约 4 天过期 → 微信爬取 100% 失败
+- 🟡 DB 中无 Subscription 记录 → `subscription_combo` 静默空转（total=0）
+- 🟡 systemd 服务文件路径未修改 → 服务无法启动
+- 🟡 `FEISHU_TABLE_ID` 与 `TABLE1_ID` 双命名，`.env` 必须同时配置（相同值）
+
+## 已决定的设计选择
+
+> 每条决策记录 what/why/when，详细内容见 `docs/design-decisions.md`
+
+| # | 决策 | 日期 | 理由 |
+|---|------|------|------|
+| D-001 | 工厂模式 + 模板方法作为爬虫核心架构 | 项目初期 | 统一接口 + 可扩展 + 各平台独立实现 |
+| D-002 | 7 种存储后端通过 StoreFactory 策略切换 | 项目初期 | 满足不同用户的存储需求 |
+| D-003 | 微信模块采用纯 HTTP API 消费（不使用 Playwright） | 微信模块开发期 | 依赖外部 wechat-article-exporter 服务 |
+| D-004 | WebUI 采用 FastAPI + Vue + WebSocket 日志 | WebUI 开发期 | 异步兼容 + 实时日志推送 |
+| D-005 | 飞书同步采用远程去重策略 | 飞书模块开发期 | 避免重复上传，降低 API 调用量 |
+| D-006 | 以 pyproject.toml 为依赖管理唯一真相源 | 2026-02-26 | 消除双文件版本漂移（交接启动会决议 #002） |
+| D-007 | Sprint #001 聚焦治理补齐，不做功能开发 | 2026-02-26 | 功能跑在治理前面，先补课（交接启动会决议 #001） |
+| D-008 | 安全修复 + 功能缺陷归入 Sprint #002 | 2026-02-26 | 安全修复需要凭据轮换确认（交接启动会决议 #003/#004） |
+| D-009 | Sprint #002 使用 systemd 部署，Sprint #003 引入 Docker | 2026-02-26 | systemd 仅 1.5h vs Docker 4h，今晚目标实现优先 |
+| D-010 | `auto_scheduler.py` 正式废弃，WebUI APScheduler 为唯一调度入口 | 2026-02-26 | `feishu_sync_simple` 幽灵引用且功能重叠，统一到 WebUI |
+## 团队协作规范
+
+- **Commit 规范：** `<type>(<scope>): <subject>`（详见 `docs/team-playbook.md` §4）
+- **Scope 约定：** `crawler` / `store` / `config` / `api` / `webui` / `feishu` / `scheduler` / `wechat` / `docs` / `ci` / `deps`
+- **会话协议：** 每次会话开启读取本文件 + 最新会议纪要；关闭时更新「当前迭代状态」
+- **变更记录：** 每次实质变更更新 `CHANGELOG.md`
+- **质量门禁：** 迭代收尾前 code-reviewer 必须输出审查报告
+
+## 三层版本总览
+
+> 遵循 `docs/team-playbook.md` §18 三层版本体系。详细变更历史见 `PLAYBOOK-CHANGELOG.md`。
+
+| 层级 | 当前版本 | 说明 | 变更记录 |
+|------|---------|------|---------|
+| **L1 项目版本** | `v0.1.0`（已完成） / `v0.2.0`（Sprint #002 完成后打 Tag） | SemVer，功能迭代 | `CHANGELOG.md` |
+| **L2 Playbook 版本** | `Playbook v2.0` | 2026-02-26 引入 §13-18 | `PLAYBOOK-CHANGELOG.md` |
+| **L3 Agent 版本** | 全员 `v1.0` | 初始版本，2026-02-26 建立 | `PLAYBOOK-CHANGELOG.md` + 各 `.agent.md` |
+
+### Agent 能力快照（L3）
+
+| Agent | 版本 | 核心能力 | 权限级别 | 已知局限 |
+|-------|------|---------|---------|---------|
+| `brain` | v1.0 | 战略规划、任务综合、用户汇报、阻塞决策 | 读写 + 决策 | 不直接写业务代码 |
+| `pm` | v1.0 | Sprint 规划、DoD 执行、CHANGELOG 维护、版本发布 | 读写 + 规划 | 不写功能代码 |
+| `dev` | v1.0 | 全栈实现（Python/TS/MD/YAML/Shell） | 读写 | 不做架构决策 |
+| `researcher` | v1.0 | 技术调研、方案分析、依赖风险评估 | **只读** | 不修改任何文件 |
+| `code-reviewer` | v1.0 | 七维度 QA、CI 门禁、阻断问题上报 | 只读 + 诊断 | 不直接修改文件 |
+
+## 团队进化记录
+
+> Brain 在每次团队结构变化后更新此表。遵循 `docs/team-playbook.md` §13.6。
+
+| 日期 | 类型 | 角色 | 改动摘要 | 原因 |
+|------|------|------|---------|------|
+| 2026-02-26 | 新增（初始化） | 全员（5 个 Agent） | 随项目接手创建所有核心 Agent 文件 | MediaCrawler 项目接手启动 |
+| 2026-02-26 | Playbook 升级 | 团队规范 | Playbook v1.0 → v2.0，引入 §13-18 | 用户更新了 Playbook 核心配置 |
+| 2026-02-26 | 新增（知识库） | 全员 | 创建 `.github/agents/knowledge/` L2 知识文件 | Playbook v2.0 §14 落地适配 |
