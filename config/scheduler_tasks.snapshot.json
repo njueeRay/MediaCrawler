@@ -1,0 +1,81 @@
+{
+  "generated_at": "2026-02-26T22:30:52",
+  "tasks": [
+    {
+      "id": 2,
+      "name": "wechat_subscription_combo_6min",
+      "task_type": "subscription_combo",
+      "platform": "wechat",
+      "is_active": false,
+      "schedule_type": "interval",
+      "schedule_config": {
+        "minutes": 6
+      },
+      "task_config": {
+        "data_type": "article",
+        "timeout_seconds": 60,
+        "limit": 1
+      },
+      "last_run_at": null,
+      "next_run_at": null,
+      "run_count": 0,
+      "fail_count": 0,
+      "created_at": "2026-02-12T05:41:43",
+      "updated_at": "2026-02-12T07:16:03"
+    },
+    {
+      "id": 3,
+      "name": "测试任务",
+      "task_type": "crawl",
+      "platform": "bili",
+      "is_active": false,
+      "schedule_type": "interval",
+      "schedule_config": {
+        "hours": 6
+      },
+      "task_config": {},
+      "last_run_at": null,
+      "next_run_at": null,
+      "run_count": 0,
+      "fail_count": 0,
+      "created_at": "2026-02-12T07:22:33",
+      "updated_at": "2026-02-12T07:22:34"
+    },
+    {
+      "id": 4,
+      "name": "测试任务_5a9e4262",
+      "task_type": "crawl",
+      "platform": "bili",
+      "is_active": false,
+      "schedule_type": "interval",
+      "schedule_config": {
+        "hours": 6
+      },
+      "task_config": {},
+      "last_run_at": null,
+      "next_run_at": null,
+      "run_count": 0,
+      "fail_count": 0,
+      "created_at": "2026-02-12T07:23:15",
+      "updated_at": "2026-02-12T07:23:15"
+    },
+    {
+      "id": 5,
+      "name": "测试任务_e24bc018",
+      "task_type": "crawl",
+      "platform": "bili",
+      "is_active": false,
+      "schedule_type": "interval",
+      "schedule_config": {
+        "hours": 6
+      },
+      "task_config": {},
+      "last_run_at": null,
+      "next_run_at": null,
+      "run_count": 0,
+      "fail_count": 0,
+      "created_at": "2026-02-26T14:30:52",
+      "updated_at": "2026-02-26T14:30:52"
+    }
+  ]
+}

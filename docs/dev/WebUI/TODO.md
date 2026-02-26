@@ -98,8 +98,8 @@
 - [ ] 5.3 小红书/抖音/快手搜索支持（需 cookie/浏览器会话）
 - [x] 5.4 订阅触发采集 schema 阻塞修复（wechat 平台枚举补齐）
 - [x] 5.4b 订阅触发采集增强（批量触发 + 执行状态可视化，内存态）
-- [ ] 5.4c 订阅采集状态持久化（落库/重启恢复）
-- [ ] 5.5 字段映射预览功能实现
+- [x] 5.4c 订阅采集状态持久化（落库/重启恢复）
+- [x] 5.5 字段映射预览功能实现（DB 抽样 + 转换明细 + 最终 fields + E2E）
 - [x] 5.6 配置元数据单一真源 `config/config_meta.py`
 - [x] 5.7 配置一致性检测脚本 `test/test_config_consistency.py`
 - [x] 5.8 微信订阅触发最小 E2E `test/test_subscription_wechat_e2e.py`
@@ -108,4 +108,15 @@
 - [x] 5.11 开发模式 WS 日志回归（Vite proxy ws + `test/test_ws_logs_smoke.py`）
 - [x] 5.12 DB 模式数据浏览（DB browse API + DataExplorer 自适配 + `test/test_db_browse_e2e.py`）
 - [x] 5.13 全面 smoke 回归套件（`test/test_webui_smoke_suite.py`）
+- [x] 5.14 接口返回结构全量审计（webui API 调用 vs routers 返回）
+- [x] 5.15 接口契约扫描脚本（`test/test_api_response_contract_scan.py`）
+- [x] 5.16 接口契约扫描接入 CI（作为前置门禁）
+- [x] 5.17 前端页面 API 解包收敛（全部改为 `unwrapApiData`）
+- [x] 5.18 变量对齐专项执行（`test/test_config_alignment_audit.py` + `PUT /config` 白名单校验 + 差异报告）
+
+## Phase 6: 验收前收口 ✅
+- [x] 6.1 smoke 补齐 `/data/files`、`/data/stats` 响应形状断言
+- [x] 6.2 新增 `test/test_subscription_e2e.py`（搜索→订阅→采集→展示）
+- [x] 6.3 同步文档勾选状态（`目前待完善工作.md`/`TODO.md`/`DEVLOG.md`）
+- [x] 6.4 新增验收计划文档 `docs/dev/WebUI/验收阶段计划.md`
 

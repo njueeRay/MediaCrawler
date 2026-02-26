@@ -371,6 +371,15 @@
 - 新增 `test/test_webui_smoke_suite.py`
   - 一键检查关键 HTTP/WS 端点，并按 `save_data_option` 自动断言 DB/CSV 分支行为
 
+### 字段映射预览 ✅
+
+- `api/routers/field_mapping.py`
+  - `/api/mapping/preview` 升级为：DB 模式优先从内容表抽样（当前重点 xhs/wechat），返回 mapped + 转换明细 + 最终 fields
+- `webui-src/src/views/FieldMapping.vue`
+  - 预览弹窗展示：映射结果 / 转换明细 / 原始样本 JSON
+- 新增 `test/test_field_mapping_preview_e2e.py`
+  - 验证预览接口结构返回（允许 sample_count=0）
+
 ### DB 模式数据浏览闭环 ✅
 
 - `api/routers/data.py`
@@ -383,5 +392,147 @@
   - DB 模式下展示“表列表 + 记录数 + 预览记录”
 - 新增 `test/test_db_browse_e2e.py`
   - 验证：CSV 模式 DB 端点返回 400；切到 sqlite 后 tables/records 200
+
+---
+
+## 2026-02-12 — Phase 5 (P0): 变量对齐专项落地
+
+### 变量对齐专项执行 ✅
+
+- 新增 `test/test_config_alignment_audit.py`
+  - 扫描维度：`config/base_config.py`、`config/config_meta.py`、`api/routers/config.py`、`.env.example`
+  - 审计项：多出/缺失/重名/类型不一致 + router 入参白名单异常
+  - 自动产出：`docs/dev/WebUI/变量对齐差异报告.md`
+
+### API 层对齐修复 ✅
+
+- `api/routers/config.py`
+  - `PUT /config` 增加入参白名单校验
+  - 白名单来源：`config_meta` + 兼容键 `FEISHU_APP_TOKEN`
+  - 对未知配置键直接返回 400，防止脏键写入 `.env`
+
+### 审计结论 ✅
+
+- `config_meta` 缺失于 `.env.example`：0
+- `config_meta` 重名键：0
+- `base_config` 与 `config_meta` 类型不一致：0
+- `router` 白名单异常键：0
+
+### 说明
+
+- 报告中 `config/*.py 消费但 config_meta 未纳入` 的键主要为“未暴露到 WebUI 的运行时/缓存类变量”（如 Redis/Mongo/词云等），已纳入追踪，不影响当前配置管理主链路。
+
+---
+
+## 2026-02-12 — Phase 5 (P0): 5.4c 订阅采集状态持久化
+
+### 状态持久化落地 ✅
+
+- `database/webui_models.py`
+  - 新增 `SubscriptionCrawlStatus`（`webui_subscription_crawl_status`）
+  - 字段：`subscription_id`、`status`、`message`、`last_started_at`、`last_finished_at`、`updated_at`
+
+- `api/services/subscription_crawl_manager.py`
+  - enqueue/running/success/failed 全链路落库
+  - 启动恢复逻辑：
+    - `queued`：自动恢复入队
+    - `running`：恢复时标记为 `failed`（服务重启中断）
+  - 数据库不可用时自动退化为内存态（不影响主流程）
+
+- `api/routers/subscription.py`
+  - `GET /subscribe/crawl/status` 改为异步获取，支持恢复后查询
+
+- `api/main.py`
+  - WebUI 启动阶段在 DB 模式下确保建表（保障状态表可用）
+
+### 验证 ✅
+
+- 新增 `test/test_subscription_crawl_status_persistence.py`
+  - 验证“状态写入 DB + 新管理器实例恢复可读”
+
+### 额外debug
+
+- 修复内容
+  - 对 URL 做归一化：html.unescape() + 将 \x26 转成 &
+  - 解析 wx_fmt 时加安全提取，只保留首个字母数字 token（如 png）
+  - 扩展名严格白名单校验，不合法一律回退 .jpg
+即使遇到 wx_fmt=png\x26amp;from=appmsg，最终也会得到合法文件名，比如 2247485454_1_019.png，不会再把后缀后面的垃圾片段写进路径。
+
+---
+
+## 2026-02-13 — Phase 6: 验收前收口 ✅
+
+### 6.1 smoke 响应形状断言补齐 ✅
+
+- `test/test_webui_smoke_suite.py`
+  - `/data/files`：从仅检查 `status_code == 200` 改为完整断言 `{code: 0, data: {files: [...]}}` 结构
+  - 新增 `/data/stats` 形状断言：验证 `{code: 0, data: {total_files, total_size, by_platform: {}, by_type: {}}}` 结构
+
+### 6.2 订阅闭环 E2E ✅
+
+- 新增 `test/test_subscription_e2e.py`（~160 行）
+  - 以 B 站平台 + 关键词"影视飓风"跑通最小闭环
+  - 步骤：(0) 切至 sqlite → (1) 搜索创作者 → (2) 订阅第一条 → (3) 批量入队采集 → (4) 查状态 → (5) 列表校验 → (6) 统计校验
+  - 含完整 cleanup：停止爬虫 + 删除测试订阅 + 恢复 SAVE_DATA_OPTION
+
+### 6.3 文档勾选状态对齐 ✅
+
+- `docs/dev/WebUI/目前待完善工作.md`
+  - 1.2 必做改造 7 项 `[ ]` → `[x]`
+  - 1.2 验收标准 2 项 `[ ]` → `[x]`
+  - 1.3 验收标准 2 项 `[ ]` → `[x]`
+  - 1.5 smoke 断言标记 `[x]`
+  - 3.1 新增 `test_subscription_e2e.py` 条目并标记 `[x]`
+- `docs/dev/WebUI/TODO.md`
+  - Phase 6 全部 4 项标记 `[x]`
+- `docs/dev/WebUI/验收阶段计划.md`
+  - 结论更新：3 个验收必做项均已完成，建议进入验收签收
+
+### 验收门禁状态
+
+| 门禁脚本 | 状态 |
+|---------|------|
+| `test/test_api_response_contract_scan.py` | ✅ 已存在 |
+| `test/test_config_alignment_audit.py` | ✅ 已存在 |
+| `test/test_webui_smoke_suite.py` | ✅ 本次增强 |
+| `test/test_subscription_e2e.py` | ✅ 本次新增 |
+| `test/test_config_consistency.py` | ✅ 已存在 |
+
+---
+
+## 2026-02-12 — Phase 5 (P0): 微信图片封面分离 + 历史兼容迁移
+
+### 封面与正文图片字段分离 ✅
+
+- `store/wechat/wechat_store_media.py`
+  - `save_image(..., is_cover: bool=False)` 支持封面标识
+  - 封面文件命名改为 `cover_{article_id}_{index:03d}.{ext}`
+- `media_platform/wechat/core.py`
+  - 下载阶段识别 `cover_url`，封面图保存时透传 `is_cover=True`
+- `feishu_sync/data_formatter.py`
+  - 微信表结构新增附件字段 `封面`
+  - `_image_meta` 拆分为 `cover_images`（封面）与 `local_images`（正文）
+- `feishu_sync/sync_manager.py` / `sync_to_feishu.py`
+  - 上传逻辑拆分：封面只写入 `封面`，正文图只写入 `图片`
+
+### 历史无 `cover_` 命名自动迁移 ✅
+
+- `feishu_sync/data_formatter.py`
+  - 新增 `collect_and_split_article_images()` 统一图片收集与拆分
+  - 新增 `_find_legacy_cover_images_from_links()`：
+    - 当目录中不存在 `cover_*` 文件时，基于记录 `cover` / `封面链接` 反查旧命名封面
+    - 反查策略：优先匹配 `{article_id}_001.{ext}`，未命中则按同扩展名最小序号回退，再按全量最小序号兜底
+  - 迁移命中后自动从正文列表移除，避免同图同时进入 `图片` 与 `封面`
+- `sync_to_feishu.py`
+  - append 模式改为复用 `collect_and_split_article_images()`，保证全链路行为一致
+
+### 验证 ✅
+
+- 语法/诊断检查通过：
+  - `feishu_sync/data_formatter.py`
+  - `sync_to_feishu.py`
+- 运行效果：
+  - 新数据：`cover_*` → `封面`，其余图片 → `图片`
+  - 旧数据（无 `cover_*`）：可按 `cover` 链接自动归档至 `封面`
 
 ---
