@@ -308,7 +308,30 @@ class SchedulerService:
                 execution_id,
                 f"start task_type={task_type} platform={platform}",
             )
-            if task_type in ("subscription_crawl", "subscription_combo"):
+
+            # ─── Pipeline 模式检测 ──────────────────────────────────────────
+            # 若 task_config 含 "pipeline" 列表，则走模块化步骤引擎，
+            # 否则回退到 legacy task_type 判断分支（向后兼容）。
+            _pipeline_mode = "pipeline" in task_config
+            if _pipeline_mode:
+                from api.services.pipeline_steps import run_pipeline, PipelineContext
+
+                _pipeline_ctx = PipelineContext(
+                    task_id=0, execution_id=execution_id, platform=platform or ""
+                )
+
+                async def _log(line: str) -> None:
+                    await SchedulerService.append_execution_log(execution_id, line)
+
+                await run_pipeline(task_config["pipeline"], _pipeline_ctx, _log)
+
+                if _pipeline_ctx.aborted:
+                    status = "failed"
+                    error_message = "管道中止（某步骤失败）"
+                result_summary.update({"pipeline_steps": _pipeline_ctx.step_results})
+            # ────────────────────────────────────────────────────────────────
+
+            if not _pipeline_mode and task_type in ("subscription_crawl", "subscription_combo"):
                 if not platform:
                     raise ValueError("subscription_* 任务必须指定 platform")
 
@@ -388,7 +411,7 @@ class SchedulerService:
                         "subscription_skipped_running": skipped_running,
                     })
 
-            if task_type in ("crawl", "combo"):
+            if not _pipeline_mode and task_type in ("crawl", "combo"):
                 # 调用 CrawlerManager
                 from api.services.crawler_manager import crawler_manager
                 from api.schemas import CrawlerStartRequest
@@ -417,7 +440,7 @@ class SchedulerService:
                     if s.get("status") != "running":
                         break
 
-            if task_type in ("sync", "combo", "subscription_combo"):
+            if not _pipeline_mode and task_type in ("sync", "combo", "subscription_combo"):
                 # 调用飞书同步
                 from api.services.feishu_service import feishu_service
                 from database.db_session import get_session

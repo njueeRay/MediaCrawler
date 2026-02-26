@@ -5,10 +5,46 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+# ─── Pipeline Step Schema ─────────────────────────────────────────────────────
+
+class PipelineStepConfig(BaseModel):
+    """
+    单个 pipeline 步骤的配置。
+    step 字段指定步骤类型，其余字段由步骤实现各自解析。
+
+    已注册步骤类型（见 api/services/pipeline_steps.py STEP_REGISTRY）：
+      crawl              — 通用爬虫采集
+      subscription_crawl — 遍历活跃订阅爬取
+      feishu_push        — DB → 飞书表 1
+      feishu_pull        — 飞书表 1 → 本地 CSV（带过滤）
+      feishu_push_json   — CSV JSON 列展开 → 飞书表 2
+    """
+    step: str
+    # 其余字段由步骤自行消费，保持开放
+    model_config = {"extra": "allow"}
+
+
+class PipelineStepInfo(BaseModel):
+    """步骤注册信息（GET /scheduler/pipeline/steps 响应条目）"""
+    step_type: str
+    class_name: str
+    description: str
+
+
+# ─── Task Schema ──────────────────────────────────────────────────────────────
+
 class ScheduledTaskCreate(BaseModel):
-    """创建定时任务"""
+    """
+    创建定时任务。
+
+    task_config 支持两种模式：
+    1. Legacy 模式（task_type 驱动）：
+       {"login_type": "cookie", "save_option": "json", ...}
+    2. Pipeline 模式（推荐，高可配置）：
+       {"pipeline": [{"step": "subscription_crawl", ...}, ...]}
+    """
     name: str
-    task_type: str              # crawl | sync | cleanup | combo
+    task_type: str              # crawl | sync | cleanup | combo | subscription_combo
     platform: Optional[str] = None
     schedule_type: str          # interval | cron | once
     schedule_config: Dict[str, Any]

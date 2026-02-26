@@ -62,13 +62,13 @@
     </n-modal>
 
     <!-- Create Modal -->
-    <n-modal v-model:show="showCreate" title="新建定时任务" preset="dialog" style="width: 520px">
-      <n-form label-placement="left" label-width="100">
+    <n-modal v-model:show="showCreate" title="新建定时任务" preset="dialog" style="width: 600px; max-height: 90vh; overflow-y: auto">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="任务名称">
-          <n-input v-model:value="newTask.name" placeholder="例: 每日小红书采集" />
+          <n-input v-model:value="newTask.name" placeholder="例: 每日微信采集&同步" />
         </n-form-item>
         <n-form-item label="任务类型">
-          <n-select v-model:value="newTask.task_type" :options="taskTypeOptions" />
+          <n-select v-model:value="newTask.task_type" :options="taskTypeOptions" @update:value="onTaskTypeChange" />
         </n-form-item>
         <n-form-item label="平台">
           <n-select v-model:value="newTask.platform" :options="platformOptions" clearable />
@@ -83,6 +83,65 @@
           <n-input v-model:value="cronExpr" placeholder="例: 0 8 * * *" />
         </n-form-item>
       </n-form>
+
+      <!-- Pipeline 配置：仅在 subscription_combo 类型下展示 -->
+      <n-collapse v-if="newTask.task_type === 'subscription_combo'" class="mt-3">
+        <n-collapse-item title="🔧 Pipeline 配置（采集 → 表1 → 过滤拉取 → JSON展开表2）" name="pipeline" :default-expanded="true">
+          <n-form label-placement="left" label-width="110" size="small">
+            <!-- Step 1: subscription_crawl -->
+            <n-divider title-placement="left" class="text-xs">① 订阅采集</n-divider>
+            <n-form-item label="采集数量上限">
+              <n-input-number v-model:value="pipelineCfg.crawl_limit" :min="0" placeholder="0 = 不限" style="width:140px" />
+              <span class="ml-2 text-xs text-gray-400">0 = 不限制</span>
+            </n-form-item>
+            <n-form-item label="超时(秒)">
+              <n-input-number v-model:value="pipelineCfg.crawl_timeout" :min="60" style="width:140px" />
+            </n-form-item>
+
+            <!-- Step 2: feishu_push -->
+            <n-divider title-placement="left" class="text-xs">② 同步到飞书表 1</n-divider>
+            <n-form-item label="数据类型">
+              <n-select v-model:value="pipelineCfg.data_type" :options="dataTypeOptions" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="表1 ID" required>
+              <n-input v-model:value="pipelineCfg.table1_id" placeholder="tblXXXXXXX" />
+            </n-form-item>
+
+            <!-- Step 3: feishu_pull -->
+            <n-divider title-placement="left" class="text-xs">③ 过滤拉取（表1 → CSV）</n-divider>
+            <n-form-item label="过滤字段">
+              <n-input v-model:value="pipelineCfg.filter_field" placeholder="例: 信息质量评䉴" />
+            </n-form-item>
+            <n-form-item label="过滤运算">
+              <n-select v-model:value="pipelineCfg.filter_operator" :options="filterOps" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="过滤值">
+              <n-dynamic-tags v-model:value="pipelineCfg.filter_values" />
+            </n-form-item>
+            <n-form-item label="视图 ID">
+              <n-input v-model:value="pipelineCfg.view_id" placeholder="可空，空则使用默认视图" />
+            </n-form-item>
+
+            <!-- Step 4: feishu_push_json -->
+            <n-divider title-placement="left" class="text-xs">④ JSON 展开推送表 2</n-divider>
+            <n-form-item label="表2 ID" required>
+              <n-input v-model:value="pipelineCfg.table2_id" placeholder="tblYYYYYYY" />
+            </n-form-item>
+            <n-form-item label="JSON 列名" required>
+              <n-input v-model:value="pipelineCfg.json_columns" placeholder="例: AI文本分析" />
+            </n-form-item>
+            <n-form-item label="主键列">
+              <n-input v-model:value="pipelineCfg.json_primary" placeholder="默认: 记录ID" />
+            </n-form-item>
+            <n-form-item label="范围起始">
+              <n-input-number v-model:value="pipelineCfg.range_start" :min="1" placeholder="可空=全量" style="width:120px" />
+              <span class="mx-2 text-xs">~</span>
+              <n-input-number v-model:value="pipelineCfg.range_end" :min="1" placeholder="可空=全量" style="width:120px" />
+            </n-form-item>
+          </n-form>
+        </n-collapse-item>
+      </n-collapse>
+
       <template #action>
         <n-button @click="showCreate = false">取消</n-button>
         <n-button type="primary" @click="createTask">创建</n-button>
@@ -125,8 +184,51 @@ const taskTypeOptions = [
   { label: '采集', value: 'crawl' },
   { label: '同步', value: 'sync' },
   { label: '采集+同步', value: 'combo' },
+  { label: '订阅采集+全流程', value: 'subscription_combo' },
   { label: '清理', value: 'cleanup' },
 ]
+
+const dataTypeOptions = [
+  { label: '文章 (article)', value: 'article' },
+  { label: '创作者 (creator)', value: 'creator' },
+  { label: '笔记 (note)', value: 'note' },
+]
+
+const filterOps = [
+  { label: 'contains', value: 'contains' },
+  { label: 'is', value: 'is' },
+  { label: 'isNot', value: 'isNot' },
+  { label: 'isEmpty', value: 'isEmpty' },
+  { label: 'isNotEmpty', value: 'isNotEmpty' },
+]
+
+// Pipeline 配置表单（subscription_combo 模式下需要）
+const pipelineCfg = ref({
+  // Step 1: subscription_crawl
+  crawl_limit: 0,
+  crawl_timeout: 3600,
+  // Step 2: feishu_push
+  data_type: 'creator',
+  table1_id: '',
+  // Step 3: feishu_pull
+  filter_field: '',
+  filter_operator: 'contains',
+  filter_values: [] as string[],
+  view_id: '',
+  // Step 4: feishu_push_json
+  table2_id: '',
+  json_columns: '',
+  json_primary: '记录ID',
+  range_start: null as number | null,
+  range_end: null as number | null,
+})
+
+function onTaskTypeChange(val: string) {
+  // subscription_combo 默认选微信平台
+  if (val === 'subscription_combo' && !newTask.value.platform) {
+    newTask.value.platform = 'wechat'
+  }
+}
 
 const platformOptions = [
   { label: '小红书', value: 'xhs' },
@@ -280,10 +382,62 @@ async function createTask() {
     if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
     if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
 
+    // 构建 task_config
+    let taskConfig: any = {}
+    if (newTask.value.task_type === 'subscription_combo') {
+      // Pipeline 模式：将表单字段序列化为 pipeline 步骤数组
+      const cfg = pipelineCfg.value
+      const pipeline: any[] = []
+
+      // Step 1
+      const step1: any = { step: 'subscription_crawl', platform: newTask.value.platform }
+      if (cfg.crawl_limit > 0) step1.limit = cfg.crawl_limit
+      if (cfg.crawl_timeout !== 3600) step1.timeout_seconds = cfg.crawl_timeout
+      pipeline.push(step1)
+
+      // Step 2
+      const step2: any = { step: 'feishu_push', platform: newTask.value.platform, data_type: cfg.data_type }
+      if (cfg.table1_id) step2.table_id = cfg.table1_id
+      pipeline.push(step2)
+
+      // Step 3 (可选）
+      if (cfg.table1_id) {
+        const step3: any = {
+          step: 'feishu_pull',
+          table_id: cfg.table1_id,
+          platform: newTask.value.platform,
+          output: 'step3_csv',
+        }
+        if (cfg.filter_field && cfg.filter_values.length) {
+          step3.filter_field = cfg.filter_field
+          step3.filter_operator = cfg.filter_operator
+          step3.filter_values = cfg.filter_values
+        }
+        if (cfg.view_id) step3.view_id = cfg.view_id
+        pipeline.push(step3)
+      }
+
+      // Step 4 (可选）
+      if (cfg.table2_id && cfg.json_columns) {
+        const step4: any = {
+          step: 'feishu_push_json',
+          input: 'step3_csv',
+          table_id: cfg.table2_id,
+          json_columns: cfg.json_columns,
+          json_primary: cfg.json_primary || '记录ID',
+        }
+        if (cfg.range_start) step4.range_start = cfg.range_start
+        if (cfg.range_end) step4.range_end = cfg.range_end
+        pipeline.push(step4)
+      }
+
+      taskConfig = { pipeline }
+    }
+
     await http.post('/scheduler/tasks', {
       ...newTask.value,
       schedule_config: scheduleConfig,
-      task_config: {},
+      task_config: taskConfig,
     })
     message.success('任务创建成功')
     showCreate.value = false

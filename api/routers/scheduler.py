@@ -28,6 +28,13 @@ async def scheduler_status(session: AsyncSession = Depends(get_db)):
     return ok(status)
 
 
+@router.get("/pipeline/steps")
+async def get_pipeline_steps():
+    """返回所有已注册的 pipeline 步骤类型及其说明（供前端表单渲染）"""
+    from api.services.pipeline_steps import get_step_registry_info
+    return ok(get_step_registry_info())
+
+
 # ---------- Tasks CRUD ----------
 
 @router.get("/tasks")
