@@ -4,9 +4,11 @@ Phase 4 — 端到端集成测试
 """
 import asyncio
 import httpx
+import os
 import sys
+import uuid
 
-BASE = "http://localhost:8081/api"
+BASE = os.getenv("WEBUI_API_BASE", "http://127.0.0.1:8080/api").rstrip("/")
 
 async def main():
     async with httpx.AsyncClient(timeout=15) as c:
@@ -93,10 +95,11 @@ async def main():
         check("POST /config/test database", r.status_code == 200 and r.json()["data"]["success"])
 
         # Create a subscription
+        creator_id = f"test_{uuid.uuid4().hex[:8]}"
         r = await c.post(f"{BASE}/subscribe", json={
             "platform": "bili",
-            "creator_id": "test_123",
-            "creator_name": "测试用户",
+            "creator_id": creator_id,
+            "creator_name": f"测试用户_{creator_id}",
         })
         check("POST /subscribe create", r.status_code == 200 and r.json()["code"] == 0)
 
@@ -106,8 +109,9 @@ async def main():
         check("GET /subscribe returns created item", len(items) >= 1)
 
         # Create scheduled task
+        task_name = f"测试任务_{uuid.uuid4().hex[:8]}"
         r = await c.post(f"{BASE}/scheduler/tasks", json={
-            "name": "测试任务",
+            "name": task_name,
             "task_type": "crawl",
             "platform": "bili",
             "schedule_type": "interval",

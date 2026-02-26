@@ -88,9 +88,32 @@ async def main() -> int:
         r = await c.get(f"{base}/dashboard")
         results.append(CheckResult("GET /dashboard", r.status_code == 200, f"{r.status_code}"))
 
-        # Data files listing should always work
+        # Crawler logs response shape should be unified
+        r = await c.get(f"{base}/crawler/logs", params={"limit": 20})
+        log_ok = r.status_code == 200 and (r.json().get("code") == 0) and isinstance(r.json().get("data"), list)
+        results.append(CheckResult("GET /crawler/logs shape", log_ok, f"{r.status_code}"))
+
+        # Data files listing — response shape {code, data: {files: [...]}}
         r = await c.get(f"{base}/data/files")
-        results.append(CheckResult("GET /data/files", r.status_code == 200, f"{r.status_code}"))
+        files_shape_ok = (
+            r.status_code == 200
+            and r.json().get("code") == 0
+            and isinstance((r.json().get("data") or {}).get("files"), list)
+        )
+        results.append(CheckResult("GET /data/files shape", files_shape_ok, f"{r.status_code}"))
+
+        # Data stats — response shape {code, data: {total_files, total_size, by_platform, by_type}}
+        r = await c.get(f"{base}/data/stats")
+        stats_data = (r.json().get("data") or {}) if r.status_code == 200 else {}
+        stats_shape_ok = (
+            r.status_code == 200
+            and r.json().get("code") == 0
+            and "total_files" in stats_data
+            and "total_size" in stats_data
+            and isinstance(stats_data.get("by_platform"), dict)
+            and isinstance(stats_data.get("by_type"), dict)
+        )
+        results.append(CheckResult("GET /data/stats shape", stats_shape_ok, f"{r.status_code}"))
 
         # DB-dependent endpoints vary by mode
         db_mode = _is_db_mode(save_opt)
@@ -106,6 +129,22 @@ async def main() -> int:
             results.append(CheckResult("GET /data/db/tables (DB mode)", r.status_code == 200, f"{r.status_code}"))
         else:
             results.append(CheckResult("GET /data/db/tables (CSV mode)", r.status_code == 400, f"{r.status_code}"))
+
+        # Field mapping preview (only meaningful in DB mode)
+        if db_mode:
+            r = await c.get(f"{base}/mapping/schemes", params={"page": 1, "size": 1})
+            ok = r.status_code == 200 and (r.json().get("code") == 0)
+            scheme_id = None
+            if ok:
+                items = (r.json().get("data", {}) or {}).get("items", [])
+                if items:
+                    scheme_id = items[0].get("id")
+            results.append(CheckResult("GET /mapping/schemes", ok and bool(scheme_id), f"{r.status_code} id={scheme_id}"))
+
+            if scheme_id:
+                r = await c.post(f"{base}/mapping/preview", json={"scheme_id": scheme_id, "limit": 1})
+                ok = r.status_code == 200 and (r.json().get("code") == 0)
+                results.append(CheckResult("POST /mapping/preview", ok, f"{r.status_code}"))
 
     # WS logs ping/pong
     results.append(await _ws_logs_ping(host, port))
