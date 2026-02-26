@@ -1,0 +1,63 @@
+# MediaCrawler WebUI systemd 服务文件
+#
+# 安装步骤:
+#   1. 修改下方 User、WorkingDirectory、EnvironmentFile 路径为实际路径
+#   2. 确认 uv 可执行文件路径: which uv
+#   3. sudo cp deploy/mediacrawler.service /etc/systemd/system/
+#   4. sudo systemctl daemon-reload
+#   5. sudo systemctl enable mediacrawler
+#   6. sudo systemctl start mediacrawler
+#   7. sudo systemctl status mediacrawler
+#
+# 日志查看:
+#   sudo journalctl -u mediacrawler -f
+
+[Unit]
+Description=MediaCrawler WebUI API Service
+Documentation=https://github.com/NanmiCoder/MediaCrawler
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ---- 修改为实际用户名 ----
+User=ubuntu
+Group=ubuntu
+
+# ---- 修改为项目实际路径 ----
+WorkingDirectory=/opt/mediacrawler
+
+# ---- 环境变量从 .env 加载（必须存在） ----
+EnvironmentFile=/opt/mediacrawler/.env
+
+# ---- 启动命令 ----
+# 注意: --workers 1 是必须的，APScheduler 使用进程内全局状态
+# 如果 uv 不在 PATH 中，替换为绝对路径: /home/ubuntu/.local/bin/uv
+ExecStart=uv run uvicorn api.main:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1 \
+    --log-level info
+
+# ---- 重启策略 ----
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# ---- 进程安全加固 ----
+NoNewPrivileges=true
+PrivateTmp=true
+
+# ---- 超时设置 ----
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# ---- 日志输出 ----
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacrawler
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,9 @@ PROJECT_ROOT_DEFAULT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${1:-${SCRIPT_DIR}/wechat_feishu_workflow.env}"
 
 if [[ -f "${ENV_FILE}" ]]; then
+  if ! bash -n "${ENV_FILE}" >/dev/null 2>&1; then
+    die "环境文件语法错误: ${ENV_FILE}（请先运行: bash -n ${ENV_FILE}）"
+  fi
   # shellcheck disable=SC1090
   source "${ENV_FILE}"
 fi
@@ -152,9 +155,17 @@ read_table1() {
   mkdir -p "$(dirname "${TABLE1_EXPORT_CSV}")"
   log "步骤3/4：读取表1并导出 CSV -> ${TABLE1_EXPORT_CSV}"
 
+  local select_fields="${TABLE1_SELECT_FIELDS}"
+  if [[ "${RUN_PARSE_TO_TABLE2}" == "1" && -n "${JSON_COLUMNS}" ]]; then
+    if [[ ",${select_fields}," != *",文章ID,"* && ",${select_fields}," != *",article_id,"* ]]; then
+      select_fields="${select_fields},文章ID"
+      log "步骤3/4：自动补充读取字段 文章ID（用于解析后封面附件绑定）"
+    fi
+  fi
+
   local cmd=(uv run python feishu_sync/read_from_feishu.py
     --table-id "${TABLE1_ID}"
-    --select-fields "${TABLE1_SELECT_FIELDS}"
+    --select-fields "${select_fields}"
     --output-csv "${TABLE1_EXPORT_CSV}")
 
   if [[ -n "${TABLE1_VIEW_ID}" ]]; then
