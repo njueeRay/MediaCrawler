@@ -27,13 +27,22 @@
           placeholder="选择平台"
           style="width: 160px"
         />
-        <n-input v-model:value="searchKeyword" placeholder="搜索创作者..." clearable style="width: 240px" />
+        <n-input v-model:value="searchKeyword" :placeholder="searchPlaceholder" clearable style="width: 280px" />
         <n-button type="primary" @click="searchCreators" :loading="searching">搜索</n-button>
         <n-button @click="showAdd = true">手动添加</n-button>
       </n-space>
 
       <div v-if="searchPlatform === 'wechat'" class="mt-2 text-xs text-gray-500">
         微信创作者搜索依赖 wechat-article-exporter（已登录）以及配置项：WECHAT_API_BASE_URL、WECHAT_AUTH_KEY。
+      </div>
+      <div v-else-if="searchPlatform === 'xhs'" class="mt-2 text-xs text-gray-500">
+        支持输入创作者主页链接（如 xiaohongshu.com/user/profile/xxx）、用户 ID 或关键词搜索。
+      </div>
+      <div v-else-if="searchPlatform === 'dy'" class="mt-2 text-xs text-gray-500">
+        请输入抖音创作者主页链接（如 douyin.com/user/xxx）或 sec_uid。关键词搜索暂不支持。
+      </div>
+      <div v-else-if="['ks', 'tieba', 'zhihu'].includes(searchPlatform)" class="mt-2 text-xs text-gray-500">
+        该平台暂不支持搜索，请使用「手动添加」功能输入创作者 ID。
       </div>
     </n-card>
 
@@ -150,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted, onBeforeUnmount } from 'vue'
+import { ref, h, computed, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
@@ -172,6 +181,19 @@ const searchKeyword = ref('')
 const filterPlatform = ref('')
 const searchResults = ref<any[]>([])
 
+const searchPlaceholder = computed(() => {
+  const map: Record<string, string> = {
+    xhs: '输入创作者主页链接、用户ID 或关键词',
+    dy: '输入创作者主页链接或 sec_uid',
+    wechat: '输入公众号名称关键词',
+    bili: '输入UP主名称关键词',
+    wb: '输入博主名称关键词',
+    ks: '请使用「手动添加」',
+    tieba: '请使用「手动添加」',
+    zhihu: '请使用「手动添加」',
+  }
+  return map[searchPlatform.value] || '搜索创作者...'
+})
 const subscriptions = ref<any[]>([])
 const subStats = ref<any>({ total: 0, active: 0, by_platform: {} })
 const pagination = ref({ page: 1, pageSize: 20, itemCount: 0 })

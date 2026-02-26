@@ -51,10 +51,28 @@ def reload_from_env():
     from config import db_config as _db
     importlib.reload(_db)
 
-    # 4. 同步到 config 模块命名空间
+    # 4. 重新加载所有平台 config 模块
+    _platform_configs = []
+    for _mod_name in [
+        "wechat_config", "xhs_config", "bilibili_config",
+        "dy_config", "ks_config", "weibo_config",
+        "tieba_config", "zhihu_config", "feishu_config",
+    ]:
+        try:
+            _mod = importlib.import_module(f"config.{_mod_name}")
+            importlib.reload(_mod)
+            _platform_configs.append(_mod)
+        except Exception:
+            pass
+
+    # 5. 同步到 config 模块命名空间
     for name in dir(_base):
         if not name.startswith('_'):
             setattr(_config_mod, name, getattr(_base, name))
     for name in dir(_db):
         if not name.startswith('_'):
             setattr(_config_mod, name, getattr(_db, name))
+    for _mod in _platform_configs:
+        for name in dir(_mod):
+            if not name.startswith('_'):
+                setattr(_config_mod, name, getattr(_mod, name))

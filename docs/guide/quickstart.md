@@ -72,3 +72,61 @@ python main.py --platform xhs --lt qrcode --type detail
 # 更多示例
 python main.py --help
 ```
+
+---
+
+## 启动 WebUI（后端 API + 前端界面）
+
+> WebUI 控制台是本 fork 新增的可视化管理界面，包括：爬虫任务控制、订阅管理、数据浏览、飞书同步配置。
+
+### 方式一：生产模式（推荐，一个服务搞定）
+
+```shell
+# Step 1：编译前端，输出到 api/webui/
+cd webui-src
+npm install
+npm run build
+cd ..
+
+# Step 2：启动后端（前端静态文件由 FastAPI 直接托管）
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8080
+```
+
+验证：浏览器访问 `http://localhost:8080` 直接打开 WebUI 控制台。
+
+### 方式二：开发模式（前后端分别启动，支持热重载）
+
+**终端 1 — 启动后端：**
+```shell
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+```
+
+**终端 2 — 启动前端开发服务器：**
+```shell
+cd webui-src
+npm install   # 首次执行
+npm run dev
+```
+
+验证：访问 `http://localhost:3000`（Vite 自动将 `/api` 请求代理到 `http://localhost:8080`）。
+
+> **端口说明：**  
+> - `8080` — FastAPI 后端（API 接口 + 生产模式静态文件）  
+> - `3000` — Vite 前端开发服务器（仅开发模式）
+
+### 后端 API 健康检查
+
+```shell
+curl http://localhost:8080/api/health
+# 预期：{"status": "ok"}
+```
+
+---
+
+## 启动定时调度系统
+
+```shell
+uv run auto_scheduler.py
+```
+
+> 调度任务通过 WebUI 控制台的「任务调度」页面配置，无需手动编辑配置文件。

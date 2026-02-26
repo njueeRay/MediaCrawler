@@ -129,8 +129,8 @@ class SubscriptionService:
         """
         搜索创作者 — 通过轻量 HTTP API 实现，不依赖 Playwright 浏览器会话。
         支持两种模式:
-          1. 关键词搜索 (bilibili, wechat)
-          2. ID/URL 精确查找 (所有平台)
+          1. 关键词搜索 (bilibili, wechat, weibo)
+          2. URL/ID 精确查找 (xhs, dy, ks)
         """
         if platform == "bili":
             return await self._search_bilibili(keyword)
@@ -138,7 +138,11 @@ class SubscriptionService:
             return await self._search_wechat(keyword)
         if platform == "wb":
             return await self._search_weibo(keyword)
-        # 其他平台暂不支持关键词搜索
+        if platform == "xhs":
+            return await self._search_xhs(keyword)
+        if platform == "dy":
+            return await self._search_douyin(keyword)
+        # 其他平台暂不支持
         return []
 
     async def _search_bilibili(self, keyword: str) -> List[dict]:
@@ -299,6 +303,176 @@ class SubscriptionService:
                         },
                     })
         return results[:10]
+
+    async def _search_xhs(self, keyword: str) -> List[dict]:
+        """小红书创作者查找 — 支持 URL / 用户 ID / 关键词搜索
+
+        由于 XHS API 需要 Playwright 签名，WebUI 中采用以下策略:
+          1. 输入为创作者主页 URL → 解析 user_id → 抓取主页提取信息
+          2. 输入为纯用户 ID (24位十六进制) → 同上
+          3. 输入为关键词 → 尝试通过搜索页 SSR 提取去重的作者信息
+        """
+        import re
+
+        keyword = keyword.strip()
+
+        # 尝试从 URL 中提取 user_id
+        url_match = re.search(r"xiaohongshu\.com/user/profile/([a-f0-9]+)", keyword)
+        if url_match:
+            user_id = url_match.group(1)
+            return await self._xhs_fetch_profile(user_id)
+
+        # 纯用户 ID（24 位十六进制）
+        if re.fullmatch(r"[a-f0-9]{24}", keyword):
+            return await self._xhs_fetch_profile(keyword)
+
+        # 关键词搜索：通过搜索页面 SSR 提取笔记作者
+        return await self._xhs_search_by_keyword(keyword)
+
+    async def _xhs_fetch_profile(self, user_id: str) -> List[dict]:
+        """通过主页 HTML 获取 XHS 用户信息"""
+        import json
+        import re
+        import httpx
+
+        profile_url = f"https://www.xiaohongshu.com/user/profile/{user_id}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": "https://www.xiaohongshu.com/",
+        }
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(profile_url, headers=headers, timeout=15)
+                html = resp.text
+
+            match = re.search(
+                r"<script>window\.__INITIAL_STATE__=(.+?)</script>", html, re.M
+            )
+            if match:
+                state = json.loads(
+                    match.group(1).replace(":undefined", ":null"), strict=False
+                )
+                user_data = (state.get("user") or {}).get("userPageData") or {}
+                basic = user_data.get("basicInfo") or {}
+                interactions = user_data.get("interactions") or []
+
+                # 提取粉丝数
+                fans = 0
+                for item in interactions:
+                    if item.get("type") == "fans":
+                        fans_str = item.get("count", "0")
+                        try:
+                            fans = int(fans_str) if isinstance(fans_str, int) else int(
+                                str(fans_str).replace("万", "0000").replace("+", "")
+                            )
+                        except (ValueError, TypeError):
+                            fans = 0
+
+                avatar = basic.get("imageb", "") or basic.get("image", "")
+                return [{
+                    "creator_id": user_id,
+                    "creator_name": basic.get("nickname", user_id),
+                    "creator_avatar": avatar,
+                    "creator_url": profile_url,
+                    "meta": {
+                        "desc": basic.get("desc", ""),
+                        "gender": basic.get("gender", ""),
+                        "fans": fans,
+                        "ip_location": basic.get("ipLocation", ""),
+                    },
+                }]
+        except Exception:
+            pass
+
+        # 兜底：即使抓取失败也返回可订阅的基本信息
+        return [{
+            "creator_id": user_id,
+            "creator_name": user_id,
+            "creator_avatar": "",
+            "creator_url": f"https://www.xiaohongshu.com/user/profile/{user_id}",
+            "meta": {"note": "无法自动获取用户信息，请确认 ID 正确后订阅"},
+        }]
+
+    async def _xhs_search_by_keyword(self, keyword: str) -> List[dict]:
+        """通过小红书搜索页面 SSR 提取笔记作者（不需要 API 签名）"""
+        import json
+        import re
+        import httpx
+
+        search_url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}&source=web_search_result_notes"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": "https://www.xiaohongshu.com/",
+        }
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(search_url, headers=headers, timeout=15)
+                html = resp.text
+
+            match = re.search(
+                r"<script>window\.__INITIAL_STATE__=(.+?)</script>", html, re.M
+            )
+            if match:
+                state = json.loads(
+                    match.group(1).replace(":undefined", ":null"), strict=False
+                )
+                feed_items = (state.get("search") or {}).get("feeds") or []
+                seen_ids: set = set()
+                results: List[dict] = []
+                for item in feed_items:
+                    note = item.get("note") or item.get("noteCard") or item
+                    user = note.get("user") or {}
+                    uid = user.get("userId") or user.get("user_id") or ""
+                    if not uid or uid in seen_ids:
+                        continue
+                    seen_ids.add(uid)
+                    avatar = user.get("avatar") or user.get("image") or ""
+                    if avatar.startswith("//"):
+                        avatar = "https:" + avatar
+                    results.append({
+                        "creator_id": uid,
+                        "creator_name": user.get("nickname") or user.get("nick_name") or uid,
+                        "creator_avatar": avatar,
+                        "creator_url": f"https://www.xiaohongshu.com/user/profile/{uid}",
+                        "meta": {},
+                    })
+                    if len(results) >= 10:
+                        break
+                return results
+        except Exception:
+            pass
+        # 搜索失败时返回空列表（前端提示用户使用 URL 或手动添加）
+        return []
+
+    async def _search_douyin(self, keyword: str) -> List[dict]:
+        """抖音创作者查找 — 支持主页 URL 或 sec_uid"""
+        import re
+        import httpx
+
+        keyword = keyword.strip()
+
+        # 从 URL 提取 sec_uid
+        sec_uid = ""
+        url_match = re.search(r"douyin\.com/user/([A-Za-z0-9_-]+)", keyword)
+        if url_match:
+            sec_uid = url_match.group(1)
+        elif re.fullmatch(r"MS4wLj[A-Za-z0-9_-]{20,}", keyword):
+            sec_uid = keyword
+
+        if sec_uid:
+            return [{
+                "creator_id": sec_uid,
+                "creator_name": sec_uid,
+                "creator_avatar": "",
+                "creator_url": f"https://www.douyin.com/user/{sec_uid}",
+                "meta": {"note": "抖音用户信息需通过爬虫采集获取"},
+            }]
+
+        return []
 
 
 subscription_service = SubscriptionService()

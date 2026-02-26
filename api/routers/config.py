@@ -117,20 +117,58 @@ async def test_connection(body: dict):
         except Exception as e:
             return ok({"success": False, "error": f"数据库连接失败: {e}"})
 
-    if conn_type == "wechat_source":
+    if conn_type in ("wechat_source", "wechat"):
         try:
             import httpx
             from api.services.config_service import config_service
             env = config_service._read_env_file()
-            url = env.get("WECHAT_API_BASE_URL", "")
+            url = (env.get("WECHAT_API_BASE_URL", "") or "").strip().rstrip("/")
             if not url:
-                return ok({"success": False, "error": "微信源 URL 未配置"})
+                return ok({"success": False, "error": "微信源 URL 未配置（WECHAT_API_BASE_URL）"})
+            auth_key = (env.get("WECHAT_AUTH_KEY", "") or "").strip()
+            headers = {"X-Auth-Key": auth_key} if auth_key else {}
+
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"{url.rstrip('/')}/api/health")
-                if resp.status_code == 200:
-                    return ok({"success": True, "message": f"微信源连接正常 ({url})"})
-                else:
-                    return ok({"success": False, "error": f"微信源返回 HTTP {resp.status_code}"})
+                # 1) 连通性检查：尝试 /api/health，不行就尝试根路径
+                reachable = False
+                for probe in [f"{url}/api/health", url]:
+                    try:
+                        resp = await client.get(probe, headers=headers)
+                        if resp.status_code < 500:
+                            reachable = True
+                            break
+                    except Exception:
+                        continue
+                if not reachable:
+                    return ok({"success": False, "error": f"微信源不可达：{url}，请检查服务是否启动"})
+
+                # 2) 认证检查：调用真实 API 验证 auth key
+                if not auth_key:
+                    return ok({
+                        "success": True,
+                        "message": f"微信源连接正常（{url}），但 WECHAT_AUTH_KEY 未配置，搜索创作者将无法使用",
+                    })
+                try:
+                    auth_resp = await client.get(
+                        f"{url}/api/public/v1/account",
+                        params={"keyword": "test", "size": 1, "begin": 0},
+                        headers=headers,
+                        timeout=10,
+                    )
+                    auth_data = auth_resp.json()
+                    base_resp = auth_data.get("base_resp", {}) if isinstance(auth_data, dict) else {}
+                    ret = base_resp.get("ret")
+                    if ret not in (0, "0", None):
+                        err_msg = base_resp.get("err_msg", "认证失败")
+                        return ok({
+                            "success": False,
+                            "error": f"微信源连接正常，但认证失败：{err_msg}（auth key 可能已过期，有效期约 4 天）",
+                        })
+                except Exception:
+                    # 如果 API 不存在，至少连通性没问题
+                    pass
+
+                return ok({"success": True, "message": f"微信源连接正常，认证有效 ({url})"})
         except ImportError:
             return ok({"success": False, "error": "httpx 未安装"})
         except Exception as e:

@@ -66,12 +66,18 @@ cat README_original.md
 
 ### 3. 启动 WebUI 控制台（新增功能）
 ```bash
-# 启动 API 服务器（端口 8080）
+# 生产模式：先构建前端，再启动后端（推荐）
+cd webui-src && npm install && npm run build && cd ..
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8080
+# 浏览器访问：http://localhost:8080
 
-# 浏览器访问 WebUI 控制台
-open http://localhost:8080
+# 开发模式：前后端分离启动（支持前端热重载）
+# 终端1：uv run uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+# 终端2：cd webui-src && npm run dev
+# 浏览器访问：http://localhost:3000
 ```
+
+> 详细联调步骤参阅 [docs/guide/quickstart.md](docs/guide/quickstart.md#启动-webui后端-api--前端界面)
 
 ### 4. 飞书数据同步
 ```bash

@@ -61,8 +61,8 @@
       </template>
     </n-modal>
 
-    <!-- Create Modal -->
-    <n-modal v-model:show="showCreate" title="新建定时任务" preset="dialog" style="width: 600px; max-height: 90vh; overflow-y: auto">
+    <!-- Create / Edit Modal -->
+    <n-modal v-model:show="showCreate" :title="editingTaskId ? '编辑定时任务' : '新建定时任务'" preset="dialog" style="width: 600px; max-height: 90vh; overflow-y: auto">
       <n-form label-placement="left" label-width="110">
         <n-form-item label="任务名称">
           <n-input v-model:value="newTask.name" placeholder="例: 每日微信采集&同步" />
@@ -144,7 +144,7 @@
 
       <template #action>
         <n-button @click="showCreate = false">取消</n-button>
-        <n-button type="primary" @click="createTask">创建</n-button>
+        <n-button type="primary" @click="editingTaskId ? updateTask() : createTask()">{{ editingTaskId ? '保存' : '创建' }}</n-button>
       </template>
     </n-modal>
   </div>
@@ -161,6 +161,7 @@ const message = useMessage()
 const loading = ref(false)
 const execLoading = ref(false)
 const showCreate = ref(false)
+const editingTaskId = ref<number | null>(null)
 const dbNotReady = ref(false)
 const showExecLog = ref(false)
 const execLogText = ref('')
@@ -236,6 +237,9 @@ const platformOptions = [
   { label: 'B站', value: 'bili' },
   { label: '微博', value: 'wb' },
   { label: '微信', value: 'wechat' },
+  { label: '快手', value: 'ks' },
+  { label: '贴吧', value: 'tieba' },
+  { label: '知乎', value: 'zhihu' },
 ]
 
 const scheduleTypeOptions = [
@@ -284,10 +288,11 @@ const columns: DataTableColumn[] = [
     },
   },
   {
-    title: '操作', key: 'actions', width: 200,
+    title: '操作', key: 'actions', width: 260,
     render: (row: any) =>
       h(NSpace, { size: 'small' }, () => [
         h(NButton, { size: 'tiny', type: 'primary', onClick: () => triggerTask(row.id) }, () => '执行'),
+        h(NButton, { size: 'tiny', type: 'info', onClick: () => openEdit(row) }, () => '编辑'),
         h(NButton, { size: 'tiny', onClick: () => toggleTask(row) }, () => row.is_active ? '禁用' : '启用'),
         h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteTask(row.id) }, () => '删除'),
       ]),
@@ -377,6 +382,8 @@ async function loadExecutions() {
 }
 
 async function createTask() {
+  if (!newTask.value.name.trim()) { message.warning('请填写任务名称'); return }
+  if (newTask.value.schedule_type === 'cron' && !cronExpr.value.trim()) { message.warning('请填写 Cron 表达式'); return }
   try {
     const scheduleConfig: any = {}
     if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
@@ -441,10 +448,108 @@ async function createTask() {
     })
     message.success('任务创建成功')
     showCreate.value = false
+    editingTaskId.value = null
     loadTasks()
     loadStatus()
   } catch (e: any) {
     message.error(e.message || '创建失败')
+  }
+}
+
+function openEdit(row: any) {
+  editingTaskId.value = row.id
+  newTask.value = {
+    name: row.name || '',
+    task_type: row.task_type || 'crawl',
+    platform: row.platform || 'xhs',
+    schedule_type: row.schedule_type || 'interval',
+  }
+  if (row.schedule_type === 'interval') {
+    intervalHours.value = row.schedule_config?.hours || 6
+  } else if (row.schedule_type === 'cron') {
+    cronExpr.value = row.schedule_config?.cron || ''
+  }
+  // 恢复 pipeline 配置（如果有）
+  if (row.task_config?.pipeline) {
+    const steps = row.task_config.pipeline
+    for (const s of steps) {
+      if (s.step === 'subscription_crawl') {
+        pipelineCfg.value.crawl_limit = s.limit || 0
+        pipelineCfg.value.crawl_timeout = s.timeout_seconds || 3600
+      }
+      if (s.step === 'feishu_push') {
+        pipelineCfg.value.data_type = s.data_type || 'creator'
+        pipelineCfg.value.table1_id = s.table_id || ''
+      }
+      if (s.step === 'feishu_pull') {
+        pipelineCfg.value.filter_field = s.filter_field || ''
+        pipelineCfg.value.filter_operator = s.filter_operator || 'contains'
+        pipelineCfg.value.filter_values = s.filter_values || []
+        pipelineCfg.value.view_id = s.view_id || ''
+        if (!pipelineCfg.value.table1_id && s.table_id) pipelineCfg.value.table1_id = s.table_id
+      }
+      if (s.step === 'feishu_push_json') {
+        pipelineCfg.value.table2_id = s.table_id || ''
+        pipelineCfg.value.json_columns = s.json_columns || ''
+        pipelineCfg.value.json_primary = s.json_primary || '记录ID'
+        pipelineCfg.value.range_start = s.range_start || null
+        pipelineCfg.value.range_end = s.range_end || null
+      }
+    }
+  }
+  showCreate.value = true
+}
+
+async function updateTask() {
+  if (!editingTaskId.value) return
+  if (!newTask.value.name.trim()) { message.warning('请填写任务名称'); return }
+  try {
+    const scheduleConfig: any = {}
+    if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
+    if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
+
+    // 构建 task_config（与 createTask 相同逻辑）
+    let taskConfig: any = {}
+    if (newTask.value.task_type === 'subscription_combo') {
+      const cfg = pipelineCfg.value
+      const pipeline: any[] = []
+      const step1: any = { step: 'subscription_crawl', platform: newTask.value.platform }
+      if (cfg.crawl_limit > 0) step1.limit = cfg.crawl_limit
+      if (cfg.crawl_timeout !== 3600) step1.timeout_seconds = cfg.crawl_timeout
+      pipeline.push(step1)
+      const step2: any = { step: 'feishu_push', platform: newTask.value.platform, data_type: cfg.data_type }
+      if (cfg.table1_id) step2.table_id = cfg.table1_id
+      pipeline.push(step2)
+      if (cfg.table1_id) {
+        const step3: any = { step: 'feishu_pull', table_id: cfg.table1_id, platform: newTask.value.platform, output: 'step3_csv' }
+        if (cfg.filter_field && cfg.filter_values.length) {
+          step3.filter_field = cfg.filter_field; step3.filter_operator = cfg.filter_operator; step3.filter_values = cfg.filter_values
+        }
+        if (cfg.view_id) step3.view_id = cfg.view_id
+        pipeline.push(step3)
+      }
+      if (cfg.table2_id && cfg.json_columns) {
+        const step4: any = { step: 'feishu_push_json', input: 'step3_csv', table_id: cfg.table2_id, json_columns: cfg.json_columns, json_primary: cfg.json_primary || '记录ID' }
+        if (cfg.range_start) step4.range_start = cfg.range_start
+        if (cfg.range_end) step4.range_end = cfg.range_end
+        pipeline.push(step4)
+      }
+      taskConfig = { pipeline }
+    }
+
+    await http.put(`/scheduler/tasks/${editingTaskId.value}`, {
+      name: newTask.value.name,
+      schedule_type: newTask.value.schedule_type,
+      schedule_config: scheduleConfig,
+      task_config: taskConfig,
+    })
+    message.success('任务更新成功')
+    showCreate.value = false
+    editingTaskId.value = null
+    loadTasks()
+    loadStatus()
+  } catch (e: any) {
+    message.error(e.message || '更新失败')
   }
 }
 

@@ -2,9 +2,11 @@
 
 ## 项目文档
 
-- [项目架构文档](项目架构文档.md) - 系统架构、模块设计、数据流向（含 Mermaid 图表）
+- [快速开始](guide/quickstart.md) - 环境搭建、爬虫 / WebUI / 调度器全量启动指引
+- [WebUI 控制台](guide/quickstart.md#启动-webui-后端api-服务器) - 后端 API + 前端界面启动方式
+- [项目架构总览](reference/01-项目架构总览.md) - 系统架构、模块设计、数据流向（含 Mermaid 图表）
+- [技术知识库](reference/README.md) - 基于源码分析的架构知识库（7 篇）
 - [微信公众号爬虫模块](wechat/README.md) - 微信公众号集成（配置、使用、API 参考）
-- [知识库](知识库/README.md) - 基于源码分析的架构知识库（6 篇）
 
 ## 推荐：使用 uv 管理依赖
 
