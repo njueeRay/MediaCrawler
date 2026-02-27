@@ -5,7 +5,8 @@
 **参会角色：** Brain · PM · Dev · Code-Reviewer  
 **议题：** 质量事故复盘 · 验证缺口归因 · 执行路径重建  
 **分类：** 紧急热修复会  
-**状态：** 🔴 P0 未解决 → 用户 WSL 环境需要 git pull
+**状态：** 🔴 P0 未解决 → Docker 镜像未重新 build（代码已修复，容器未更新）
+**勘误：** 初始诊断误判为 WSL 环境，实际为 Docker 部署（WORKDIR /app）
 
 ---
 
@@ -24,11 +25,16 @@
 ### 根因 #1：验证环境错位（直接导致用户报错）
 
 ```
-Dev 验证环境：  Windows · F:\Project\GitHub\MediaCrawler
-用户运行环境：  WSL/Linux · /app/
+Dev 验证环境：  Windows · F:\Project\GitHub\MediaCrawler（直接 uv run）
+用户运行环境：  Docker 容器（WORKDIR /app，来自 deploy/Dockerfile）
 ```
 
-`main.py` lazy import 修复（commit `7788218`）已 push，但用户 WSL 环境 `/app/` **没有执行 `git pull`**，仍在运行旧代码。
+`main.py` lazy import 修复（commit `7788218`）已在 Windows 文件系统中，  
+但 **Docker 镜像已使用旧代码构建，未重新 `docker-compose build`**，容器内仍是修复前的 `main.py`。  
+路径 `/app/main.py` = Docker 容器内路径，不是 WSL。
+
+> **【会议勘误】** 首席侦探（Brain）最初误判为 WSL 环境，实为 Docker 容器。
+> 教训：在诊断路径来源时，应优先检查项目是否有 Dockerfile/WORKDIR 配置，而不是直接假设 WSL。
 
 ### 根因 #2：自测标准过低
 
@@ -42,26 +48,36 @@ P0 修复未经目标环境验证，P1 修复就开始开发。没有任何一�
 
 ## 三、立即执行路径
 
-### P0-A：用户在 WSL 执行代码同步
+### P0-A：重新 build Docker 镜像（在 Windows PowerShell 执行）
 
-```bash
-cd /app
-git fetch origin
-git pull origin dev  # 或当前 working 分支名
+```powershell
+# 在项目根目录
+cd F:\Project\GitHub\MediaCrawler
 
-# 验证修复到位
-grep -n "importlib" main.py       # 应有输出
-head -50 main.py                   # 不应有 from media_platform.douyin import
+# 重新构建镜像（拉取最新代码已在 Windows 文件系统，直接 build 即可）
+docker-compose -f deploy/docker-compose.yml build --no-cache mediacrawler
+
+# 重启容器
+docker-compose -f deploy/docker-compose.yml up -d
+
+# 等待启动
+Start-Sleep -Seconds 5
+
+# 验证容器内 main.py 已更新
+docker exec mediacrawler grep -n "importlib" main.py   # 应有输出
+docker exec mediacrawler head -50 main.py              # 不应有 from media_platform.douyin import
 ```
 
 **成功判据：** `grep -n "importlib" main.py` 有输出。
 
 ### P0-B：基础烟雾测试
 
-```bash
-# 在 /app/ 目录
-uv run python main.py --help       # 无 execjs 错误
-curl http://localhost:8000/api/health/platforms  # 200 + wechat 在列表
+```powershell
+# 验证容器内 --help 无 execjs 错误
+docker exec mediacrawler python main.py --help
+
+# API 健康检查
+curl http://localhost:8080/api/health/platforms
 ```
 
 ### P1-A：WebSocket 端到端验证
@@ -126,10 +142,10 @@ curl "http://localhost:8000/api/data/stats" | python3 -m json.tool
 
 | # | 条件 | 验证方式 | 负责方 |
 |---|------|---------|--------|
-| EC-1 | WSL 已 git pull，main.py 无顶层平台 import | `head -50 main.py` + `grep importlib main.py` | 用户执行 |
-| EC-2 | `uv run python main.py --help` 无 execjs 错误 | 终端输出 | 用户执行，Dev 确认 |
-| EC-3 | API Server 启动正常，`/api/health/platforms` 返回 200 含 wechat | curl 输出 | Dev 提供命令，用户确认 |
-| EC-4 | `/ws/logs` 在触发简单任务后有实际日志流出（无 connection reset） | wscat 输出 | Dev 在 WSL 复现 |
+| EC-1 | Docker 镜像rebuild，容器内 main.py 无顶层平台 import | `docker exec mediacrawler grep -n "importlib" main.py` | 用户执行 |
+| EC-2 | `docker exec mediacrawler python main.py --help` 无 execjs 错误 | 终端输出 | 用户执行，Dev 确认 |
+| EC-3 | API 启动正常，`http://localhost:8080/api/health/platforms` 返回 200 含 wechat | curl 输出 | 用户确认 |
+| EC-4 | `/ws/logs` 在触发简单任务后有实际日志流出（无 connection reset） | wscat 或浏览器 DevTools | Dev 提供步骤，用户确认 |
 
 **EC-5（P1，在 EC-1~4 通过后评估）：**  
 DataExplorer 和 FeishuSync WebSocket 端到端链路可用，Dev 提供验证截图。
