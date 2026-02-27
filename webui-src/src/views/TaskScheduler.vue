@@ -15,7 +15,7 @@
     <n-tabs type="line" animated>
       <!-- Task List -->
       <n-tab-pane name="tasks" tab="定时任务">
-        <n-card size="small">
+        <n-card size="small" title="定时任务列表">
           <template #header-extra>
             <n-space>
               <n-button type="primary" size="small" @click="openCreate()">新建任务</n-button>
@@ -71,7 +71,7 @@
           <n-select v-model:value="newTask.task_type" :options="taskTypeOptions" @update:value="onTaskTypeChange" />
         </n-form-item>
         <n-form-item label="平台">
-          <n-select v-model:value="newTask.platform" :options="platformOptions" clearable />
+          <n-select v-model:value="newTask.platform" :options="platformOptions" clearable @update:value="onPlatformChange" />
         </n-form-item>
         <n-form-item label="调度类型">
           <n-select v-model:value="newTask.schedule_type" :options="scheduleTypeOptions" />
@@ -101,9 +101,22 @@
 
         <!-- subscription_crawl 配置 -->
         <template v-if="step.step === 'subscription_crawl'">
-          <n-form label-placement="left" label-width="100" size="small">
+          <n-form label-placement="left" label-width="110" size="small">
+            <n-form-item label="指定采集账号">
+              <n-select
+                v-model:value="step.only_creator_ids"
+                :options="subscriptionOptions"
+                :loading="subscriptionLoading"
+                multiple
+                filterable
+                clearable
+                placeholder="不选则采集全部活跃订阅"
+                style="width: 100%"
+              />
+            </n-form-item>
             <n-form-item label="采集数量上限">
               <n-input-number v-model:value="step.limit" :min="0" placeholder="0=不限" style="width:140px" />
+              <span class="ml-2 text-xs text-gray-400">0 = 不限</span>
             </n-form-item>
             <n-form-item label="超时(秒)">
               <n-input-number v-model:value="step.timeout_seconds" :min="60" style="width:140px" />
@@ -258,6 +271,10 @@ const newTask = ref({
 // Pipeline 步骤数组（解耦化核心）
 const pipelineSteps = ref<any[]>([])
 
+// 订阅账号列表（供步骤表单选择）
+const subscriptionOptions = ref<{ label: string; value: string }[]>([])
+const subscriptionLoading = ref(false)
+
 const taskTypeOptions = [
   { label: '仅采集（订阅）', value: 'subscription_crawl' },
   { label: '仅采集（搜索/指定）', value: 'crawl' },
@@ -344,7 +361,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
   const needRetry = PLAYWRIGHT_PLATFORMS.has(p)
   switch (stepType) {
     case 'subscription_crawl':
-      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 3600 }
+      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 3600, only_creator_ids: [] }
     case 'crawl':
       return {
         step: 'crawl', platform: p,
@@ -432,6 +449,7 @@ function resetFormState() {
 
 function openCreate() {
   resetFormState()
+  loadSubscriptions(newTask.value.platform)
   showCreate.value = true
 }
 
@@ -445,6 +463,12 @@ function onTaskTypeChange(val: string) {
     if (!newTask.value.platform) newTask.value.platform = 'wechat'
   }
   pipelineSteps.value = getDefaultPipeline(val, newTask.value.platform)
+  loadSubscriptions(newTask.value.platform)
+}
+
+function onPlatformChange(val: string) {
+  pipelineSteps.value = getDefaultPipeline(newTask.value.task_type, val)
+  loadSubscriptions(val)
 }
 
 // ─── 从 pipeline 步骤数组构建 task_config ────────────────────────────────────
@@ -457,6 +481,7 @@ function buildTaskConfig(): any {
     if (s.step === 'subscription_crawl') {
       if (s.limit > 0) clean.limit = s.limit
       if (s.timeout_seconds && s.timeout_seconds !== 3600) clean.timeout_seconds = s.timeout_seconds
+      if (s.only_creator_ids && s.only_creator_ids.length > 0) clean.only_creator_ids = s.only_creator_ids
     }
     if (s.step === 'crawl') {
       clean.crawler_type = s.crawler_type || 'search'
@@ -610,6 +635,24 @@ async function openExecutionLog(executionId: number) {
   }
 }
 
+async function loadSubscriptions(platform?: string) {
+  subscriptionLoading.value = true
+  try {
+    const params: any = { size: 100, is_active: true }
+    if (platform) params.platform = platform
+    const { data } = await http.get('/subscribe', { params })
+    const payload = unwrapApiData<any>(data) || {}
+    subscriptionOptions.value = (payload.items || []).map((s: any) => ({
+      label: s.creator_name ? `${s.creator_name}（${s.creator_id}）` : s.creator_id,
+      value: s.creator_id,
+    }))
+  } catch {
+    subscriptionOptions.value = []
+  } finally {
+    subscriptionLoading.value = false
+  }
+}
+
 async function loadStatus() {
   try {
     const { data } = await http.get('/scheduler/status')
@@ -702,6 +745,7 @@ async function openEdit(row: any) {
   }
 
   restorePipelineFromConfig(taskConfig, newTask.value.task_type, newTask.value.platform)
+  loadSubscriptions(newTask.value.platform)
   showCreate.value = true
 }
 

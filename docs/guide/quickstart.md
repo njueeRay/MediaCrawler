@@ -121,6 +121,30 @@ curl http://localhost:8080/api/health
 # 预期：{"status": "ok"}
 ```
 
+### Windows 端口冲突处理
+
+> **症状**：uvicorn 启动后立即报 `[Errno 10048] error while attempting to bind on address`，exit code 1。
+
+**步骤 1 — 找出占用进程：**
+```powershell
+Get-NetTCPConnection -LocalPort 8080 | Select-Object LocalAddress, State, OwningProcess
+```
+
+**步骤 2 — 强杀：**
+```powershell
+Stop-Process -Id <OwningProcess> -Force
+```
+
+**步骤 3 — 若为僵尸进程（Stop-Process 报"找不到"但端口仍占用），改用其他端口：**
+```powershell
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8088
+```
+同步修改前端代理目标（`webui-src/vite.config.ts`）：
+```typescript
+target: 'http://localhost:8088',  // 与后端端口保持一致
+```
+> 僵尸进程重启系统后自动消失，平时直接换端口绕过即可。
+
 ---
 
 ## 启动定时调度系统
