@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Sprint #002 — 缺陷修复 + Linux 服务器部署
+### Sprint #003 — UI+后端协同大修 + Roadmap v1 启动
+
+#### Fixed
+- **P0** (`api/schemas/scheduler.py`, `api/routers/scheduler.py`): 任务编辑保存后 `task_type`/`platform` 丢弃 + `task_config` 被清空——`ScheduledTaskUpdate` 补充字段，`updateTask()` 发送完整体
+- **P0** (`webui-src/src/views/TaskScheduler.vue`): `openEdit()` 打开弹窗时不加载已有 `task_config`——任务列表 API 现返回 `task_config`，前端正确回填
+- 禁用任务手动执行语义不清——点击「立即执行」时弹出确认对话框
+
+#### Added
+- Pipeline-first 任务调度重构：所有任务类型统一 pipeline 格式，task_type 退化为「模板预设」
+- 任务中断机制：`abort_flags` + `POST /scheduler/executions/{id}/abort` + 前端中断按钮
+- `GET /api/health/platforms`：并发检测微信/飞书/DB 连通性与鉴权状态
+- `GET /api/health/version`：返回 pyproject.toml 版本号
+- Dashboard 健康面板：各平台状态可视化（🟢/🟡/🔴）+ Onboarding 提示
+- GitHub Actions CI：ruff lint + mypy type-check + npm build + pytest
+- PR 合并前检查清单模板（`.github/pull_request_template.md`）
+- Roadmap v1 规划（`docs/ops/meetings/2026-02-27-roadmap-v1-planning.md`）
+
+### Sprint #002+ — 验收复查 Bug 修复
 
 #### Fixed
 - **P0-1** (`api/main.py`): `webui_startup()` 添加 APScheduler 任务恢复循环——服务重启后自动将数据库中所有 `is_active=True` 的 `ScheduledTask` 重新向 APScheduler 注册
