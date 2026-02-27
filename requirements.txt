@@ -24,12 +24,8 @@ pyhumps==3.8.0
 # 飞书同步模块依赖
 schedule==1.2.0      # 定时任务
 celery==5.3.4        # 异步任务队列
-redis>=4.6.0         # Celery消息代理
-sqlalchemy==2.0.23   # 数据库ORM
-alembic==1.13.1      # 数据库迁移
 click==8.1.7         # CLI工具
 rich==13.7.0         # 富文本输出
-typer==0.9.0         # 现代CLI框架
 watchdog==3.0.0      # 文件监控
 psutil==5.9.6        # 系统监控
 

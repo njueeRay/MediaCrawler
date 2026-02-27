@@ -27,9 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 浏览器（可选，仅爬虫需要）
 # 如果只运行 WebUI + 微信模块，可注释掉以下两行减小镜像
-RUN pip install playwright && playwright install chromium --with-deps
-
-# 复制应用代码
+    # ⚠️ 当前部署模式：WebUI + 微信 API 模式，不需要本地浏览器
+    # RUN pip install playwright && playwright install chromium --with-deps
 COPY . .
 
 # 覆盖前端构建产物
