@@ -1,0 +1,9 @@
+## MediaCrawler — Playwright 爬虫依赖
+## 适用于：抖音 / 小红书 / B站 / 知乎 / 微博等平台爬虫
+## 安装：pip install -r requirements-base.txt -r requirements-playwright.txt
+## 然后：playwright install chromium --with-deps
+
+-r requirements-base.txt
+
+playwright==1.45.0
+opencv-python

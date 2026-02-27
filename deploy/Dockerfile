@@ -14,6 +14,10 @@ RUN npm run build
 # ─── Stage 2: Python 运行时 ───
 FROM python:3.11-slim AS runtime
 
+# ENABLE_PLAYWRIGHT=true 时安装 Playwright 及系统依赖（镜像增约 400MB）
+# 默认 false：仅 WebUI + 微信 API 模式，镜像更小
+ARG ENABLE_PLAYWRIGHT=false
+
 # 系统依赖（Playwright 浏览器需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -21,14 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Python 依赖
-COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 安装 Playwright 浏览器（可选，仅爬虫需要）
-# 如果只运行 WebUI + 微信模块，可注释掉以下两行减小镜像
-    # ⚠️ 当前部署模式：WebUI + 微信 API 模式，不需要本地浏览器
-    # RUN pip install playwright && playwright install chromium --with-deps
+# Python 依赖 — 根据 ENABLE_PLAYWRIGHT 选择安装范围
+COPY pyproject.toml requirements.txt requirements-base.txt requirements-playwright.txt ./
+RUN if [ "$ENABLE_PLAYWRIGHT" = "true" ]; then \
+      pip install --no-cache-dir -r requirements-playwright.txt && \
+      playwright install chromium --with-deps; \
+    else \
+      pip install --no-cache-dir -r requirements-base.txt; \
+    fi
 COPY . .
 
 # 覆盖前端构建产物
