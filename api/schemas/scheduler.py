@@ -55,6 +55,8 @@ class ScheduledTaskCreate(BaseModel):
 class ScheduledTaskUpdate(BaseModel):
     """更新定时任务"""
     name: Optional[str] = None
+    task_type: Optional[str] = None
+    platform: Optional[str] = None
     is_active: Optional[bool] = None
     schedule_type: Optional[str] = None
     schedule_config: Optional[Dict[str, Any]] = None

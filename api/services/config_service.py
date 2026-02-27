@@ -75,6 +75,18 @@ class ConfigService:
 
     # ------ public API ------
 
+    def get(self, key: str, default: str = "") -> str:
+        """统一配置读取入口 — 直接从 .env 文件读取。
+
+        所有需要读取运行时配置的新代码应通过此方法，
+        避免 `from config import xxx` 与 .env 直读之间的不一致。
+
+        用法::
+            from api.services.config_service import config_service
+            auth_key = config_service.get("WECHAT_AUTH_KEY")
+        """
+        return self._read_env_file().get(key, default)
+
     def get_all_groups(self) -> List[dict]:
         """获取所有配置分组 (值脱敏)"""
         env = self._read_env_file()

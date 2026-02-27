@@ -230,8 +230,8 @@ class FeishuService:
                         record.finished_at = datetime.now()
                         record.duration_seconds = round(duration, 1)
                     await session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[FeishuService] Failed to update sync history record id={history_id}: {e}")
 
         # Notify WS: sync completed
         await push_sync_progress({

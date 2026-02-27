@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # APScheduler 实例 (延迟初始化，避免导入循环)
 _apscheduler = None
 
+# 全局中断标记：execution_id -> bool
+abort_flags: Dict[int, bool] = {}
+
 
 def _get_scheduler():
     """获取或创建 APScheduler 实例"""
@@ -294,6 +297,11 @@ class SchedulerService:
             logger.error(f"[Scheduler] Scheduled execution failed for task {task_id}: {e}")
 
     @staticmethod
+    def _is_aborted(execution_id: int) -> bool:
+        """检查执行是否被用户中断"""
+        return abort_flags.get(execution_id, False)
+
+    @staticmethod
     async def _run_task(
         execution_id: int, task_type: str, platform: str, task_config: dict
     ):
@@ -319,13 +327,18 @@ class SchedulerService:
                 _pipeline_ctx = PipelineContext(
                     task_id=0, execution_id=execution_id, platform=platform or ""
                 )
+                # 将 abort 检查注入 pipeline context
+                _pipeline_ctx._abort_check = lambda: SchedulerService._is_aborted(execution_id)
 
                 async def _log(line: str) -> None:
                     await SchedulerService.append_execution_log(execution_id, line)
 
                 await run_pipeline(task_config["pipeline"], _pipeline_ctx, _log)
 
-                if _pipeline_ctx.aborted:
+                if SchedulerService._is_aborted(execution_id):
+                    status = "cancelled"
+                    error_message = "用户手动中断"
+                elif _pipeline_ctx.aborted:
                     status = "failed"
                     error_message = "管道中止（某步骤失败）"
                 result_summary.update({"pipeline_steps": _pipeline_ctx.step_results})
@@ -433,8 +446,11 @@ class SchedulerService:
                 if not started:
                     raise RuntimeError("爬虫启动失败")
 
-                # 等待爬虫完成 (最多 30 分钟)
+                # 等待爬虫完成 (最多 30 分钟)，支持中断
                 for _ in range(1800):
+                    if SchedulerService._is_aborted(execution_id):
+                        await crawler_manager.stop()
+                        raise RuntimeError("用户手动中断")
                     await asyncio.sleep(1)
                     s = crawler_manager.get_status()
                     if s.get("status") != "running":
@@ -470,9 +486,16 @@ class SchedulerService:
                         })
 
         except Exception as e:
-            status = "failed"
-            error_message = str(e)
+            if SchedulerService._is_aborted(execution_id):
+                status = "cancelled"
+                error_message = "用户手动中断"
+            else:
+                status = "failed"
+                error_message = str(e)
             await SchedulerService.append_execution_log(execution_id, f"error: {error_message}")
+
+        # 清理 abort flag
+        abort_flags.pop(execution_id, None)
 
         # 更新执行记录
         duration = (datetime.now() - start_time).total_seconds()
@@ -506,8 +529,8 @@ class SchedulerService:
                             task.fail_count = (task.fail_count or 0) + 1
 
                     await session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[Scheduler] Failed to update execution record for execution_id={execution_id}: {e}")
 
     # ------ Execution History ------
 

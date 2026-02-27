@@ -5,6 +5,7 @@ from typing import Optional
 
 import asyncio
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -58,6 +59,7 @@ async def list_tasks(
             "is_active": t.is_active,
             "schedule_type": t.schedule_type,
             "schedule_config": t.schedule_config or {},
+            "task_config": t.task_config or {},
             "last_run_at": str(t.last_run_at) if t.last_run_at else None,
             "next_run_at": str(t.next_run_at) if t.next_run_at else None,
             "run_count": t.run_count,
@@ -135,6 +137,37 @@ async def trigger_task(task_id: int, session: AsyncSession = Depends(get_db)):
         {"execution_id": execution.id, "status": execution.status},
         message="任务已触发",
     )
+
+
+# ---------- Abort ----------
+
+@router.post("/executions/{execution_id}/abort")
+async def abort_execution(execution_id: int, session: AsyncSession = Depends(get_db)):
+    """中断正在运行的执行"""
+    result = await session.execute(
+        select(TaskExecution).where(TaskExecution.id == execution_id)
+    )
+    record = result.scalars().first()
+    if not record:
+        raise HTTPException(404, "执行记录不存在")
+    if record.status != "running":
+        return ok(message="当前执行不在运行中")
+
+    # 1. 标记 abort flag（让 _run_task 循环退出）
+    from api.services.scheduler_service import abort_flags
+    abort_flags[execution_id] = True
+
+    # 2. 同时尝试停止 CrawlerManager 子进程
+    from api.services.crawler_manager import crawler_manager
+    await crawler_manager.stop()
+
+    # 3. 标记 execution 状态
+    record.status = "cancelled"
+    record.finished_at = datetime.now()
+    record.error_message = "用户手动中断"
+    await session.commit()
+
+    return ok(message="中断指令已发送")
 
 
 # ---------- Executions ----------

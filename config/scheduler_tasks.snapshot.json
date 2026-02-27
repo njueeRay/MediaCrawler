@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-27T01:42:34",
+  "generated_at": "2026-02-27T14:54:58",
   "tasks": [
     {
       "id": 2,
@@ -7,21 +7,17 @@
       "task_type": "subscription_combo",
       "platform": "wechat",
       "is_active": false,
-      "schedule_type": "interval",
+      "schedule_type": "cron",
       "schedule_config": {
-        "minutes": 6
+        "cron": "*/5 * * * *"
       },
-      "task_config": {
-        "data_type": "article",
-        "timeout_seconds": 60,
-        "limit": 1
-      },
-      "last_run_at": null,
+      "task_config": {},
+      "last_run_at": "2026-02-27T14:45:00.016629",
       "next_run_at": null,
-      "run_count": 0,
-      "fail_count": 0,
+      "run_count": 4,
+      "fail_count": 1,
       "created_at": "2026-02-12T05:41:43",
-      "updated_at": "2026-02-12T07:16:03"
+      "updated_at": "2026-02-27T06:50:56"
     }
   ]
 }
