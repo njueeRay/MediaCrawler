@@ -36,36 +36,33 @@ import cmd_arg
 import config
 from database import db
 from base.base_crawler import AbstractCrawler
-from media_platform.bilibili import BilibiliCrawler
-from media_platform.douyin import DouYinCrawler
-from media_platform.kuaishou import KuaishouCrawler
-from media_platform.tieba import TieBaCrawler
-from media_platform.weibo import WeiboCrawler
-from media_platform.wechat import WeChatCrawler
-from media_platform.xhs import XiaoHongShuCrawler
-from media_platform.zhihu import ZhihuCrawler
 from tools.async_file_writer import AsyncFileWriter
 from var import crawler_type_var
 
 
 class CrawlerFactory:
-    CRAWLERS: dict[str, Type[AbstractCrawler]] = {
-        "xhs": XiaoHongShuCrawler,
-        "dy": DouYinCrawler,
-        "ks": KuaishouCrawler,
-        "bili": BilibiliCrawler,
-        "wb": WeiboCrawler,
-        "tieba": TieBaCrawler,
-        "zhihu": ZhihuCrawler,
-        "wechat": WeChatCrawler,
+    CRAWLERS: dict[str, str] = {
+        "xhs": "media_platform.xhs:XiaoHongShuCrawler",
+        "dy": "media_platform.douyin:DouYinCrawler",
+        "ks": "media_platform.kuaishou:KuaishouCrawler",
+        "bili": "media_platform.bilibili:BilibiliCrawler",
+        "wb": "media_platform.weibo:WeiboCrawler",
+        "tieba": "media_platform.tieba:TieBaCrawler",
+        "zhihu": "media_platform.zhihu:ZhihuCrawler",
+        "wechat": "media_platform.wechat:WeChatCrawler",
     }
 
     @staticmethod
     def create_crawler(platform: str) -> AbstractCrawler:
-        crawler_class = CrawlerFactory.CRAWLERS.get(platform)
-        if not crawler_class:
+        entry = CrawlerFactory.CRAWLERS.get(platform)
+        if not entry:
             supported = ", ".join(sorted(CrawlerFactory.CRAWLERS))
             raise ValueError(f"Invalid media platform: {platform!r}. Supported: {supported}")
+        # Lazy import: only load the requested platform module
+        module_path, class_name = entry.rsplit(":", 1)
+        import importlib
+        module = importlib.import_module(module_path)
+        crawler_class: Type[AbstractCrawler] = getattr(module, class_name)
         return crawler_class()
 
 
