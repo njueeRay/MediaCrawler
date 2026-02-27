@@ -164,9 +164,14 @@ async def test_connection(body: dict):
                             "success": False,
                             "error": f"微信源连接正常，但认证失败：{err_msg}（auth key 可能已过期，有效期约 4 天）",
                         })
-                except Exception:
-                    # 如果 API 不存在，至少连通性没问题
-                    pass
+                except Exception as auth_exc:
+                    # API 端点不存在或响应异常 — 不能假定认证有效
+                    import logging
+                    logging.getLogger(__name__).warning(f"微信 auth 验证端点异常: {auth_exc}")
+                    return ok({
+                        "success": True,
+                        "message": f"微信源连接正常（{url}），但 auth 验证未完成（验证端点异常），搜索创作者时可能失败",
+                    })
 
                 return ok({"success": True, "message": f"微信源连接正常，认证有效 ({url})"})
         except ImportError:

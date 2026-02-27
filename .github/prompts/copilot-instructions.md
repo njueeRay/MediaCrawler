@@ -124,43 +124,51 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 | 设计决策归档 | `docs/design-decisions.md` |
 | 变更历史 | `CHANGELOG.md` |
 | 团队作战手册 | `docs/team-playbook.md` |
-| 会议纪要 | `docs/meetings/` |
+| 会议纪要 | `docs/ops/meetings/` |
 
 ## 当前迭代状态
 
-> 最后更新：2026-02-26（Sprint #002 全体复盘会后）
+> 最后更新：2026-02-27（第二轮验收复查 Bug 修复后）
 
-**当前 Sprint：** #002 — 缺陷修复 + Linux 服务器部署  
-**Sprint 目标：** 修复 3 个 P0 阻断项，将服务部署到 Linux 服务器，实现订阅驱动的定时爬取 → 飞书同步全流程。  
-**团队状态：** 代码层全部就绪（P0/P1 已修复），等待用户在服务器执行部署步骤 + 端到端验证。DoD 代码部分 ✅，服务器部分 ⏳。
+**当前 Sprint：** #002+ — 验收第二轮 Bug 修复 + Linux 部署准备  
+**Sprint 目标：** 修复任务调度新建状态残留 + 微信搜索 auth 不一致问题，本地多任务编排跑通后部署到 Linux。  
+**团队状态：** P0 Bug 已修复，Docker 部署骨架已输出，等待用户本地验证通过后进入服务器部署。
 
 ### 已完成
 - [x] Sprint #001: 全员阅读项目上下文，形成统一认知
-- [x] Sprint #001: 交接启动会已召开，纪要存档 (`docs/meetings/2026-02-26-handover-kickoff.md`)
+- [x] Sprint #001: 交接启动会已召开，纪要存档 (`docs/ops/meetings/2026-02-26-handover-kickoff.md`)
 - [x] Sprint #001: `CHANGELOG.md`、`design-decisions.md`、`copilot-instructions.md` 已优化
 - [x] Sprint #002: **P0-1** 修复——`webui_startup()` 添加 APScheduler 任务恢复循环
 - [x] Sprint #002: **P0-3** 修复——CORS `allow_origins` 改为读取 `ALLOWED_ORIGINS` env var
 - [x] Sprint #002: **P0-4** 修复——`apscheduler` + `lark-oapi` 加入 `pyproject.toml`（全体复盘新发现）
 - [x] Sprint #002: **P1-1** 修复——`subscription_combo` 循环 `raise` → `continue`
 - [x] Sprint #002: **P1-3** 修复——`/api/config/platforms` 添加微信平台
-- [x] Sprint #002: `auto_scheduler.py` 正式废弃（加 RuntimeError 保护 + 迁移说明）
-- [x] Sprint #002: `.env.example` 补充 `ALLOWED_ORIGINS`、服务器部署警告
+- [x] Sprint #002: 微信测试连接增强（连通性+认证双重检测）
+- [x] Sprint #002: XHS/DY 创作者搜索实现
+- [x] Sprint #002: 任务调度编辑功能实现
+- [x] Sprint #002: 前端平台搜索提示优化
+- [x] Sprint #002: `auto_scheduler.py` 正式废弃
 - [x] Sprint #002: `deploy/mediacrawler.service` systemd 模板创建
-- [x] Sprint #002: 全体复盘会议纪要更新（P0-4 + 部署路径 + 风险清单）
+- [x] Sprint #002+: **P0-BugA** 修复——任务调度「新建」按钮状态残留（editingTaskId/newTask/pipelineCfg 未重置）
+- [x] Sprint #002+: **P0-BugB** 修复——微信搜索 auth key 读取源与测试连接不一致（改为优先读 .env）
+- [x] Sprint #002+: 微信测试连接 auth 验证假阳性修复（except Exception: pass → 记录 warning + 明确提示）
+- [x] Sprint #002+: 文档归档治理（会议纪要统一到 docs/ops/meetings/）
+- [x] Sprint #002+: Docker 部署骨架输出（Dockerfile + docker-compose.yml）
 
 ### 待执行（服务器层——用户按序操作）
 - [ ] `git pull` + `uv sync`（确认输出含 apscheduler + lark-oapi）
-- [ ] 服务器 `.env` 填写关键变量：`SAVE_DATA_OPTION=sqlite`、飞书双表配置、`WECHAT_AUTH_KEY`、`ALLOWED_ORIGINS`（P0-2，最关键）
-- [ ] 修改 systemd 服务文件路径 → 安装并启动服务 → `curl /api/health` 验证
+- [ ] 服务器 `.env` 填写关键变量：`SAVE_DATA_OPTION=sqlite`、飞书双表配置、`WECHAT_AUTH_KEY`、`ALLOWED_ORIGINS`
+- [ ] 选择部署方式：systemd（`deploy/mediacrawler.service`）或 Docker（`deploy/docker-compose.yml`）
 - [ ] DB 批量插入 Subscription 记录（首次部署必做，SQL 或 WebUI API）
 - [ ] WebUI 创建 ScheduledTask，手动触发 → 验证飞书「表1」有写入
 - [ ] 配置 cron 运行 `wechat_feishu_workflow.sh` 完成表2同步
+- [ ] 本地端到端多任务编排验证：cron 定时 → 采集 → 飞书同步 → JSON 解析
 
 ### 待执行（代码层——团队操作）
-- [ ] WebUI scheduler 增加 table2 配置入口（P1-4，`TABLE2_ID`/`JSON_COLUMNS`）
 - [ ] 迁移 `@app.on_event` → `lifespan`（P1-2，FastAPI deprecated 警告）
 - [ ] `WECHAT_AUTH_KEY` 轮换机制文档化 + cron 模板（每 3 天）
-- [ ] **Sprint #003 P0**：建立 CI 套件（link-check + markdown-lint）——Playbook §7 CI 先行原则，当前项目无任何 CI Workflow
+- [ ] Docker 部署正式验证（Sprint #003）
+- [ ] **Sprint #003 P0**：建立 CI 套件（link-check + markdown-lint）
 
 ### 已知风险（最高优先级排查）
 - 🔴 `SAVE_DATA_OPTION` 未设为 `sqlite` → WebUI 全部 DB 功能静默失败（无报错）

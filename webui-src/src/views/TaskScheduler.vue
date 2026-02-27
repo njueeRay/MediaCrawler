@@ -18,7 +18,7 @@
         <n-card size="small">
           <template #header-extra>
             <n-space>
-              <n-button type="primary" size="small" @click="showCreate = true">新建任务</n-button>
+              <n-button type="primary" size="small" @click="openCreate()">新建任务</n-button>
               <n-button size="small" @click="loadTasks">刷新</n-button>
             </n-space>
           </template>
@@ -143,7 +143,7 @@
       </n-collapse>
 
       <template #action>
-        <n-button @click="showCreate = false">取消</n-button>
+        <n-button @click="cancelCreate()">取消</n-button>
         <n-button type="primary" @click="editingTaskId ? updateTask() : createTask()">{{ editingTaskId ? '保存' : '创建' }}</n-button>
       </template>
     </n-modal>
@@ -223,6 +223,31 @@ const pipelineCfg = ref({
   range_start: null as number | null,
   range_end: null as number | null,
 })
+
+function resetFormState() {
+  editingTaskId.value = null
+  newTask.value = { name: '', task_type: 'crawl', platform: 'xhs', schedule_type: 'interval' }
+  intervalHours.value = 6
+  cronExpr.value = ''
+  pipelineCfg.value = {
+    crawl_limit: 0, crawl_timeout: 3600,
+    data_type: 'creator', table1_id: '',
+    filter_field: '', filter_operator: 'contains', filter_values: [],
+    view_id: '',
+    table2_id: '', json_columns: '', json_primary: '记录ID',
+    range_start: null, range_end: null,
+  }
+}
+
+function openCreate() {
+  resetFormState()
+  showCreate.value = true
+}
+
+function cancelCreate() {
+  showCreate.value = false
+  editingTaskId.value = null
+}
 
 function onTaskTypeChange(val: string) {
   // subscription_combo 默认选微信平台

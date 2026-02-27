@@ -3,6 +3,7 @@
 订阅管理服务 — CRUD + 平台创作者搜索
 """
 
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -10,6 +11,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.webui_models import Subscription
+
+logger = logging.getLogger(__name__)
 
 
 class CreatorSearchError(RuntimeError):
@@ -188,7 +191,18 @@ class SubscriptionService:
 
         from config import wechat_config
 
-        configured_base_url = (getattr(wechat_config, "WECHAT_API_BASE_URL", "") or "").strip().rstrip("/")
+        # 优先从 .env 文件读取（与测试连接一致），fallback 到 config 模块
+        env_base_url = ""
+        env_auth_key = ""
+        try:
+            from api.services.config_service import config_service
+            env = config_service._read_env_file()
+            env_base_url = (env.get("WECHAT_API_BASE_URL", "") or "").strip().rstrip("/")
+            env_auth_key = (env.get("WECHAT_AUTH_KEY", "") or "").strip()
+        except Exception:
+            pass
+
+        configured_base_url = env_base_url or (getattr(wechat_config, "WECHAT_API_BASE_URL", "") or "").strip().rstrip("/")
         base_urls: List[str] = []
         if configured_base_url:
             base_urls.append(configured_base_url)
@@ -198,7 +212,8 @@ class SubscriptionService:
             "http://localhost:8088",
         ])
 
-        auth_key = (getattr(wechat_config, "WECHAT_AUTH_KEY", "") or "").strip()
+        auth_key = env_auth_key or (getattr(wechat_config, "WECHAT_AUTH_KEY", "") or "").strip()
+        logger.info(f"微信搜索: auth_key={auth_key[:6]}*** base_url={configured_base_url}" if auth_key else f"微信搜索: auth_key=未配置 base_url={configured_base_url}")
         headers = {"X-Auth-Key": auth_key} if auth_key else {}
 
         last_network_error: Optional[str] = None

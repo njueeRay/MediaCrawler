@@ -1,0 +1,40 @@
+# MediaCrawler — Docker Compose 部署配置
+# 用法：cd deploy && docker-compose up -d
+#
+# 前置条件：
+# 1. 复制 ../.env.example → ../.env 并填写所有必要配置
+# 2. 确保 SAVE_DATA_OPTION=sqlite（推荐）或配置外部数据库
+
+version: "3.8"
+
+services:
+  mediacrawler:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mediacrawler
+    restart: unless-stopped
+    ports:
+      - "${WEBUI_PORT:-8080}:8080"
+    env_file:
+      - ../.env
+    volumes:
+      # 持久化数据
+      - ../data:/app/data
+      # SQLite 数据库文件
+      - ../database:/app/database
+      # 浏览器缓存（登录态保持）
+      - ../browser_data:/app/browser_data
+      # 日志
+      - mediacrawler-logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  mediacrawler-logs:
