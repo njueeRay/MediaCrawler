@@ -14,16 +14,22 @@ RUN npm run build
 # ─── Stage 2: Python 运行时 ───
 FROM python:3.11-slim AS runtime
 
-# 系统依赖（Playwright 浏览器需要）
+# 系统依赖（curl + OpenCV 运行时）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Python 依赖
 COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir "uvicorn[standard]" websockets wsproto
+
+# 安装 uv（pipeline 步骤执行子进程使用）
+RUN pip install --no-cache-dir uv
 
 # 安装 Playwright 浏览器（可选，仅爬虫需要）
 # 如果只运行 WebUI + 微信模块，可注释掉以下两行减小镜像
