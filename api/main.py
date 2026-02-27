@@ -163,14 +163,18 @@ async def dashboard_data():
     # 爬虫状态
     crawler_status = crawler_manager.get_status()
 
-    # 数据文件统计
+    # 数据文件统计 (run in thread to avoid blocking event loop)
     data_dir = Path(__file__).parent.parent / "data"
     total_files = 0
     total_size = 0
     platforms_with_data = set()
     platform_file_counts: dict[str, int] = {}
     platform_sizes: dict[str, int] = {}
-    if data_dir.exists():
+
+    def _scan_data_dir():
+        nonlocal total_files, total_size
+        if not data_dir.exists():
+            return
         for root, dirs, files in os.walk(data_dir):
             for f in files:
                 fp = Path(root) / f
@@ -188,6 +192,9 @@ async def dashboard_data():
                             platform_sizes[plat] = platform_sizes.get(plat, 0) + fsize
                     except Exception:
                         pass
+
+    import asyncio
+    await asyncio.to_thread(_scan_data_dir)
 
     # 订阅/调度统计 (best-effort, 可能无数据库)
     sub_stats = {"total": 0, "active": 0}

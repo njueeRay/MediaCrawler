@@ -18,8 +18,9 @@
 
 import os
 import json
+import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -203,31 +204,34 @@ async def get_data_stats():
 
     supported_extensions = {".json", ".csv", ".xlsx", ".xls"}
 
-    for root, dirs, filenames in os.walk(DATA_DIR):
-        root_path = Path(root)
-        for filename in filenames:
-            file_path = root_path / filename
-            if file_path.suffix.lower() not in supported_extensions:
-                continue
+    def _scan_files():
+        """Synchronous file scan — run in thread to avoid blocking event loop."""
+        for root, dirs, filenames in os.walk(DATA_DIR):
+            root_path = Path(root)
+            for filename in filenames:
+                file_path = root_path / filename
+                if file_path.suffix.lower() not in supported_extensions:
+                    continue
 
-            try:
-                stat = file_path.stat()
-                stats["total_files"] += 1
-                stats["total_size"] += stat.st_size
+                try:
+                    stat = file_path.stat()
+                    stats["total_files"] += 1
+                    stats["total_size"] += stat.st_size
 
-                # Statistics by type
-                file_type = file_path.suffix[1:].lower()
-                stats["by_type"][file_type] = stats["by_type"].get(file_type, 0) + 1
+                    # Statistics by type
+                    file_type = file_path.suffix[1:].lower()
+                    stats["by_type"][file_type] = stats["by_type"].get(file_type, 0) + 1
 
-                # Statistics by platform (inferred from path)
-                rel_path = str(file_path.relative_to(DATA_DIR))
-                for platform in ["xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu"]:
-                    if platform in rel_path.lower():
-                        stats["by_platform"][platform] = stats["by_platform"].get(platform, 0) + 1
-                        break
-            except Exception:
-                continue
+                    # Statistics by platform (inferred from path)
+                    rel_path = str(file_path.relative_to(DATA_DIR))
+                    for platform in ["xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu", "wechat"]:
+                        if platform in rel_path.lower():
+                            stats["by_platform"][platform] = stats["by_platform"].get(platform, 0) + 1
+                            break
+                except Exception:
+                    continue
 
+    await asyncio.to_thread(_scan_files)
     return ok(stats)
 
 
@@ -238,11 +242,25 @@ def _is_db_mode(save_option: str) -> bool:
     return save_option in ("sqlite", "db", "postgres")
 
 
-@router.get("/db/tables")
-async def list_db_tables(platform: Optional[str] = None):
-    """列出数据库表及记录数（仅在 DB 模式可用）。"""
-    import config
-    if not _is_db_mode(getattr(config, "SAVE_DATA_OPTION", "csv")):
+# Platform-to-table mapping (shared by list/stats)
+PLATFORM_TO_TABLE = {
+    "xhs": "xhs_note",
+    "dy": "douyin_aweme",
+    "ks": "kuaishou_video",
+    "bili": "bilibili_video",
+    "wb": "weibo_note",
+    "tieba": "tieba_note",
+    "zhihu": "zhihu_content",
+    "wechat": "wechat_article",
+}
+
+
+async def _query_db_tables(platform: Optional[str] = None) -> List[Dict]:
+    """Internal: query database tables and their record counts.
+    Returns a list of dicts like [{"table": "xhs_note", "count": 123}, ...].
+    Shared by /db/tables and /db/stats to avoid handler-to-handler calls."""
+    import config as _config
+    if not _is_db_mode(getattr(_config, "SAVE_DATA_OPTION", "csv")):
         raise HTTPException(status_code=400, detail="数据库未配置")
 
     from sqlalchemy import select, func
@@ -252,25 +270,13 @@ async def list_db_tables(platform: Optional[str] = None):
 
     tables = Base.metadata.tables
 
-    # 默认仅返回主要内容表，避免 WebUI 表干扰
-    platform_to_table = {
-        "xhs": "xhs_note",
-        "dy": "douyin_aweme",
-        "ks": "kuaishou_video",
-        "bili": "bilibili_video",
-        "wb": "weibo_note",
-        "tieba": "tieba_note",
-        "zhihu": "zhihu_content",
-        "wechat": "wechat_article",
-    }
-
     selected = []
     if platform:
-        tname = platform_to_table.get(platform)
+        tname = PLATFORM_TO_TABLE.get(platform)
         if tname:
             selected = [tname]
     if not selected:
-        selected = list(platform_to_table.values())
+        selected = list(PLATFORM_TO_TABLE.values())
 
     result = []
     async with get_session() as session:
@@ -287,7 +293,14 @@ async def list_db_tables(platform: Optional[str] = None):
                 total = 0
             result.append({"table": tname, "count": total})
 
-    return ok({"items": result})
+    return result
+
+
+@router.get("/db/tables")
+async def list_db_tables(platform: Optional[str] = None):
+    """列出数据库表及记录数（仅在 DB 模式可用）。"""
+    items = await _query_db_tables(platform)
+    return ok({"items": items})
 
 
 @router.get("/db/records")
@@ -322,11 +335,6 @@ async def get_db_records(table: str, limit: int = 100, offset: int = 0):
 @router.get("/db/stats")
 async def get_db_stats():
     """数据库数据概览（仅在 DB 模式可用）。"""
-    import config
-    if not _is_db_mode(getattr(config, "SAVE_DATA_OPTION", "csv")):
-        raise HTTPException(status_code=400, detail="数据库未配置")
-
-    items = (await list_db_tables())
-    rows = items.get("data", {}).get("items", [])
+    rows = await _query_db_tables()
     total = sum((r.get("count") or 0) for r in rows)
     return ok({"total_records": total, "by_table": rows})

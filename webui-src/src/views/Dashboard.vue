@@ -346,6 +346,7 @@ async function loadQueueStats() {
 }
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let healthTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   loadDashboard()
@@ -361,141 +362,11 @@ onMounted(() => {
     lastRefreshAt.value = new Date().toLocaleTimeString()
   }, 30000)
   // Health refresh every 5 minutes
-  setInterval(loadHealth, 300_000)
+  healthTimer = setInterval(loadHealth, 300_000)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
-})
-</script>
-
-const message = useMessage()
-
-const dashboard = ref({
-  crawler: { status: 'idle', platform: '', crawler_type: '', started_at: '' },
-  data: { total_files: 0, total_size: 0, platforms: [] as string[], by_platform: {} as Record<string, { files: number; size: number }> },
-  subscriptions: { total: 0, active: 0 },
-  scheduler: { active_tasks: 0, total_executions: 0 },
-})
-
-const recentLogs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
-const queueStats = ref({ queue_size: 0, running: 0, queued: 0, success: 0, failed: 0 })
-const lastRefreshAt = ref('')
-
-const platformLabels: Record<string, string> = {
-  xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博', wechat: '微信', tieba: '贴吧', zhihu: '知乎',
-}
-const platformColors: Record<string, string> = {
-  xhs: '#ff2442', dy: '#000000', ks: '#ff4500', bili: '#00a1d6', wb: '#ff8200', wechat: '#07c160', tieba: '#4e6ef2', zhihu: '#0066ff',
-}
-const platformList = computed(() => {
-  const bp = dashboard.value.data.by_platform || {}
-  return Object.entries(bp)
-    .map(([name, stat]) => ({ name, files: stat.files, size: stat.size }))
-    .sort((a, b) => b.files - a.files)
-})
-
-const statusLabelMap: Record<string, string> = {
-  idle: '空闲', running: '运行中', stopping: '停止中', error: '异常',
-}
-const crawlerLabel = computed(() => statusLabelMap[dashboard.value.crawler.status] || dashboard.value.crawler.status)
-const crawlerRunning = computed(() => dashboard.value.crawler.status === 'running')
-const crawlerBadgeType = computed(() => {
-  const m: Record<string, string> = { idle: 'default', running: 'success', stopping: 'warning', error: 'error' }
-  return (m[dashboard.value.crawler.status] || 'default') as any
-})
-const lastRefreshText = computed(() => lastRefreshAt.value ? `刷新于 ${lastRefreshAt.value}` : '未刷新')
-
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
-  return (bytes / 1073741824).toFixed(1) + ' GB'
-}
-
-function logLevelClass(level: string) {
-  switch (level) {
-    case 'error': return 'text-red-400'
-    case 'warning': return 'text-yellow-400'
-    default: return ''
-  }
-}
-
-async function stopCrawler() {
-  try {
-    await http.post('/crawler/stop')
-    message.success('已发送停止指令')
-    loadDashboard()
-  } catch (e: any) {
-    message.error(e.message || '停止失败')
-  }
-}
-
-async function loadDashboard() {
-  try {
-    const { data } = await http.get('/dashboard')
-    const d = unwrapApiData<any>(data) || {}
-    dashboard.value.crawler = d.crawler || dashboard.value.crawler
-    dashboard.value.data = d.data || dashboard.value.data
-    dashboard.value.subscriptions = d.subscriptions || dashboard.value.subscriptions
-    dashboard.value.scheduler = d.scheduler || dashboard.value.scheduler
-  } catch {
-    // 降级：至少获取 health
-    try {
-      await http.get('/health')
-    } catch {
-      // offline
-    }
-  }
-}
-
-async function loadLogs() {
-  try {
-    const { data } = await http.get('/crawler/logs', { params: { limit: 20 } })
-    const payload = unwrapApiData<any>(data)
-    const logs = Array.isArray(payload) ? payload : (payload?.logs || [])
-    recentLogs.value = logs.slice(-20)
-  } catch {
-    // silent
-  }
-}
-
-async function loadQueueStats() {
-  try {
-    const { data } = await http.get('/subscribe/crawl/status')
-    const payload = unwrapApiData<any>(data) || {}
-    const items = payload.items || []
-    const next = { queue_size: payload.queue_size || 0, running: 0, queued: 0, success: 0, failed: 0 }
-    for (const item of items) {
-      if (item.status === 'running') next.running += 1
-      else if (item.status === 'queued') next.queued += 1
-      else if (item.status === 'success') next.success += 1
-      else if (item.status === 'failed') next.failed += 1
-    }
-    queueStats.value = next
-  } catch {
-    // silent
-  }
-}
-
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-
-onMounted(() => {
-  loadDashboard()
-  loadLogs()
-  loadQueueStats()
-  lastRefreshAt.value = new Date().toLocaleTimeString()
-  // Auto-refresh every 30s
-  refreshTimer = setInterval(() => {
-    loadDashboard()
-    loadLogs()
-    loadQueueStats()
-    lastRefreshAt.value = new Date().toLocaleTimeString()
-  }, 30000)
-})
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  if (healthTimer) clearInterval(healthTimer)
 })
 </script>
