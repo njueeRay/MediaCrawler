@@ -201,6 +201,27 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 - **变更记录：** 每次实质变更更新 `CHANGELOG.md`
 - **质量门禁：** 迭代收尾前 code-reviewer 必须输出审查报告
 
+### 并行工作约定（Git Worktree）
+
+**活跃 Worktree：**
+
+| 目录 | 仓库 | 分支 | 职责 |
+|------|------|------|------|
+| `OpenProfile/` | OpenProfile | `main` | 协调中枢（本窗口）|
+
+**Phase P + Phase A + Phase K 已并入 main**。`njueeRay-rss/` 、`njueeray-blog-authors/` 、`njueeray-kg/` 关闭 VS Code 窗口后手动删除目录即可。
+
+**Phase P + Phase A 已并入 main**。`njueeRay-rss/` 和 `njueeray-blog-authors/` 关闭 VS Code 窗口后手动删除目录即可。
+
+**Phase K（知识图谱）** 等待 Phase P 合并后在 `njueeRay-profile` 新开 worktree。
+
+**Worktree 操作规范：**
+- 新开专项任务时：`git worktree add -b feature/<name> ..\<dir> main`
+- 同步创建 `.github/worktree-context.md`（任务目标 + DoD + 汇报模板），提交到 feature 分支
+- 专项完成后，用以下提示触发主窗口合并：`feature/<name> worktree 任务已完成。变更摘要：[…] 请执行合并流程。`
+- 主窗口执行：`git merge feature/<name>` → `git push origin main` → `git worktree remove` → `git branch -d`
+- 跨 worktree **禁止** checkout 到对方分支（会占用冲突）
+
 ## 三层版本总览
 
 > 遵循 `docs/team-playbook.md` §18 三层版本体系。详细变更历史见 `PLAYBOOK-CHANGELOG.md`。
