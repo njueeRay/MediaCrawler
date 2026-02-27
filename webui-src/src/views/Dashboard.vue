@@ -104,6 +104,37 @@
       </div>
     </n-card>
 
+    <!-- Onboarding alert：未配置 WECHAT_API_BASE_URL 时提示 -->
+    <n-alert v-if="showOnboardingAlert" type="warning" class="mt-4" closable @close="showOnboardingAlert = false">
+      <template #icon><span>⚙️</span></template>
+      系统尚未完成基础配置。请先前往
+      <n-button text type="primary" size="small" @click="$router.push({ name: 'ConfigManager' })">系统配置</n-button>
+      填写 WECHAT_API_BASE_URL 等必填项。
+    </n-alert>
+
+    <!-- Platform Health Panel -->
+    <n-card size="small" class="mt-4">
+      <template #header>
+        <n-space align="center" size="small">
+          <span>系统健康</span>
+          <n-tag v-if="health.overall === 'ok'" type="success" size="small">正常</n-tag>
+          <n-tag v-else-if="health.overall === 'warning'" type="warning" size="small">警告</n-tag>
+          <n-tag v-else-if="health.overall === 'error'" type="error" size="small">异常</n-tag>
+          <n-tag v-else size="small">检测中</n-tag>
+          <span class="text-xs text-gray-400">{{ health.checked_at ? `更新于 ${new Date(health.checked_at).toLocaleTimeString()}` : '' }}</span>
+        </n-space>
+      </template>
+      <template #header-extra>
+        <n-button size="small" text :loading="healthLoading" @click="loadHealth">刷新</n-button>
+      </template>
+      <n-data-table
+        :columns="healthColumns"
+        :data="health.platforms"
+        :bordered="false"
+        size="small"
+      />
+    </n-card>
+
     <!-- Platform Data Distribution -->
     <n-card title="平台数据分布" size="small" class="mt-4" v-if="platformList.length">
       <div v-for="p in platformList" :key="p.name" class="flex items-center gap-3 mb-2">
@@ -123,9 +154,220 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
+import { useMessage, NTag, NSpace } from 'naive-ui'
 import http, { unwrapApiData } from '@/api'
+
+const message = useMessage()
+
+const dashboard = ref({
+  crawler: { status: 'idle', platform: '', crawler_type: '', started_at: '' },
+  data: { total_files: 0, total_size: 0, platforms: [] as string[], by_platform: {} as Record<string, { files: number; size: number }> },
+  subscriptions: { total: 0, active: 0 },
+  scheduler: { active_tasks: 0, total_executions: 0 },
+})
+
+const recentLogs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
+const queueStats = ref({ queue_size: 0, running: 0, queued: 0, success: 0, failed: 0 })
+const lastRefreshAt = ref('')
+const showOnboardingAlert = ref(false)
+
+// ─── 健康面板 ──────────────────────────────────────────────────
+interface PlatformHealth {
+  platform: string
+  reachable: boolean
+  auth_valid: boolean | null
+  auth_expires_hint?: string | null
+  status: 'ok' | 'warning' | 'error' | 'unconfigured'
+  message: string
+}
+const health = ref<{ overall: string; checked_at: string; platforms: PlatformHealth[] }>({
+  overall: '',
+  checked_at: '',
+  platforms: [],
+})
+const healthLoading = ref(false)
+
+const platformNameMap: Record<string, string> = {
+  wechat: '微信', feishu: '飞书', database: '数据库',
+}
+const healthColumns = [
+  {
+    title: '平台',
+    key: 'platform',
+    width: 80,
+    render: (row: PlatformHealth) => platformNameMap[row.platform] || row.platform,
+  },
+  {
+    title: '连通性',
+    key: 'reachable',
+    width: 80,
+    render: (row: PlatformHealth) =>
+      h(NTag, { type: row.reachable ? 'success' : 'error', size: 'small' }, { default: () => row.reachable ? '✅ 可达' : '❌ 不可达' }),
+  },
+  {
+    title: '鉴权',
+    key: 'auth_valid',
+    width: 100,
+    render: (row: PlatformHealth) => {
+      if (row.auth_valid === null) return h('span', { class: 'text-gray-400 text-xs' }, 'N/A')
+      const type = row.auth_valid ? 'success' : 'error'
+      let text = row.auth_valid ? '✅ 有效' : '❌ 失效'
+      if (row.auth_valid && row.auth_expires_hint) text += ` (${row.auth_expires_hint})`
+      return h(NTag, { type, size: 'small' }, { default: () => text })
+    },
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    render: (row: PlatformHealth) => {
+      const typeMap: Record<string, any> = { ok: 'success', warning: 'warning', error: 'error', unconfigured: 'default' }
+      const labelMap: Record<string, string> = { ok: '🟢 正常', warning: '🟡 警告', error: '🔴 异常', unconfigured: '⚪ 未配置' }
+      return h(NTag, { type: typeMap[row.status] || 'default', size: 'small' }, { default: () => labelMap[row.status] || row.status })
+    },
+  },
+  {
+    title: '说明',
+    key: 'message',
+    render: (row: PlatformHealth) => h('span', { class: 'text-xs text-gray-500' }, row.message || ''),
+  },
+]
+
+async function loadHealth() {
+  healthLoading.value = true
+  try {
+    const { data } = await http.get('/health/platforms')
+    const payload = unwrapApiData<any>(data) || {}
+    health.value = payload
+    // Onboarding: 如果 wechat 未配置则显示提示
+    const wechat = payload.platforms?.find((p: PlatformHealth) => p.platform === 'wechat')
+    if (wechat?.status === 'unconfigured') {
+      showOnboardingAlert.value = true
+    }
+  } catch {
+    // silent — health check is best-effort
+  } finally {
+    healthLoading.value = false
+  }
+}
+// ─── end 健康面板 ──────────────────────────────────────────────
+
+const platformLabels: Record<string, string> = {
+  xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博', wechat: '微信', tieba: '贴吧', zhihu: '知乎',
+}
+const platformColors: Record<string, string> = {
+  xhs: '#ff2442', dy: '#000000', ks: '#ff4500', bili: '#00a1d6', wb: '#ff8200', wechat: '#07c160', tieba: '#4e6ef2', zhihu: '#0066ff',
+}
+const platformList = computed(() => {
+  const bp = dashboard.value.data.by_platform || {}
+  return Object.entries(bp)
+    .map(([name, stat]) => ({ name, files: stat.files, size: stat.size }))
+    .sort((a, b) => b.files - a.files)
+})
+
+const statusLabelMap: Record<string, string> = {
+  idle: '空闲', running: '运行中', stopping: '停止中', error: '异常',
+}
+const crawlerLabel = computed(() => statusLabelMap[dashboard.value.crawler.status] || dashboard.value.crawler.status)
+const crawlerRunning = computed(() => dashboard.value.crawler.status === 'running')
+const crawlerBadgeType = computed(() => {
+  const m: Record<string, string> = { idle: 'default', running: 'success', stopping: 'warning', error: 'error' }
+  return (m[dashboard.value.crawler.status] || 'default') as any
+})
+const lastRefreshText = computed(() => lastRefreshAt.value ? `刷新于 ${lastRefreshAt.value}` : '未刷新')
+
+function formatSize(bytes: number): string {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
+  return (bytes / 1073741824).toFixed(1) + ' GB'
+}
+
+function logLevelClass(level: string) {
+  switch (level) {
+    case 'error': return 'text-red-400'
+    case 'warning': return 'text-yellow-400'
+    default: return ''
+  }
+}
+
+async function stopCrawler() {
+  try {
+    await http.post('/crawler/stop')
+    message.success('已发送停止指令')
+    loadDashboard()
+  } catch (e: any) {
+    message.error(e.message || '停止失败')
+  }
+}
+
+async function loadDashboard() {
+  try {
+    const { data } = await http.get('/dashboard')
+    const d = unwrapApiData<any>(data) || {}
+    dashboard.value.crawler = d.crawler || dashboard.value.crawler
+    dashboard.value.data = d.data || dashboard.value.data
+    dashboard.value.subscriptions = d.subscriptions || dashboard.value.subscriptions
+    dashboard.value.scheduler = d.scheduler || dashboard.value.scheduler
+  } catch {
+    // 降级
+  }
+}
+
+async function loadLogs() {
+  try {
+    const { data } = await http.get('/crawler/logs', { params: { limit: 20 } })
+    const payload = unwrapApiData<any>(data)
+    const logs = Array.isArray(payload) ? payload : (payload?.logs || [])
+    recentLogs.value = logs.slice(-20)
+  } catch {
+    // silent
+  }
+}
+
+async function loadQueueStats() {
+  try {
+    const { data } = await http.get('/subscribe/crawl/status')
+    const payload = unwrapApiData<any>(data) || {}
+    const items = payload.items || []
+    const next = { queue_size: payload.queue_size || 0, running: 0, queued: 0, success: 0, failed: 0 }
+    for (const item of items) {
+      if (item.status === 'running') next.running += 1
+      else if (item.status === 'queued') next.queued += 1
+      else if (item.status === 'success') next.success += 1
+      else if (item.status === 'failed') next.failed += 1
+    }
+    queueStats.value = next
+  } catch {
+    // silent
+  }
+}
+
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+onMounted(() => {
+  loadDashboard()
+  loadLogs()
+  loadQueueStats()
+  loadHealth()
+  lastRefreshAt.value = new Date().toLocaleTimeString()
+  // Auto-refresh every 30s
+  refreshTimer = setInterval(() => {
+    loadDashboard()
+    loadLogs()
+    loadQueueStats()
+    lastRefreshAt.value = new Date().toLocaleTimeString()
+  }, 30000)
+  // Health refresh every 5 minutes
+  setInterval(loadHealth, 300_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
+</script>
 
 const message = useMessage()
 

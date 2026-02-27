@@ -24,6 +24,7 @@ from .subscription import router as subscription_router
 from .field_mapping import router as field_mapping_router
 from .feishu import router as feishu_router
 from .scheduler import router as scheduler_router
+from .health import router as health_router
 
 __all__ = [
     "crawler_router",
@@ -34,4 +35,5 @@ __all__ = [
     "field_mapping_router",
     "feishu_router",
     "scheduler_router",
+    "health_router",
 ]
