@@ -54,7 +54,8 @@ WECHAT_API_BASE_URL = _os.environ.get("WECHAT_API_BASE_URL", "https://down.mptex
 # API 认证密钥（必填，有效期约 4 天）
 # 获取方式：在 wechat-article-exporter 网页端登录后，从浏览器 Cookie 中取 auth-key 的值
 # 或者调用 /api/public/v1/authkey 接口验证
-WECHAT_AUTH_KEY = _os.environ.get("WECHAT_AUTH_KEY", "3a7a1612d29f479ea2f3647a4640544e")
+# 请通过环境变量或 .env 文件配置，不要在代码中硬编码
+WECHAT_AUTH_KEY = _os.environ.get("WECHAT_AUTH_KEY", "")
 
 # 预留微信扩展场景的 Secret（当前采集流程可为空）
 WECHAT_APP_SECRET = _os.environ.get("WECHAT_APP_SECRET", "")
