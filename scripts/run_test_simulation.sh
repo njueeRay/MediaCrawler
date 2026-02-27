@@ -6,6 +6,9 @@
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# 激活 Python venv（提供 python 命令 + 已安装的依赖）
+VENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.venv"
+[[ -f "${VENV_DIR}/bin/activate" ]] && source "${VENV_DIR}/bin/activate"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
