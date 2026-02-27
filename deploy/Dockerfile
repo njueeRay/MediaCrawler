@@ -14,7 +14,11 @@ RUN npm run build
 # ─── Stage 2: Python 运行时 ───
 FROM python:3.11-slim AS runtime
 
-# 系统依赖（curl + OpenCV 运行时）
+# ENABLE_PLAYWRIGHT=true 时安装 Playwright 及系统依赖（镜像增约 400MB）
+# 默认 false：仅 WebUI + 微信 API 模式，镜像更小
+ARG ENABLE_PLAYWRIGHT=false
+
+# 系统依赖（curl + OpenCV 运行时 + Playwright 浏览器需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgl1 \
@@ -23,18 +27,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Python 依赖
-COPY pyproject.toml requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir "uvicorn[standard]" websockets wsproto
+# Python 依赖 — 根据 ENABLE_PLAYWRIGHT 选择安装范围
+COPY pyproject.toml requirements.txt requirements-base.txt requirements-playwright.txt ./
+RUN if [ "$ENABLE_PLAYWRIGHT" = "true" ]; then \
+      pip install --no-cache-dir -r requirements-playwright.txt && \
+      playwright install chromium --with-deps; \
+    else \
+      pip install --no-cache-dir -r requirements-base.txt; \
+    fi
 
-# 安装 uv（pipeline 步骤执行子进程使用）
-RUN pip install --no-cache-dir uv
-
-# 安装 Playwright 浏览器（可选，仅爬虫需要）
-# 如果只运行 WebUI + 微信模块，可注释掉以下两行减小镜像
-    # ⚠️ 当前部署模式：WebUI + 微信 API 模式，不需要本地浏览器
-    # RUN pip install playwright && playwright install chromium --with-deps
+# WebSocket + uv 运行时依赖（两种模式都需要）
+RUN pip install --no-cache-dir "uvicorn[standard]" websockets wsproto uv
 COPY . .
 
 # 覆盖前端构建产物

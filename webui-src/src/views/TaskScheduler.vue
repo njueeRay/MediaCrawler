@@ -126,6 +126,32 @@
             <n-form-item label="超时(秒)">
               <n-input-number v-model:value="step.timeout_seconds" :min="60" style="width:140px" />
             </n-form-item>
+            <n-form-item label="失败重试">
+              <n-input-number v-model:value="step.retry_count" :min="0" :max="5" style="width:100px" />
+              <span class="ml-2 text-xs text-gray-400">次（XHS/抖音建议 2）</span>
+            </n-form-item>
+          </n-form>
+        </template>
+
+        <!-- multi_platform_crawl 配置 -->
+        <template v-if="step.step === 'multi_platform_crawl'">
+          <n-form label-placement="left" label-width="120" size="small">
+            <n-form-item label="采集平台">
+              <n-select
+                v-model:value="step.platforms"
+                :options="platformOptions"
+                multiple
+                placeholder="选择一个或多个平台"
+                style="min-width:280px"
+              />
+            </n-form-item>
+            <n-form-item label="每平台数量上限">
+              <n-input-number v-model:value="step.limit_per_platform" :min="0" placeholder="0=不限" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="某平台失败时">
+              <n-switch v-model:value="step.stop_on_failure" />
+              <span class="ml-2 text-xs text-gray-400">{{ step.stop_on_failure ? '中止全部' : '跳过继续' }}</span>
+            </n-form-item>
           </n-form>
         </template>
 
@@ -199,11 +225,13 @@
 import { ref, h, onMounted } from 'vue'
 import { NTag, NButton, NSpace, useMessage, useDialog, NLog } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
+import { useRoute } from 'vue-router'
 import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const dialog = useDialog()
+const route = useRoute()
 const loading = ref(false)
 const execLoading = ref(false)
 const showCreate = ref(false)
@@ -233,12 +261,14 @@ const pipelineSteps = ref<any[]>([])
 const taskTypeOptions = [
   { label: '仅采集（订阅）', value: 'subscription_crawl' },
   { label: '仅采集（搜索/指定）', value: 'crawl' },
+  { label: '多平台订阅采集', value: 'multi_platform_crawl' },
   { label: '仅同步到飞书', value: 'sync' },
   { label: '全流程（采集+同步）', value: 'subscription_combo' },
 ]
 
 const availableStepOptions = [
   { label: '订阅采集', value: 'subscription_crawl' },
+  { label: '多平台订阅采集', value: 'multi_platform_crawl' },
   { label: '通用采集', value: 'crawl' },
   { label: '同步到飞书表', value: 'feishu_push' },
   { label: '从飞书表拉取', value: 'feishu_pull' },
@@ -289,21 +319,48 @@ const execStatusOptions = [
   { label: '已取消', value: 'cancelled' },
 ]
 
+// ─── 平台元数据 ─────────────────────────────────────────────────────────────
+
+/** 各平台推送飞书时的默认 data_type（与 pipeline_steps.py PLATFORM_DATA_TYPES 保持同步） */
+const PLATFORM_DATA_TYPES: Record<string, string> = {
+  wechat: 'article',
+  xhs:    'note',
+  dy:     'video',
+  bili:   'video',
+  wb:     'weibo',
+  ks:     'video',
+  tieba:  'note',
+  zhihu:  'note',
+}
+
+/** 需要 Playwright 的平台 */
+const PLAYWRIGHT_PLATFORMS = new Set(['xhs', 'dy', 'bili', 'wb', 'ks', 'tieba', 'zhihu'])
+
 // ─── 步骤默认值工厂 ─────────────────────────────────────────────────────────
 
 function createDefaultStep(stepType: string, platform?: string): any {
   const p = platform || newTask.value.platform || 'wechat'
+  const dataType = PLATFORM_DATA_TYPES[p] || 'note'
+  const needRetry = PLAYWRIGHT_PLATFORMS.has(p)
   switch (stepType) {
     case 'subscription_crawl':
-      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: 3600 }
+      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 3600 }
     case 'crawl':
-      return { step: 'crawl', platform: p, crawler_type: 'search', keywords: '', creator_ids: '', timeout_seconds: 1800 }
+      return {
+        step: 'crawl', platform: p,
+        crawler_type: 'search', keywords: '', creator_ids: '',
+        timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 1800,
+        retry_count: needRetry ? 2 : 0,
+        retry_delay: 30,
+      }
     case 'feishu_push':
-      return { step: 'feishu_push', platform: p, data_type: p === 'wechat' ? 'article' : 'note', table_id: '' }
+      return { step: 'feishu_push', platform: p, data_type: dataType, table_id: '' }
     case 'feishu_pull':
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', output: 'step3_csv' }
     case 'feishu_push_json':
       return { step: 'feishu_push_json', input: 'step3_csv', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
+    case 'multi_platform_crawl':
+      return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
     default:
       return { step: stepType }
   }
@@ -325,6 +382,11 @@ function getDefaultPipeline(taskType: string, platform?: string): any[] {
         createDefaultStep('feishu_pull', p),
         createDefaultStep('feishu_push_json', p),
       ]
+    case 'multi_platform_crawl':
+      return [
+        createDefaultStep('multi_platform_crawl', p),
+        createDefaultStep('feishu_push', p),
+      ]
     default:
       return [createDefaultStep('subscription_crawl', p)]
   }
@@ -332,11 +394,12 @@ function getDefaultPipeline(taskType: string, platform?: string): any[] {
 
 function stepTagType(stepType: string): string {
   const m: Record<string, string> = {
-    subscription_crawl: 'info',
-    crawl: 'info',
-    feishu_push: 'success',
-    feishu_pull: 'warning',
-    feishu_push_json: 'error',
+    subscription_crawl:   'info',
+    crawl:                'info',
+    multi_platform_crawl: 'primary',
+    feishu_push:          'success',
+    feishu_pull:          'warning',
+    feishu_push_json:     'error',
   }
   return (m[stepType] || 'default') as any
 }
@@ -449,8 +512,12 @@ const columns: DataTableColumn[] = [
     title: '类型', key: 'task_type', width: 100,
     render: (row: any) => {
       const labels: Record<string, string> = {
-        subscription_crawl: '订阅采集', crawl: '采集', sync: '同步',
-        subscription_combo: '全流程', combo: '采集+同步', cleanup: '清理',
+        subscription_crawl:   '订阅采集',
+        crawl:                '采集',
+        sync:                 '同步',
+        multi_platform_crawl: '多平台',
+        subscription_combo:   '全流程',
+        combo: '采集+同步', cleanup: '清理',
       }
       return h(NTag, { size: 'small' }, () => labels[row.task_type] || row.task_type)
     },
@@ -730,5 +797,18 @@ onMounted(() => {
   loadStatus()
   loadTasks()
   loadExecutions()
+
+  // Handle preset query params when navigated from Subscription page
+  const { preset_platform, preset_type, preset_name } = route.query
+  if (preset_platform || preset_type) {
+    resetFormState()
+    if (preset_platform) newTask.value.platform = preset_platform as string
+    if (preset_type) {
+      newTask.value.task_type = preset_type as string
+      pipelineSteps.value = getDefaultPipeline(preset_type as string, preset_platform as string || '')
+    }
+    if (preset_name) newTask.value.name = preset_name as string
+    showCreate.value = true
+  }
 })
 </script>

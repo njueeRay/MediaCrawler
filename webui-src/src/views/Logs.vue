@@ -52,6 +52,10 @@ const loadingHistory = ref(false)
 let ws: WebSocket | null = null
 let logId = 0
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let wsReconnectDelay = 3000
+const WS_MAX_RECONNECT_DELAY = 60000
+const WS_MAX_RECONNECT_ATTEMPTS = 20
+let wsReconnectAttempts = 0
 
 const levelOptions = [
   { label: '全部', value: 'all' },
@@ -85,6 +89,8 @@ function connectWs() {
 
   ws.onopen = () => {
     wsConnected.value = true
+    wsReconnectDelay = 3000  // Reset backoff on successful connection
+    wsReconnectAttempts = 0
     addLog('info', 'WebSocket 已连接')
   }
 
@@ -100,8 +106,14 @@ function connectWs() {
   ws.onclose = () => {
     wsConnected.value = false
     addLog('warning', 'WebSocket 断开连接')
-    // Auto reconnect after 3s
-    wsReconnectTimer = setTimeout(connectWs, 3000)
+    // Exponential backoff reconnect
+    wsReconnectAttempts++
+    if (wsReconnectAttempts <= WS_MAX_RECONNECT_ATTEMPTS) {
+      wsReconnectTimer = setTimeout(connectWs, wsReconnectDelay)
+      wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY)
+    } else {
+      addLog('error', '后端不可达，已停止自动重连。请检查服务后手动点击「重连」')
+    }
   }
 
   ws.onerror = () => {

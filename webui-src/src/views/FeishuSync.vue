@@ -107,12 +107,21 @@ const syncProgressStatus = computed(() => {
 
 let ws: WebSocket | null = null
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let wsReconnectDelay = 3000
+const WS_MAX_RECONNECT_DELAY = 60000
+const WS_MAX_RECONNECT_ATTEMPTS = 20
+let wsReconnectAttempts = 0
 
 function connectSyncWS() {
   if (ws && ws.readyState <= 1) return // already connecting or open
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const url = `${protocol}//${location.host}/api/ws/sync`
   ws = new WebSocket(url)
+
+  ws.onopen = () => {
+    wsReconnectDelay = 3000
+    wsReconnectAttempts = 0
+  }
 
   ws.onmessage = (event) => {
     if (event.data === 'ping') {
@@ -126,8 +135,12 @@ function connectSyncWS() {
   }
 
   ws.onclose = () => {
-    // Auto reconnect while component is mounted
-    wsReconnectTimer = setTimeout(connectSyncWS, 3000)
+    // Exponential backoff reconnect while component is mounted
+    wsReconnectAttempts++
+    if (wsReconnectAttempts <= WS_MAX_RECONNECT_ATTEMPTS) {
+      wsReconnectTimer = setTimeout(connectSyncWS, wsReconnectDelay)
+      wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY)
+    }
   }
 
   ws.onerror = () => {

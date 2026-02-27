@@ -161,10 +161,12 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
+import { useRouter } from 'vue-router'
 import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
+const router = useRouter()
 const loading = ref(false)
 const searching = ref(false)
 const adding = ref(false)
@@ -268,11 +270,12 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
-    width: 180,
+    width: 240,
     render: (row: any) =>
       h(NSpace, { size: 'small' }, () => [
         h(NButton, { size: 'tiny', type: 'primary', onClick: () => triggerCrawl(row.id) }, () => '采集'),
         h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, () => row.is_active ? '暂停' : '恢复'),
+        h(NButton, { size: 'tiny', type: 'info', onClick: () => createTaskForSub(row) }, () => '创建任务'),
         h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteSub(row.id) }, () => '删除'),
       ]),
   },
@@ -409,6 +412,21 @@ async function createSubscription() {
   } finally {
     adding.value = false
   }
+}
+
+/**
+ * 快捷导航到任务调度页面，并预填当前订阅的平台信息。
+ * TaskScheduler 页面会读取 query 参数 preset_platform / preset_type。
+ */
+function createTaskForSub(row: any) {
+  router.push({
+    name: 'TaskScheduler',
+    query: {
+      preset_platform: row.platform,
+      preset_type: 'subscription_crawl',
+      preset_name: `定时采集-${row.creator_name || row.platform}`,
+    },
+  })
 }
 
 async function triggerCrawl(id: number) {

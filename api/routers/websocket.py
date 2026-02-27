@@ -17,12 +17,14 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import logging
 from typing import Set, Optional, Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..services import crawler_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
 
@@ -179,9 +181,9 @@ async def websocket_status(websocket: WebSocket):
             await websocket.send_json(status)
             await asyncio.sleep(1)
     except WebSocketDisconnect:
-        pass
-    except Exception:
-        pass
+        logger.debug("[WS/status] Client disconnected")
+    except Exception as e:
+        logger.debug(f"[WS/status] Connection closed: {type(e).__name__}: {e}")
 
 
 @router.websocket("/ws/sync")

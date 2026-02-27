@@ -52,6 +52,35 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
+# ─── 平台元数据 ───────────────────────────────────────────────────────────────
+
+# 各平台推送到飞书时的默认 data_type
+PLATFORM_DATA_TYPES: Dict[str, str] = {
+    "wechat":  "article",
+    "xhs":     "note",
+    "dy":      "video",
+    "bili":    "video",
+    "wb":      "weibo",
+    "ks":      "video",
+    "tieba":   "note",
+    "zhihu":   "note",
+}
+
+# 各平台爬取默认超时（秒）— XHS/抖音反爬需更长等待
+PLATFORM_CRAWL_TIMEOUTS: Dict[str, int] = {
+    "wechat": 1800,
+    "xhs":    2700,   # 小红书更慢，给 45min
+    "dy":     2700,
+    "bili":   1800,
+    "wb":     1800,
+    "ks":     1800,
+    "tieba":  1200,
+    "zhihu":  1200,
+}
+
+# 需要 Playwright 的平台
+PLAYWRIGHT_PLATFORMS = {"xhs", "dy", "bili", "wb", "ks", "tieba", "zhihu"}
+
 
 # ─── 上下文 ────────────────────────────────────────────────────────────────────
 
@@ -140,15 +169,17 @@ class CrawlStep(PipelineStep):
     通用爬虫采集步骤（search / creator 模式）。
 
     config keys:
-      platform      — 平台（优先级 > ctx.platform）
-      crawler_type  — search | creator（默认 search）
-      keywords      — 搜索关键词（search 模式）
-      creator_ids   — 创作者 ID 列表（creator 模式）
-      limit         — 采集数量上限
-      login_type    — cookie | phone（默认 cookie）
-      save_option   — json | csv | db（默认 json）
-      headless      — 是否无头模式（默认 True）
-      timeout_seconds — 等待超时（默认 1800）
+      platform        — 平台（优先级 > ctx.platform）
+      crawler_type    — search | creator（默认 search）
+      keywords        — 搜索关键词（search 模式）
+      creator_ids     — 创作者 ID 列表（creator 模式）
+      limit           — 采集数量上限
+      login_type      — cookie | phone（默认 cookie）
+      save_option     — json | csv | db（默认 json）
+      headless        — 是否无头模式（默认 True）
+      timeout_seconds — 等待超时（默认按平台自动选取）
+      retry_count     — 失败重试次数（默认 0，XHS建议设为 2）
+      retry_delay     — 重试间隔秒数（默认 30）
     """
 
     step_type = "crawl"
@@ -159,37 +190,56 @@ class CrawlStep(PipelineStep):
 
         cfg = self.config
         platform = cfg.get("platform") or ctx.platform
+        retry_count = int(cfg.get("retry_count", 0))
+        retry_delay = int(cfg.get("retry_delay", 30))
+        timeout = int(cfg.get("timeout_seconds") or PLATFORM_CRAWL_TIMEOUTS.get(platform, 1800))
 
-        status = crawler_manager.get_status()
-        if status.get("status") == "running":
-            ctx.aborted = True
-            await log("[crawl] ERROR: 另一个爬虫任务正在运行，中止管道")
+        for attempt in range(retry_count + 1):
+            if attempt > 0:
+                await log(f"[crawl] 第 {attempt} 次重试（等待 {retry_delay}s）...")
+                await asyncio.sleep(retry_delay)
+
+            status = crawler_manager.get_status()
+            if status.get("status") == "running":
+                ctx.aborted = True
+                await log("[crawl] ERROR: 另一个爬虫任务正在运行，中止管道")
+                return
+
+            req = CrawlerStartRequest(
+                platform=platform,
+                login_type=cfg.get("login_type", "cookie"),
+                crawler_type=cfg.get("crawler_type", "search"),
+                keywords=cfg.get("keywords", ""),
+                creator_ids=cfg.get("creator_ids", ""),
+                save_option=cfg.get("save_option", "json"),
+                headless=cfg.get("headless", True),
+            )
+            started = await crawler_manager.start(req)
+            if not started:
+                if attempt < retry_count:
+                    await log(f"[crawl] WARN: 启动失败，将重试 ({attempt+1}/{retry_count})")
+                    continue
+                ctx.aborted = True
+                await log("[crawl] ERROR: 爬虫启动失败（已用尽重试次数）")
+                return
+
+            for _ in range(timeout):
+                await asyncio.sleep(1)
+                s = crawler_manager.get_status()
+                if s.get("status") != "running":
+                    break
+
+            final_status = crawler_manager.get_status()
+            if final_status.get("status") == "failed" and attempt < retry_count:
+                await log(f"[crawl] WARN: 爬虫失败，将重试 ({attempt+1}/{retry_count})")
+                continue
+
+            await log(f"[crawl] OK platform={platform} attempt={attempt+1}")
+            ctx.step_results.append({"step": "crawl", "platform": platform, "status": "ok", "attempts": attempt + 1})
             return
 
-        req = CrawlerStartRequest(
-            platform=platform,
-            login_type=cfg.get("login_type", "cookie"),
-            crawler_type=cfg.get("crawler_type", "search"),
-            keywords=cfg.get("keywords", ""),
-            creator_ids=cfg.get("creator_ids", ""),
-            save_option=cfg.get("save_option", "json"),
-            headless=cfg.get("headless", True),
-        )
-        started = await crawler_manager.start(req)
-        if not started:
-            ctx.aborted = True
-            await log("[crawl] ERROR: 爬虫启动失败")
-            return
-
-        timeout = int(cfg.get("timeout_seconds", 1800))
-        for _ in range(timeout):
-            await asyncio.sleep(1)
-            s = crawler_manager.get_status()
-            if s.get("status") != "running":
-                break
-
-        await log(f"[crawl] OK platform={platform}")
-        ctx.step_results.append({"step": "crawl", "platform": platform, "status": "ok"})
+        ctx.aborted = True
+        await log(f"[crawl] ERROR: 重试 {retry_count} 次后仍失败，中止管道")
 
 
 class SubscriptionCrawlStep(PipelineStep):
@@ -324,6 +374,12 @@ class FeishuPushStep(PipelineStep):
         cfg = self.config
         platform = cfg.get("platform") or ctx.platform
 
+        # 校验 platform 不能为空
+        if not platform:
+            ctx.aborted = True
+            await log("[feishu_push] ERROR: platform 未配置，无法推送")
+            return
+
         env_save = os.environ.get("SAVE_DATA_OPTION", "sqlite").strip().lower()
         db_type = (cfg.get("db_type") or env_save).lower()
         if db_type == "mysql":
@@ -336,14 +392,19 @@ class FeishuPushStep(PipelineStep):
 
         data_type = cfg.get("data_type") or ("article" if platform == "wechat" else "note")
 
+        # 校验 table_id：step 配置或环境变量均未设置时发出警告
+        table_id = cfg.get("table_id") or os.environ.get("FEISHU_TABLE_ID", "").strip()
+        if not table_id:
+            await log("[feishu_push] WARNING: table_id 未配置（step config 和 FEISHU_TABLE_ID 均为空），将依赖 sync_to_feishu.py 默认值")
+
         cmd = [
             "uv", "run", "python", "sync_to_feishu.py",
             "--db", "--db-type", db_type,
             "--platform", platform,
             "--data-type", data_type,
         ]
-        if cfg.get("table_id"):
-            cmd += ["--table-id", cfg["table_id"]]
+        if table_id:
+            cmd += ["--table-id", table_id]
         batch = cfg.get("batch_size")
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
@@ -571,11 +632,94 @@ class FeishuPushJsonStep(PipelineStep):
             })
 
 
+class MultiPlatformCrawlStep(PipelineStep):
+    """
+    跨多平台订阅采集步骤：依次对每个平台执行 subscription_crawl。
+
+    config keys:
+      platforms        — 平台列表，例如 ["wechat", "xhs", "dy"]（必填）
+      limit_per_platform — 每个平台最多采集订阅数（默认 0=全量）
+      timeout_seconds  — 单个平台采集超时（默认按平台自动选取）
+      crawl_config     — 传给每个平台爬虫的通用配置
+      stop_on_failure  — 某平台失败时是否中止全部（默认 False，继续下一个）
+    """
+
+    step_type = "multi_platform_crawl"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        cfg = self.config
+        platforms: List[str] = cfg.get("platforms") or []
+        if not platforms:
+            ctx.aborted = True
+            await log("[multi_platform_crawl] ERROR: platforms 列表不能为空")
+            return
+
+        stop_on_failure = bool(cfg.get("stop_on_failure", False))
+        limit_per = int(cfg.get("limit_per_platform", 0) or 0)
+        timeout_override = cfg.get("timeout_seconds")
+        crawl_config = dict(cfg.get("crawl_config") or {})
+
+        results: List[Dict] = []
+        await log(f"[multi_platform_crawl] 开始跨平台采集：{platforms}")
+
+        for platform in platforms:
+            await log(f"[multi_platform_crawl] ── 平台 {platform} 开始 ──")
+            sub_cfg: Dict[str, Any] = {
+                "step": "subscription_crawl",
+                "platform": platform,
+                "limit": limit_per,
+                "crawl_config": crawl_config,
+            }
+            if timeout_override:
+                sub_cfg["timeout_seconds"] = timeout_override
+            else:
+                sub_cfg["timeout_seconds"] = PLATFORM_CRAWL_TIMEOUTS.get(platform, 1800)
+
+            sub_step = SubscriptionCrawlStep(sub_cfg)
+            # 用独立的 aborted flag 避免一个平台失败阻断后续
+            sub_ctx = PipelineContext(
+                task_id=ctx.task_id,
+                execution_id=ctx.execution_id,
+                platform=platform,
+            )
+            sub_ctx.vars = ctx.vars
+
+            try:
+                await sub_step.run(sub_ctx, log)
+            except Exception as exc:
+                await log(f"[multi_platform_crawl] EXCEPTION {platform}: {exc}")
+                sub_ctx.aborted = True
+
+            result = {
+                "platform": platform,
+                "status":   "failed" if sub_ctx.aborted else "ok",
+            }
+            if sub_ctx.step_results:
+                result.update(sub_ctx.step_results[-1])
+            results.append(result)
+
+            if sub_ctx.aborted and stop_on_failure:
+                ctx.aborted = True
+                await log(f"[multi_platform_crawl] ABORT: {platform} 失败且 stop_on_failure=True")
+                break
+
+            await log(f"[multi_platform_crawl] ── 平台 {platform} {'✓ OK' if not sub_ctx.aborted else '✗ 失败，继续下一个'} ──")
+
+        ok_count = sum(1 for r in results if r["status"] == "ok")
+        await log(f"[multi_platform_crawl] 完成 {ok_count}/{len(results)} 个平台")
+        ctx.step_results.append({
+            "step": "multi_platform_crawl",
+            "status": "ok" if not ctx.aborted else "partial",
+            "platforms": results,
+        })
+
+
 # ─── 步骤注册表 ───────────────────────────────────────────────────────────────
 
 STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
     "crawl": CrawlStep,
     "subscription_crawl": SubscriptionCrawlStep,
+    "multi_platform_crawl": MultiPlatformCrawlStep,
     "feishu_push": FeishuPushStep,
     "feishu_pull": FeishuPullStep,
     "feishu_push_json": FeishuPushJsonStep,

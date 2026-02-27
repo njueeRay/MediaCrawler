@@ -11,7 +11,7 @@
             :options="platformOptions"
             placeholder="选择平台"
             style="width: 140px"
-            @update:value="loadData"
+            @update:value="onPlatformChange"
           />
           <n-select
             v-if="!isDbMode"
@@ -35,6 +35,31 @@
           :row-key="(r: any) => r.path || r.table"
         />
       </n-spin>
+
+      <!-- DB 模式下同时展示文件数据 -->
+      <template v-if="isDbMode">
+        <n-divider />
+        <n-space justify="space-between" align="center" style="margin-bottom: 8px">
+          <span class="text-sm font-medium">文件数据 <n-tag size="small" type="info">file</n-tag></span>
+          <n-select
+            v-model:value="fileType"
+            :options="typeOptions"
+            placeholder="文件类型"
+            style="width: 120px"
+            @update:value="loadFileData"
+          />
+        </n-space>
+        <n-spin :show="fileLoading">
+          <n-empty v-if="!fileLoading && !fileDataList.length" description="暂无文件数据" />
+          <n-data-table
+            v-else
+            :columns="fileColumns"
+            :data="fileDataList"
+            size="small"
+            :row-key="(r: any) => r.path"
+          />
+        </n-spin>
+      </template>
     </n-card>
 
     <!-- Preview Modal -->
@@ -88,6 +113,10 @@ const stats = ref<any>({})
 const saveMode = ref('')
 
 const isDbMode = computed(() => ['sqlite', 'db', 'postgres'].includes((saveMode.value || '').toLowerCase()))
+
+// File data for mixed mode (DB mode also shows files)
+const fileDataList = ref<any[]>([])
+const fileLoading = ref(false)
 
 const previewFile = ref('')
 const previewType = ref('json')
@@ -174,6 +203,27 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+function onPlatformChange() {
+  loadData()
+  if (isDbMode.value) loadFileData()
+}
+
+async function loadFileData() {
+  fileLoading.value = true
+  try {
+    const params: any = {}
+    if (platform.value) params.platform = platform.value
+    if (fileType.value) params.file_type = fileType.value
+    const { data } = await http.get('/data/files', { params })
+    const payload = unwrapApiData<any>(data) || {}
+    fileDataList.value = payload.files || []
+  } catch {
+    fileDataList.value = []
+  } finally {
+    fileLoading.value = false
+  }
 }
 
 async function loadData() {
@@ -302,6 +352,10 @@ onMounted(() => {
   loadSaveMode().finally(() => {
     loadData()
     loadStats()
+    // In DB mode, also load file data for mixed browsing
+    if (isDbMode.value) {
+      loadFileData()
+    }
   })
 })
 </script>

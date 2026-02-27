@@ -16,6 +16,8 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+import re
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -24,29 +26,40 @@ from .models import Base
 import config
 from config.db_config import mysql_db_config, sqlite_db_config, postgres_db_config
 
+
+def _validate_db_name(name: str) -> str:
+    """Validate database name to prevent SQL injection.
+    Only allows alphanumeric characters and underscores."""
+    if not name or not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f"Invalid database name: {name!r}. Only [a-zA-Z0-9_] allowed, must start with letter or underscore.")
+    return name
+
 # Keep a cache of engines
 _engines = {}
 
 
 async def create_database_if_not_exists(db_type: str):
     if db_type == "mysql" or db_type == "db":
-        # Connect to the server without a database
+        # Validate db_name to prevent SQL injection (identifiers cannot be parameterized)
+        safe_db_name = _validate_db_name(mysql_db_config['db_name'])
         server_url = f"mysql+asyncmy://{mysql_db_config['user']}:{mysql_db_config['password']}@{mysql_db_config['host']}:{mysql_db_config['port']}"
         engine = create_async_engine(server_url, echo=False)
         async with engine.connect() as conn:
-            await conn.execute(text(f"CREATE DATABASE IF NOT EXISTS {mysql_db_config['db_name']}"))
+            await conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{safe_db_name}`"))
         await engine.dispose()
     elif db_type == "postgres":
-        # Connect to the default 'postgres' database
+        # Validate db_name to prevent SQL injection
+        safe_db_name = _validate_db_name(postgres_db_config['db_name'])
         server_url = f"postgresql+asyncpg://{postgres_db_config['user']}:{postgres_db_config['password']}@{postgres_db_config['host']}:{postgres_db_config['port']}/postgres"
         print(f"[init_db] Connecting to Postgres: host={postgres_db_config['host']}, port={postgres_db_config['port']}, user={postgres_db_config['user']}, dbname=postgres")
         # Isolation level AUTOCOMMIT is required for CREATE DATABASE
         engine = create_async_engine(server_url, echo=False, isolation_level="AUTOCOMMIT")
         async with engine.connect() as conn:
-            # Check if database exists
-            result = await conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname = '{postgres_db_config['db_name']}'"))
+            # Check if database exists — use parameterized query for the SELECT
+            result = await conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :dbname"), {"dbname": safe_db_name})
             if not result.scalar():
-                await conn.execute(text(f"CREATE DATABASE {postgres_db_config['db_name']}"))
+                # CREATE DATABASE cannot be parameterized; use validated identifier
+                await conn.execute(text(f'CREATE DATABASE "{safe_db_name}"'))
         await engine.dispose()
 
 

@@ -104,6 +104,37 @@
       </div>
     </n-card>
 
+    <!-- Onboarding alert：未配置 WECHAT_API_BASE_URL 时提示 -->
+    <n-alert v-if="showOnboardingAlert" type="warning" class="mt-4" closable @close="showOnboardingAlert = false">
+      <template #icon><span>⚙️</span></template>
+      系统尚未完成基础配置。请先前往
+      <n-button text type="primary" size="small" @click="$router.push({ name: 'ConfigManager' })">系统配置</n-button>
+      填写 WECHAT_API_BASE_URL 等必填项。
+    </n-alert>
+
+    <!-- Platform Health Panel -->
+    <n-card size="small" class="mt-4">
+      <template #header>
+        <n-space align="center" size="small">
+          <span>系统健康</span>
+          <n-tag v-if="health.overall === 'ok'" type="success" size="small">正常</n-tag>
+          <n-tag v-else-if="health.overall === 'warning'" type="warning" size="small">警告</n-tag>
+          <n-tag v-else-if="health.overall === 'error'" type="error" size="small">异常</n-tag>
+          <n-tag v-else size="small">检测中</n-tag>
+          <span class="text-xs text-gray-400">{{ health.checked_at ? `更新于 ${new Date(health.checked_at).toLocaleTimeString()}` : '' }}</span>
+        </n-space>
+      </template>
+      <template #header-extra>
+        <n-button size="small" text :loading="healthLoading" @click="loadHealth">刷新</n-button>
+      </template>
+      <n-data-table
+        :columns="healthColumns"
+        :data="health.platforms"
+        :bordered="false"
+        size="small"
+      />
+    </n-card>
+
     <!-- Platform Data Distribution -->
     <n-card title="平台数据分布" size="small" class="mt-4" v-if="platformList.length">
       <div v-for="p in platformList" :key="p.name" class="flex items-center gap-3 mb-2">
@@ -123,8 +154,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
+import { useMessage, NTag, NSpace } from 'naive-ui'
 import http, { unwrapApiData } from '@/api'
 
 const message = useMessage()
@@ -139,6 +170,88 @@ const dashboard = ref({
 const recentLogs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
 const queueStats = ref({ queue_size: 0, running: 0, queued: 0, success: 0, failed: 0 })
 const lastRefreshAt = ref('')
+const showOnboardingAlert = ref(false)
+
+// ─── 健康面板 ──────────────────────────────────────────────────
+interface PlatformHealth {
+  platform: string
+  reachable: boolean
+  auth_valid: boolean | null
+  auth_expires_hint?: string | null
+  status: 'ok' | 'warning' | 'error' | 'unconfigured'
+  message: string
+}
+const health = ref<{ overall: string; checked_at: string; platforms: PlatformHealth[] }>({
+  overall: '',
+  checked_at: '',
+  platforms: [],
+})
+const healthLoading = ref(false)
+
+const platformNameMap: Record<string, string> = {
+  wechat: '微信', feishu: '飞书', database: '数据库',
+}
+const healthColumns = [
+  {
+    title: '平台',
+    key: 'platform',
+    width: 80,
+    render: (row: PlatformHealth) => platformNameMap[row.platform] || row.platform,
+  },
+  {
+    title: '连通性',
+    key: 'reachable',
+    width: 80,
+    render: (row: PlatformHealth) =>
+      h(NTag, { type: row.reachable ? 'success' : 'error', size: 'small' }, { default: () => row.reachable ? '✅ 可达' : '❌ 不可达' }),
+  },
+  {
+    title: '鉴权',
+    key: 'auth_valid',
+    width: 100,
+    render: (row: PlatformHealth) => {
+      if (row.auth_valid === null) return h('span', { class: 'text-gray-400 text-xs' }, 'N/A')
+      const type = row.auth_valid ? 'success' : 'error'
+      let text = row.auth_valid ? '✅ 有效' : '❌ 失效'
+      if (row.auth_valid && row.auth_expires_hint) text += ` (${row.auth_expires_hint})`
+      return h(NTag, { type, size: 'small' }, { default: () => text })
+    },
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    render: (row: PlatformHealth) => {
+      const typeMap: Record<string, any> = { ok: 'success', warning: 'warning', error: 'error', unconfigured: 'default' }
+      const labelMap: Record<string, string> = { ok: '🟢 正常', warning: '🟡 警告', error: '🔴 异常', unconfigured: '⚪ 未配置' }
+      return h(NTag, { type: typeMap[row.status] || 'default', size: 'small' }, { default: () => labelMap[row.status] || row.status })
+    },
+  },
+  {
+    title: '说明',
+    key: 'message',
+    render: (row: PlatformHealth) => h('span', { class: 'text-xs text-gray-500' }, row.message || ''),
+  },
+]
+
+async function loadHealth() {
+  healthLoading.value = true
+  try {
+    const { data } = await http.get('/health/platforms')
+    const payload = unwrapApiData<any>(data) || {}
+    health.value = payload
+    // Onboarding: 如果 wechat 未配置则显示提示
+    const wechat = payload.platforms?.find((p: PlatformHealth) => p.platform === 'wechat')
+    if (wechat?.status === 'unconfigured') {
+      showOnboardingAlert.value = true
+    }
+  } catch {
+    // silent — health check is best-effort
+  } finally {
+    healthLoading.value = false
+  }
+}
+// ─── end 健康面板 ──────────────────────────────────────────────
 
 const platformLabels: Record<string, string> = {
   xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博', wechat: '微信', tieba: '贴吧', zhihu: '知乎',
@@ -199,12 +312,7 @@ async function loadDashboard() {
     dashboard.value.subscriptions = d.subscriptions || dashboard.value.subscriptions
     dashboard.value.scheduler = d.scheduler || dashboard.value.scheduler
   } catch {
-    // 降级：至少获取 health
-    try {
-      await http.get('/health')
-    } catch {
-      // offline
-    }
+    // 降级
   }
 }
 
@@ -238,11 +346,13 @@ async function loadQueueStats() {
 }
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let healthTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   loadDashboard()
   loadLogs()
   loadQueueStats()
+  loadHealth()
   lastRefreshAt.value = new Date().toLocaleTimeString()
   // Auto-refresh every 30s
   refreshTimer = setInterval(() => {
@@ -251,9 +361,12 @@ onMounted(() => {
     loadQueueStats()
     lastRefreshAt.value = new Date().toLocaleTimeString()
   }, 30000)
+  // Health refresh every 5 minutes
+  healthTimer = setInterval(loadHealth, 300_000)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (healthTimer) clearInterval(healthTimer)
 })
 </script>
