@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse
 from .routers import (
     crawler_router, data_router, websocket_router,
     config_router, subscription_router, field_mapping_router,
-    feishu_router, scheduler_router,
+    feishu_router, scheduler_router, health_router,
 )
 
 app = FastAPI(
@@ -78,6 +78,7 @@ app.include_router(subscription_router, prefix="/api")
 app.include_router(field_mapping_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")
+app.include_router(health_router, prefix="/api")
 
 
 @app.on_event("startup")
