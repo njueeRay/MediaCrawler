@@ -199,11 +199,13 @@
 import { ref, h, onMounted } from 'vue'
 import { NTag, NButton, NSpace, useMessage, useDialog, NLog } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
+import { useRoute } from 'vue-router'
 import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
 const message = useMessage()
 const dialog = useDialog()
+const route = useRoute()
 const loading = ref(false)
 const execLoading = ref(false)
 const showCreate = ref(false)
@@ -730,5 +732,18 @@ onMounted(() => {
   loadStatus()
   loadTasks()
   loadExecutions()
+
+  // Handle preset query params when navigated from Subscription page
+  const { preset_platform, preset_type, preset_name } = route.query
+  if (preset_platform || preset_type) {
+    resetFormState()
+    if (preset_platform) newTask.value.platform = preset_platform as string
+    if (preset_type) {
+      newTask.value.task_type = preset_type as string
+      pipelineSteps.value = getDefaultPipeline(preset_type as string, preset_platform as string || '')
+    }
+    if (preset_name) newTask.value.name = preset_name as string
+    showCreate.value = true
+  }
 })
 </script>

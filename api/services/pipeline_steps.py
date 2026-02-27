@@ -324,6 +324,12 @@ class FeishuPushStep(PipelineStep):
         cfg = self.config
         platform = cfg.get("platform") or ctx.platform
 
+        # 校验 platform 不能为空
+        if not platform:
+            ctx.aborted = True
+            await log("[feishu_push] ERROR: platform 未配置，无法推送")
+            return
+
         env_save = os.environ.get("SAVE_DATA_OPTION", "sqlite").strip().lower()
         db_type = (cfg.get("db_type") or env_save).lower()
         if db_type == "mysql":
@@ -336,14 +342,19 @@ class FeishuPushStep(PipelineStep):
 
         data_type = cfg.get("data_type") or ("article" if platform == "wechat" else "note")
 
+        # 校验 table_id：step 配置或环境变量均未设置时发出警告
+        table_id = cfg.get("table_id") or os.environ.get("FEISHU_TABLE_ID", "").strip()
+        if not table_id:
+            await log("[feishu_push] WARNING: table_id 未配置（step config 和 FEISHU_TABLE_ID 均为空），将依赖 sync_to_feishu.py 默认值")
+
         cmd = [
             "uv", "run", "python", "sync_to_feishu.py",
             "--db", "--db-type", db_type,
             "--platform", platform,
             "--data-type", data_type,
         ]
-        if cfg.get("table_id"):
-            cmd += ["--table-id", cfg["table_id"]]
+        if table_id:
+            cmd += ["--table-id", table_id]
         batch = cfg.get("batch_size")
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
