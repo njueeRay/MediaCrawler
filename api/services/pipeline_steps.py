@@ -140,41 +140,52 @@ class PipelineStep(ABC):
     ) -> int:
         """
         运行子进程并将 stdout/stderr 实时写入执行日志。
+        使用 subprocess.Popen + run_in_executor 实现，兼容 Windows SelectorEventLoop。
         返回 exit code。
         """
+        import subprocess
+        import threading
+
         env = {**os.environ, "PYTHONUTF8": "1"}
         work_dir = cwd or PROJECT_ROOT
 
-        # 打印执行命令（隐藏长路径已在参数层）
+        # 打印执行命令
         await log(f"$ {' '.join(str(c) for c in cmd)}")
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *[str(c) for c in cmd],
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+        loop = asyncio.get_event_loop()
+        lines_queue: asyncio.Queue = asyncio.Queue()
+        _SENTINEL = object()  # 结束标记
+
+        def _reader(proc: "subprocess.Popen[bytes]") -> None:
+            """在线程中逐行读取子进程输出，放入队列。"""
+            assert proc.stdout is not None
+            for raw in proc.stdout:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                loop.call_soon_threadsafe(lines_queue.put_nowait, line)
+            loop.call_soon_threadsafe(lines_queue.put_nowait, _SENTINEL)
+
+        def _run() -> "subprocess.Popen[bytes]":
+            return subprocess.Popen(
+                [str(c) for c in cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 cwd=str(work_dir),
                 env=env,
             )
-        except NotImplementedError:
-            await log(
-                "[subprocess] ERROR: asyncio.create_subprocess_exec 不可用 "
-                "（Windows SelectorEventLoop）— 请确认 api/main.py 已设置 "
-                "asyncio.WindowsProactorEventLoopPolicy，并重启服务器"
-            )
-            return 2
 
-        if proc.stdout is None:
-            await log("[subprocess] ERROR: proc.stdout is None — 可能是 Windows SelectorEventLoop 未切换为 ProactorEventLoop")
-            await proc.wait()
-            return 1
+        proc = await loop.run_in_executor(None, _run)
+        t = threading.Thread(target=_reader, args=(proc,), daemon=True)
+        t.start()
+
+        # 从队列消费日志行
         while True:
-            line = await proc.stdout.readline()
-            if not line:
+            item = await lines_queue.get()
+            if item is _SENTINEL:
                 break
-            await log(line.decode("utf-8", errors="replace").rstrip())
+            await log(item)
 
-        exit_code = await proc.wait()
+        await loop.run_in_executor(None, t.join)
+        exit_code = proc.returncode if proc.returncode is not None else await loop.run_in_executor(None, proc.wait)
         return exit_code
 
 
