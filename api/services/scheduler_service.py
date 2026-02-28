@@ -9,12 +9,12 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-import config as _global_config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.webui_models import ScheduledTask, TaskExecution, Subscription
+import config as _global_config
 from api.services.scheduler_snapshot import dump_tasks_snapshot
+from database.webui_models import ScheduledTask, Subscription, TaskExecution
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,6 @@ def _get_scheduler():
         return _apscheduler
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.interval import IntervalTrigger
-        from apscheduler.triggers.cron import CronTrigger
 
         _apscheduler = AsyncIOScheduler()
         _apscheduler.start()
@@ -342,7 +340,7 @@ class SchedulerService:
             # 否则回退到 legacy task_type 判断分支（向后兼容）。
             _pipeline_mode = "pipeline" in task_config
             if _pipeline_mode:
-                from api.services.pipeline_steps import run_pipeline, PipelineContext
+                from api.services.pipeline_steps import PipelineContext, run_pipeline
 
                 _pipeline_ctx = PipelineContext(
                     task_id=0, execution_id=execution_id, platform=platform or ""
@@ -372,9 +370,9 @@ class SchedulerService:
                 if not platform:
                     raise ValueError("subscription_* 任务必须指定 platform")
 
-                from database.db_session import get_session
-                from api.services.crawler_manager import crawler_manager
                 from api.schemas import CrawlerStartRequest
+                from api.services.crawler_manager import crawler_manager
+                from database.db_session import get_session
 
                 only_creator_ids = set(SchedulerService._parse_csv_ids(task_config.get("only_creator_ids", "")))
                 limit = int(task_config.get("limit", 0) or 0)
@@ -450,8 +448,8 @@ class SchedulerService:
 
             if not _pipeline_mode and task_type in ("crawl", "combo"):
                 # 调用 CrawlerManager
-                from api.services.crawler_manager import crawler_manager
                 from api.schemas import CrawlerStartRequest
+                from api.services.crawler_manager import crawler_manager
 
                 crawler_status = crawler_manager.get_status()
                 if crawler_status.get("status") == "running":
@@ -588,7 +586,7 @@ class SchedulerService:
     async def get_status(self, session: AsyncSession) -> Dict:
         active_count = (await session.execute(
             select(func.count()).select_from(ScheduledTask)
-            .where(ScheduledTask.is_active == True)
+            .where(ScheduledTask.is_active)
         )).scalar() or 0
 
         total_exec = (await session.execute(

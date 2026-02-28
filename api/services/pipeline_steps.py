@@ -148,13 +148,21 @@ class PipelineStep(ABC):
         # 打印执行命令（隐藏长路径已在参数层）
         await log(f"$ {' '.join(str(c) for c in cmd)}")
 
-        proc = await asyncio.create_subprocess_exec(
-            *[str(c) for c in cmd],
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(work_dir),
-            env=env,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *[str(c) for c in cmd],
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(work_dir),
+                env=env,
+            )
+        except NotImplementedError:
+            await log(
+                "[subprocess] ERROR: asyncio.create_subprocess_exec 不可用 "
+                "（Windows SelectorEventLoop）— 请确认 api/main.py 已设置 "
+                "asyncio.WindowsProactorEventLoopPolicy，并重启服务器"
+            )
+            return 2
 
         if proc.stdout is None:
             await log("[subprocess] ERROR: proc.stdout is None — 可能是 Windows SelectorEventLoop 未切换为 ProactorEventLoop")

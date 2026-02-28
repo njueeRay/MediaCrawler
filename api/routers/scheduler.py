@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
 """任务调度路由"""
 
-from typing import Optional
-
 import asyncio
 import json
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
-from api.schemas.common import ok, fail, page_ok
+from api.schemas.common import ok, page_ok
 from api.schemas.scheduler import ScheduledTaskCreate, ScheduledTaskUpdate
 from api.services.scheduler_service import scheduler_service
 from database.db_session import get_session
@@ -154,8 +153,9 @@ async def dry_run_task(task_id: int, session: AsyncSession = Depends(get_db)):
 @router.get("/datasets/columns")
 async def get_dataset_columns(table_id: str = Query("")):
     """根据飞书 table_id 查询最新快照数据集的列名（为 json_columns 选择提供候选）"""
-    from database.db_session import get_async_engine
     from sqlalchemy import text
+
+    from database.db_session import get_async_engine
     if not table_id:
         return ok({"columns": []})
     engine = get_async_engine("sqlite")
