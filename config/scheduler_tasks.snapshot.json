@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-27T14:54:58",
+  "generated_at": "2026-02-28T22:25:18",
   "tasks": [
     {
       "id": 2,
@@ -18,6 +18,68 @@
       "fail_count": 1,
       "created_at": "2026-02-12T05:41:43",
       "updated_at": "2026-02-27T06:50:56"
+    },
+    {
+      "id": 3,
+      "name": "定时采集-部分公众号测试",
+      "task_type": "subscription_crawl",
+      "platform": "wechat",
+      "is_active": true,
+      "schedule_type": "once",
+      "schedule_config": {},
+      "task_config": {
+        "pipeline": [
+          {
+            "step": "subscription_crawl",
+            "platform": "wechat",
+            "limit": 10,
+            "only_creator_ids": [
+              "MzkyMDY5MTEyNA==",
+              "MzYzMzA2MDM4NA==",
+              "Mzk0NDc0ODg4Ng=="
+            ]
+          }
+        ]
+      },
+      "last_run_at": "2026-02-28T22:20:58.822849",
+      "next_run_at": null,
+      "run_count": 8,
+      "fail_count": 0,
+      "created_at": "2026-02-27T17:04:25",
+      "updated_at": "2026-02-28T14:20:58"
+    },
+    {
+      "id": 4,
+      "name": "飞书同步",
+      "task_type": "subscription_combo",
+      "platform": "wechat",
+      "is_active": true,
+      "schedule_type": "once",
+      "schedule_config": {},
+      "task_config": {
+        "pipeline": [
+          {
+            "step": "feishu_pull",
+            "platform": "wechat",
+            "table_id": "tblZn1GWLKNHiR11",
+            "view_id": "vewT7xrAZ5",
+            "output": "step3_csv"
+          },
+          {
+            "step": "feishu_push_json",
+            "input": "step3_csv",
+            "table_id": "tbl9RcXEGoCwWJHW",
+            "json_columns": "AI文本分析",
+            "json_primary": "title"
+          }
+        ]
+      },
+      "last_run_at": "2026-02-28T08:00:03.542875",
+      "next_run_at": null,
+      "run_count": 1,
+      "fail_count": 4,
+      "created_at": "2026-02-27T23:59:35",
+      "updated_at": "2026-02-28T14:25:18"
     }
   ]
 }

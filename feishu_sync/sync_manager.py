@@ -287,6 +287,148 @@ class FeishuSyncManager:
         items = response.data.items if response.data and response.data.items else []
         return {field.field_name: field for field in items if field.field_name}
 
+    def list_fields(self, table_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        公有接口：获取表字段列表，供 API 层和前端下拉使用。
+
+        Args:
+            table_id: 临时覆盖 self.table_id（可选）
+
+        Returns:
+            [{field_id, field_name, type, is_primary}, ...]
+
+        Raises:
+            ValueError:   table_id 为空
+            RuntimeError: 飞书 API 返回失败
+        """
+        effective_tid = table_id or self.table_id
+        if not effective_tid:
+            raise ValueError("table_id 不能为空")
+        original_tid = self.table_id
+        self.table_id = effective_tid
+        try:
+            fields_map = self._list_fields()
+        finally:
+            self.table_id = original_tid
+        return [
+            {
+                "field_id":   f.field_id or "",
+                "field_name": name,
+                "type":       f.type or 1,
+                "is_primary": bool(f.is_primary),
+            }
+            for name, f in fields_map.items()
+        ]
+
+    def batch_update_records(
+        self,
+        record_ids: List[str],
+        fields_to_set: Dict[str, Any],
+        *,
+        skip_on_error: bool = True,
+        table_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        批量更新记录字段值。
+
+        Args:
+            record_ids:    飞书 record_id 列表（形如 "recXXXXXX"）
+            fields_to_set: 要回写的字段字典，支持魔法值 "now" -> 毫秒时间戳
+            skip_on_error: True=单批失败继续；False=首批失败即 raise
+            table_id:      临时覆盖 self.table_id（可选）
+
+        Returns:
+            {"success": int, "failed": int, "total": int}
+
+        Raises:
+            ValueError:   table_id 为空 或 fields_to_set 含目标表不存在的字段名
+            RuntimeError: skip_on_error=False 且批量更新失败时
+        """
+        effective_tid = table_id or self.table_id
+        if not effective_tid:
+            raise ValueError("table_id 不能为空")
+
+        if not record_ids:
+            return {"success": 0, "failed": 0, "total": 0}
+
+        # ── 1. 解析魔法值 ────────────────────────────────────────────────────
+        now_ms = int(time.time() * 1000)
+        resolved: Dict[str, Any] = {
+            k: (now_ms if v == "now" else v)
+            for k, v in fields_to_set.items()
+        }
+
+        # ── 2. 字段类型推断 + 字段存在性校验（字段名错误立即报错）────────────
+        original_tid = self.table_id
+        self.table_id = effective_tid
+        try:
+            field_type_map = {
+                name: (f.type or 1) for name, f in self._list_fields().items()
+            }
+        finally:
+            self.table_id = original_tid
+
+        unknown = [k for k in resolved if k not in field_type_map]
+        if unknown:
+            raise ValueError(f"字段在目标表中不存在: {unknown}，请检查字段名称")
+
+        coerced = {
+            k: self._coerce_value_by_type(field_type_map[k], v)
+            for k, v in resolved.items()
+        }
+        coerced = {k: v for k, v in coerced.items() if v is not None}
+        if not coerced:
+            raise ValueError("fields_to_set 经类型转换后全部为 None，请检查字段类型与值")
+
+        # ── 3. 分批 PATCH ────────────────────────────────────────────────────
+        BATCH = min(FeishuConfig.BATCH_SIZE, 500)
+        success_count = failed_count = 0
+
+        for i in range(0, len(record_ids), BATCH):
+            batch = record_ids[i: i + BATCH]
+            req_records = [
+                AppTableRecord.builder().record_id(rid).fields(coerced).build()
+                for rid in batch
+            ]
+            request = (
+                BatchUpdateAppTableRecordRequest.builder()
+                .app_token(self.app_token)
+                .table_id(effective_tid)
+                .request_body(
+                    BatchUpdateAppTableRecordRequestBody.builder()
+                    .records(req_records)
+                    .build()
+                )
+                .build()
+            )
+            response = self.client.bitable.v1.app_table_record.batch_update(
+                request, self._get_request_option()
+            )
+
+            if response.success():
+                cnt = (
+                    len(response.data.records)
+                    if response.data and response.data.records
+                    else len(batch)
+                )
+                success_count += cnt
+                logger.info(f"batch_update 第{i // BATCH + 1}批：{cnt} 条成功")
+            else:
+                msg = (
+                    f"batch_update 第{i // BATCH + 1}批失败 "
+                    f"Code={response.code} Msg={response.msg}"
+                )
+                if skip_on_error:
+                    logger.error(msg)
+                    failed_count += len(batch)
+                else:
+                    raise RuntimeError(msg)
+
+            if i + BATCH < len(record_ids):
+                time.sleep(FeishuConfig.RATE_LIMIT_DELAY)
+
+        return {"success": success_count, "failed": failed_count, "total": len(record_ids)}
+
     def _filter_records_by_table_fields(self, records: List[Dict]) -> List[Dict]:
         """过滤记录字段，只保留表中已存在字段"""
         try:
@@ -369,6 +511,10 @@ class FeishuSyncManager:
                 parts = [part.strip() for part in value.split(",") if part.strip()]
                 return parts
             return []
+        if field_type == 7:  # 复选框：直接传 bool
+            if isinstance(value, bool):
+                return value
+            return str(value).lower() in {"1", "true", "yes", "y"}
         return str(value)
 
     def _coerce_records_by_field_types(
@@ -1004,7 +1150,8 @@ class FeishuSyncManager:
 
             items = response.data.items if response.data and response.data.items else []
             for item in items:
-                fields = getattr(item, "fields", None) or {}
+                fields = dict(getattr(item, "fields", None) or {})
+                fields["_feishu_record_id"] = getattr(item, "record_id", None) or ""
                 records.append(fields)
 
             if not response.data or not response.data.has_more:

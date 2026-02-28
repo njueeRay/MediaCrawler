@@ -253,6 +253,7 @@ async def save_rows_to_db(
     table_id: str,
     view_id: str,
     dataset_name: str,
+    record_ids: Optional[List[str]] = None,
 ) -> int:
     """将飞书读取结果保存到关系型数据库（sqlite/mysql/postgres）。"""
     if not rows:
@@ -275,13 +276,15 @@ async def save_rows_to_db(
 
     async with AsyncSessionFactory() as session:
         assert isinstance(session, AsyncSession)
-        for row in rows:
+        for i, row in enumerate(rows):
+            rid = (record_ids[i] if record_ids and i < len(record_ids) else "") or ""
             session.add(
                 FeishuRecordSnapshot(
                     source_app_token=app_token or "",
                     source_table_id=table_id or "",
                     source_view_id=view_id or "",
                     dataset_name=dataset_name or "default",
+                    feishu_record_id=rid,
                     fields_json=json.dumps(row, ensure_ascii=False),
                     add_ts=now_text,
                 )
@@ -358,14 +361,16 @@ def main() -> None:
         logger.info("已指定 view_id=%s，忽略显式过滤参数（使用视图内置过滤）", view_id)
         filter_info = None
 
-    rows = manager.search_records(
+    rows_raw = manager.search_records(
         field_names=field_names or None,
         filter_info=filter_info,
         page_size=args.page_size,
         view_id=view_id,
     )
 
-    rows = [normalize_row(row, field_names or None) for row in rows]
+    # 提取飞书原生 record_id（供回写步骤使用），并从行数据中移除私有键
+    record_ids = [row.pop("_feishu_record_id", "") for row in rows_raw]
+    rows = [normalize_row(row, field_names or None) for row in rows_raw]
 
     logger.info(f"🎯 读取记录数: {len(rows)}")
 
@@ -387,6 +392,7 @@ def main() -> None:
                 table_id=table_id,
                 view_id=view_id or "",
                 dataset_name=args.db_dataset or table_id,
+                record_ids=record_ids,
             )
         )
         wrote_output = True

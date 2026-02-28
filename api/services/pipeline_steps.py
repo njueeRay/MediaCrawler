@@ -517,7 +517,7 @@ class FeishuPullStep(PipelineStep):
                 ref_desc = f"dataset={dataset_name}"
 
             await log(f"[feishu_pull] OK output={output_key} format={output_format} {ref_desc}")
-            # 如果飞书源表当前无记录，主动记录警告（方便调试），但不中止 pipeline
+            # 提取 feishu_record_id 列表（供 feishu_update_records 步骤回写使用）
             if dataset_name:
                 from database.db_session import get_async_engine
                 from sqlalchemy import text as _text
@@ -525,21 +525,26 @@ class FeishuPullStep(PipelineStep):
                     _engine = get_async_engine("sqlite")
                     if _engine:
                         async with _engine.connect() as _conn:
-                            _row = await _conn.execute(
+                            _rrows = await _conn.execute(
                                 _text(
-                                    "SELECT COUNT(*) FROM feishu_record_snapshot "
-                                    "WHERE dataset=:ds"
+                                    "SELECT feishu_record_id FROM feishu_record_snapshot "
+                                    "WHERE dataset_name=:ds"
                                 ),
                                 {"ds": dataset_name},
                             )
-                            _count = (_row.fetchone() or (0,))[0]
+                            _rids = [r[0] for r in _rrows.fetchall() if r[0]]
+                        _count = len(_rids)
                         if _count == 0:
+                            ctx.vars[output_key]["empty"] = True
                             await log(
                                 f"[feishu_pull] ⚠️  飞书表共拉取 0 条记录"
-                                f"（table_id={table_id}），后续推送步骤将被跳过"
+                                f"（table_id={table_id}），下游步骤将自动跳过"
                             )
-                except Exception:
-                    pass  # 计数失败不影响主流程
+                        else:
+                            ctx.vars[output_key]["record_ids"] = _rids
+                            await log(f"[feishu_pull] 已提取 {_count} 条 feishu_record_id → 下游可回写")
+                except Exception as _exc:
+                    await log(f"[feishu_pull] WARN: 提取 record_ids 失败: {_exc}")
             ctx.step_results.append({
                 "step": "feishu_pull",
                 "status": "ok",
@@ -739,6 +744,129 @@ class MultiPlatformCrawlStep(PipelineStep):
         })
 
 
+class FeishuUpdateRecordsStep(PipelineStep):
+    """
+    对 feishu_pull 拉取的记录做批量字段回写（如标记"已入库"=true）。
+
+    config keys:
+      table_id       — 目标飞书表 ID（必填，通常与 feishu_pull 的 table_id 相同）
+      input          — 从 ctx.vars 读取 feishu_pull 输出的 key（默认 "step3_csv"）
+      fields_to_set  — 要回写的字段字典（必填），示例：
+                         {"已入库": true, "入库时间": "now", "状态": "已处理"}
+                       魔法值：
+                         "now" -> 当前毫秒时间戳（适用于日期/数字字段）
+      skip_on_error  — True=单批失败后继续（默认 True）；False=首批失败即中止
+      dry_run        — True=仅打印不实际写入飞书（默认 False，调试用）
+    """
+
+    step_type = "feishu_update_records"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        import asyncio as _asyncio
+        from feishu_sync.sync_manager import FeishuSyncManager
+
+        cfg = self.config
+        table_id = cfg.get("table_id", "")
+        if not table_id:
+            ctx.aborted = True
+            await log("[feishu_update_records] ERROR: 缺少 table_id")
+            return
+
+        raw_fields = cfg.get("fields_to_set")
+        if not raw_fields or not isinstance(raw_fields, dict):
+            ctx.aborted = True
+            await log("[feishu_update_records] ERROR: fields_to_set 必须为非空字典")
+            return
+
+        input_key = cfg.get("input", "step3_csv")
+        input_ref = ctx.vars.get(input_key)
+        if not input_ref:
+            ctx.aborted = True
+            await log(
+                f"[feishu_update_records] ERROR: 找不到输入引用 key={input_key!r}，"
+                f"请确认 feishu_pull 步骤已执行且 output key 对齐"
+            )
+            return
+
+        # ── 数据驱动跳过：上游 0 条时自动跳过 ────────────────────────────────
+        if isinstance(input_ref, dict) and input_ref.get("empty"):
+            await log("[feishu_update_records] ⏭ 上游 feishu_pull 拉取 0 条，自动跳过回写")
+            ctx.step_results.append({
+                "step": "feishu_update_records",
+                "status": "skipped",
+                "reason": "upstream_empty",
+            })
+            return
+
+        # ── 获取 record_ids ───────────────────────────────────────────────────
+        record_ids: List[str] = []
+        if isinstance(input_ref, dict):
+            record_ids = list(input_ref.get("record_ids") or [])
+        if not record_ids:
+            await log(
+                "[feishu_update_records] WARN: 输入引用中无 record_ids，"
+                "请确认 feishu_pull 使用 sqlite 模式且版本已更新"
+            )
+            ctx.step_results.append({
+                "step": "feishu_update_records",
+                "status": "skipped",
+                "reason": "no_record_ids",
+            })
+            return
+
+        skip_on_error = bool(cfg.get("skip_on_error", True))
+        dry_run = bool(cfg.get("dry_run", False))
+
+        await log(
+            f"[feishu_update_records] 准备回写 {len(record_ids)} 条记录 "
+            f"fields={list(raw_fields.keys())} dry_run={dry_run}"
+        )
+
+        if dry_run:
+            sample = record_ids[:5]
+            await log(f"[feishu_update_records] DRY RUN record_ids(前5)={sample}")
+            ctx.step_results.append({
+                "step": "feishu_update_records",
+                "status": "dry_run",
+                "record_count": len(record_ids),
+            })
+            return
+
+        # ── 调用 SDK ─────────────────────────────────────────────────────────
+        loop = _asyncio.get_event_loop()
+        try:
+            manager = FeishuSyncManager(table_id=table_id)
+            result = await loop.run_in_executor(
+                None,
+                lambda: manager.batch_update_records(
+                    record_ids=record_ids,
+                    fields_to_set=raw_fields,
+                    skip_on_error=skip_on_error,
+                    table_id=table_id,
+                ),
+            )
+        except (ValueError, RuntimeError) as exc:
+            ctx.aborted = not skip_on_error
+            level = "ERROR" if ctx.aborted else "WARN"
+            await log(f"[feishu_update_records] {level}: {exc}")
+            ctx.step_results.append({
+                "step": "feishu_update_records",
+                "status": "failed",
+                "error": str(exc),
+            })
+            return
+
+        await log(
+            f"[feishu_update_records] OK success={result['success']} "
+            f"failed={result['failed']} total={result['total']}"
+        )
+        ctx.step_results.append({
+            "step": "feishu_update_records",
+            "status": "ok",
+            **result,
+        })
+
+
 # ─── 步骤注册表 ───────────────────────────────────────────────────────────────
 
 STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
@@ -748,6 +876,7 @@ STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
     "feishu_push": FeishuPushStep,
     "feishu_pull": FeishuPullStep,
     "feishu_push_json": FeishuPushJsonStep,
+    "feishu_update_records": FeishuUpdateRecordsStep,
 }
 
 

@@ -88,3 +88,28 @@ async def get_sync_history(history_id: int, session: AsyncSession = Depends(get_
         "finished_at": str(h.finished_at) if h.finished_at else None,
         "duration_seconds": h.duration_seconds,
     })
+
+
+@router.get("/tables/{table_id}/fields")
+async def list_table_fields(table_id: str):
+    """
+    查询飞书多维表格的字段列表（供前端下拉使用）。
+    type: 1=文本 2=数字 3=单选 4=多选 5=日期 7=复选框 11=人员 13=电话 15=超链接 17=附件
+    """
+    import asyncio
+    from feishu_sync.sync_manager import FeishuSyncManager
+
+    if not table_id or not table_id.startswith("tbl"):
+        raise HTTPException(422, "table_id 格式不合法，应以 'tbl' 开头")
+
+    try:
+        manager = FeishuSyncManager(table_id=table_id)
+        loop = asyncio.get_event_loop()
+        fields = await loop.run_in_executor(None, lambda: manager.list_fields())
+        return ok(fields)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(502, f"飞书 API 调用失败: {exc}")
+    except Exception as exc:
+        raise HTTPException(500, f"内部错误: {exc}")

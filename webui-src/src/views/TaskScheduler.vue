@@ -191,7 +191,21 @@
               <n-input v-model:value="step.table_id" placeholder="tblXXXXXXX" />
             </n-form-item>
             <n-form-item label="过滤字段">
-              <n-input v-model:value="step.filter_field" placeholder="例: 信息质量评估" />
+              <n-select
+                v-if="_fieldCacheState[step.table_id]?.length"
+                v-model:value="step.filter_field"
+                :options="_fieldCacheState[step.table_id]"
+                :loading="!!_fieldLoading[step.table_id]"
+                filterable clearable
+                placeholder="选择过滤字段"
+                style="width:100%"
+              />
+              <n-input
+                v-else
+                v-model:value="step.filter_field"
+                :loading="!!_fieldLoading[step.table_id]"
+                placeholder="填写字段名，或先填写表 ID 加载字段列表"
+              />
             </n-form-item>
             <n-form-item label="过滤运算">
               <n-select v-model:value="step.filter_operator" :options="filterOps" style="width:140px" />
@@ -212,7 +226,22 @@
               <n-input v-model:value="step.table_id" placeholder="tblYYYYYYY" />
             </n-form-item>
             <n-form-item label="JSON 列名" required>
-              <n-input v-model:value="step.json_columns" placeholder="例: AI文本分析" />
+              <n-select
+                v-if="_fieldCacheState[step.table_id]?.length"
+                :value="step.json_columns ? step.json_columns.split(',').map((c:string)=>c.trim()).filter(Boolean) : []"
+                :options="_fieldCacheState[step.table_id]"
+                :loading="!!_fieldLoading[step.table_id]"
+                multiple filterable
+                placeholder="选择要展开的 JSON 列（可多选）"
+                style="width:100%"
+                @update:value="(v: string[]) => step.json_columns = v.join(',')"
+              />
+              <n-input
+                v-else
+                v-model:value="step.json_columns"
+                :loading="!!_fieldLoading[step.table_id]"
+                placeholder="例: AI文本分析（逗号分隔多列）"
+              />
             </n-form-item>
             <n-form-item label="主键列">
               <n-input v-model:value="step.json_primary" placeholder="默认: 记录ID" />
@@ -223,6 +252,38 @@
                 <span>~</span>
                 <n-input-number v-model:value="step.range_end" :min="1" placeholder="结束" style="width:100px" />
               </n-space>
+            </n-form-item>
+          </n-form>
+        </template>
+
+        <!-- feishu_update_records 配置 -->
+        <template v-if="step.step === 'feishu_update_records'">
+          <n-form label-placement="left" label-width="110" size="small">
+            <n-form-item label="目标表 ID" required>
+              <n-input v-model:value="step.table_id" placeholder="tblXXXXXXX（通常与 feishu_pull 相同）" />
+            </n-form-item>
+            <n-form-item label="输入引用">
+              <n-input v-model:value="step.input" placeholder="step3_csv（对齐 feishu_pull 的 output）" />
+            </n-form-item>
+            <n-form-item label="回写字段" required>
+              <div style="width:100%">
+                <n-input
+                  v-model:value="step._fields_raw"
+                  type="textarea"
+                  :rows="4"
+                  placeholder='{"已入库": true, "入库时间": "now", "状态": "已处理"}'
+                  style="width:100%;font-family:monospace;font-size:12px"
+                />
+                <n-text depth="3" style="font-size:11px">支持魔法值："now" → 当前毫秒时间戳</n-text>
+              </div>
+            </n-form-item>
+            <n-form-item label="出错时跳过">
+              <n-switch v-model:value="step.skip_on_error" />
+              <span class="ml-2 text-xs text-gray-400">{{ step.skip_on_error ? '单批失败后继续' : '首批失败即中止' }}</span>
+            </n-form-item>
+            <n-form-item label="试运行">
+              <n-switch v-model:value="step.dry_run" />
+              <span class="ml-2 text-xs text-gray-400">开启后只打印 record_ids，不写入飞书</span>
             </n-form-item>
           </n-form>
         </template>
@@ -239,8 +300,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted, watch, nextTick } from 'vue'
-import { NTag, NButton, NSpace, useMessage, useDialog, NLog } from 'naive-ui'
+import { ref, h, onMounted, watch, nextTick, watchEffect } from 'vue'
+import { NTag, NButton, NSpace, useMessage, useDialog, NLog, NSpin } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import http, { isDbError, unwrapApiData } from '@/api'
@@ -261,6 +322,19 @@ const logRef = ref<any>(null)
 const _isPolling = ref(false)
 let _logPollTimer: ReturnType<typeof setInterval> | null = null
 
+// 遗书字段缓存（会话级，刷新后清空）
+/** 飞书字段类型 int -> 中文标签 */
+const FEISHU_FIELD_TYPE_LABELS: Record<number, string> = {
+  1: '文本', 2: '数字', 3: '单选', 4: '多选', 5: '日期',
+  7: '复选框', 11: '人员', 13: '电话', 15: '超链接', 17: '附件',
+  18: '关联', 19: '公式', 20: '自动编号',
+}
+interface FieldOption { label: string; value: string; type: number }
+/** key=table_id → 字段选项列表（响应式） */
+const _fieldCacheState = ref<Record<string, FieldOption[]>>({})
+/** key=table_id → 是否加载中 */
+const _fieldLoading = ref<Record<string, boolean>>({})
+
 function _stopLogPoll() {
   if (_logPollTimer !== null) {
     clearInterval(_logPollTimer)
@@ -271,6 +345,43 @@ function _stopLogPoll() {
 
 // 关闭日志弹窗时自动停止轮询
 watch(showExecLog, (val) => { if (!val) _stopLogPoll() })
+
+// 字段加载：按 table_id 向后端请求飞书字段列表（自动去重，会话级缓存）
+async function loadFields(tableId: string): Promise<void> {
+  if (!tableId || !tableId.startsWith('tbl') || tableId.length <= 6) return
+  if (_fieldCacheState.value[tableId] || _fieldLoading.value[tableId]) return
+  _fieldLoading.value = { ..._fieldLoading.value, [tableId]: true }
+  try {
+    const res = await http.get(`/feishu/tables/${tableId}/fields`)
+    const data: Array<{ field_name: string; type: number }> = unwrapApiData(res.data) || []
+    _fieldCacheState.value = {
+      ..._fieldCacheState.value,
+      [tableId]: data.map(f => ({
+        label: `${f.field_name}\uff08${FEISHU_FIELD_TYPE_LABELS[f.type] ?? '\u672a\u77e5'}\uff09`,
+        value: f.field_name,
+        type: f.type,
+      })),
+    }
+  } catch (e: any) {
+    message.warning(`\u5b57\u6bb5\u52a0\u8f7d\u5931\u8d25\uff1a${e?.message ?? '\u672a\u77e5\u9519\u8bef'}`)
+  } finally {
+    const tmp = { ..._fieldLoading.value }
+    delete tmp[tableId]
+    _fieldLoading.value = tmp
+  }
+}
+
+// watchEffect \u76d1\u542c\u6240\u6709\u6b65\u9aa4\u7684 table_id \u53d8\u5316\uff0c\u81ea\u52a8\u52a0\u8f7d\u5b57\u6bb5\uff08\u907f\u514d\u5220\u9664\u6b65\u9aa4\u65f6 index \u9519\u4f4d\uff09
+watchEffect(() => {
+  for (const step of pipelineSteps.value) {
+    if (['feishu_pull', 'feishu_push_json', 'feishu_update_records'].includes(step.step)) {
+      const tid = step.table_id as string | undefined
+      if (tid && tid.startsWith('tbl') && tid.length > 6 && !_fieldCacheState.value[tid]) {
+        void loadFields(tid)
+      }
+    }
+  }
+})
 
 // 日志内容更新时自动滚动到底部
 watch(execLogText, async () => {
@@ -314,6 +425,7 @@ const availableStepOptions = [
   { label: '同步到飞书表', value: 'feishu_push' },
   { label: '从飞书表拉取', value: 'feishu_pull' },
   { label: 'JSON展开推送', value: 'feishu_push_json' },
+  { label: '回写记录字段', value: 'feishu_update_records' },
 ]
 
 const crawlerTypeOptions = [
@@ -400,6 +512,8 @@ function createDefaultStep(stepType: string, platform?: string): any {
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', output: 'step3_csv' }
     case 'feishu_push_json':
       return { step: 'feishu_push_json', input: 'step3_csv', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
+    case 'feishu_update_records':
+      return { step: 'feishu_update_records', table_id: '', input: 'step3_csv', _fields_raw: '{"已入库": true, "入库时间": "now"}', skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
       return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
     default:
@@ -428,6 +542,11 @@ function getDefaultPipeline(taskType: string, platform?: string): any[] {
         createDefaultStep('multi_platform_crawl', p),
         createDefaultStep('feishu_push', p),
       ]
+    case 'pull_update':
+      return [
+        createDefaultStep('feishu_pull', p),
+        createDefaultStep('feishu_update_records', p),
+      ]
     default:
       return [createDefaultStep('subscription_crawl', p)]
   }
@@ -441,6 +560,7 @@ function stepTagType(stepType: string): string {
     feishu_push:          'success',
     feishu_pull:          'warning',
     feishu_push_json:     'error',
+    feishu_update_records: 'primary',
   }
   return (m[stepType] || 'default') as any
 }
@@ -536,6 +656,17 @@ function buildTaskConfig(): any {
       if (s.json_primary) clean.json_primary = s.json_primary
       if (s.range_start) clean.range_start = s.range_start
       if (s.range_end) clean.range_end = s.range_end
+    }
+    if (s.step === 'feishu_update_records') {
+      if (s.table_id) clean.table_id = s.table_id
+      if (s.input) clean.input = s.input
+      try {
+        clean.fields_to_set = JSON.parse(s._fields_raw || '{}')
+      } catch {
+        throw new Error('步骤 feishu_update_records 的"回写字段"不是合法 JSON，请检查格式')
+      }
+      clean.skip_on_error = s.skip_on_error !== false
+      if (s.dry_run) clean.dry_run = true
     }
     return clean
   })
@@ -741,7 +872,8 @@ async function createTask() {
     if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
     if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
 
-    const taskConfig = buildTaskConfig()
+    let taskConfig: any
+    try { taskConfig = buildTaskConfig() } catch (e: any) { message.error(e.message || '配置错误'); return }
 
     await http.post('/scheduler/tasks', {
       ...newTask.value,
@@ -800,7 +932,8 @@ async function updateTask() {
     if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
     if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
 
-    const taskConfig = buildTaskConfig()
+    let taskConfig: any
+    try { taskConfig = buildTaskConfig() } catch (e: any) { message.error(e.message || '配置错误'); return }
 
     // P0-1 FIX: 发送完整字段（包含 task_type / platform / task_config）
     await http.put(`/scheduler/tasks/${editingTaskId.value}`, {

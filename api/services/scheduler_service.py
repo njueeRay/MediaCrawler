@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import config as _global_config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -398,7 +399,7 @@ class SchedulerService:
                             login_type=crawl_config.get("login_type", "cookie"),
                             crawler_type="creator",
                             creator_ids=sub.creator_id,
-                            save_option=crawl_config.get("save_option", "json"),
+                            save_option=crawl_config.get("save_option") or _global_config.SAVE_DATA_OPTION,
                             headless=crawl_config.get("headless", True),
                         )
 
@@ -439,7 +440,7 @@ class SchedulerService:
                     crawler_type=task_config.get("crawler_type", "search"),
                     keywords=task_config.get("keywords", ""),
                     creator_ids=task_config.get("creator_ids", ""),
-                    save_option=task_config.get("save_option", "json"),
+                    save_option=task_config.get("save_option") or _global_config.SAVE_DATA_OPTION,
                     headless=task_config.get("headless", True),
                 )
                 started = await crawler_manager.start(request)

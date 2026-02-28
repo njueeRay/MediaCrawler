@@ -503,5 +503,6 @@ class FeishuRecordSnapshot(Base):
     source_table_id = Column(String(128), index=True)
     source_view_id = Column(String(128), default='')
     dataset_name = Column(String(128), index=True, default='default')
+    feishu_record_id = Column(String(128), default='', index=True)
     fields_json = Column(Text)
     add_ts = Column(String(32), default='')
