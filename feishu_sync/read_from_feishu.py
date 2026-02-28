@@ -271,6 +271,16 @@ async def save_rows_to_db(
     if not engine:
         raise RuntimeError("数据库引擎不可用")
 
+    # 向后兼容迁移：若 feishu_record_id 列不存在则自动 ALTER TABLE
+    try:
+        from sqlalchemy import text as _text
+        async with engine.begin() as _mc:
+            await _mc.execute(_text(
+                "ALTER TABLE feishu_record_snapshot ADD COLUMN feishu_record_id TEXT DEFAULT ''"
+            ))
+    except Exception:
+        pass  # 列已存在时 ALTER TABLE 报错，正常忽略
+
     AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
