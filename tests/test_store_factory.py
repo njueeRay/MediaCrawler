@@ -67,7 +67,7 @@ class TestXhsStoreFactory:
     
     def test_all_stores_registered(self):
         """Test that all store types are registered"""
-        expected_stores = ['csv', 'json', 'db', 'sqlite', 'mongodb', 'excel']
+        expected_stores = ['csv', 'json', 'db', 'postgres', 'sqlite', 'mongodb', 'excel']
         
         for store_type in expected_stores:
             assert store_type in XhsStoreFactory.STORES

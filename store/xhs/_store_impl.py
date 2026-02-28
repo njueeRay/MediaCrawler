@@ -20,24 +20,22 @@
 # @Time    : 2025/9/5 19:34
 # @Desc    : Xiaohongshu storage implementation class
 import json
-import os
-from datetime import datetime
-from typing import List, Dict, Any
+import threading
+from typing import Dict, List
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from base.base_crawler import AbstractStore
 from database.db_session import get_session
-from database.models import XhsNote, XhsNoteComment, XhsCreator
-
+from database.models import XhsCreator, XhsNote, XhsNoteComment
+from database.mongodb_store_base import MongoDBStoreBase
+from store.excel_store_base import ExcelStoreBase
+from tools import utils
 from tools.async_file_writer import AsyncFileWriter
 from tools.time_util import get_current_timestamp
 from var import crawler_type_var
-from database.mongodb_store_base import MongoDBStoreBase
-from tools import utils
-from store.excel_store_base import ExcelStoreBase
+
 
 class XhsCsvStoreImplement(AbstractStore):
     def __init__(self, **kwargs):
@@ -339,12 +337,21 @@ class XhsMongoStoreImplement(AbstractStore):
         utils.logger.info(f"[XhsMongoStoreImplement.store_creator] Saved creator {user_id} to MongoDB")
 
 
-class XhsExcelStoreImplement:
+class XhsExcelStoreImplement(ExcelStoreBase):
     """Xiaohongshu Excel storage implementation - Global singleton"""
 
+    _xhs_instance: "XhsExcelStoreImplement | None" = None
+    _xhs_lock = threading.Lock()
+
     def __new__(cls, *args, **kwargs):
-        from store.excel_store_base import ExcelStoreBase
-        return ExcelStoreBase.get_instance(
-            platform="xhs",
-            crawler_type=crawler_type_var.get()
-        )
+        with cls._xhs_lock:
+            if cls._xhs_instance is None:
+                obj = super().__new__(cls)
+                cls._xhs_instance = obj
+            return cls._xhs_instance
+
+    def __init__(self, *args, **kwargs):
+        if getattr(self, '_init_done', False):
+            return
+        super().__init__(platform="xhs", crawler_type=crawler_type_var.get())
+        self._init_done = True

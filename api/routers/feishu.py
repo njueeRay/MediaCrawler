@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
-from api.schemas.common import ok, fail, page_ok
+from api.schemas.common import ok, page_ok
 from api.schemas.feishu import FeishuSyncRequest
 from api.services.feishu_service import feishu_service
 
@@ -97,6 +97,7 @@ async def list_table_fields(table_id: str):
     type: 1=文本 2=数字 3=单选 4=多选 5=日期 7=复选框 11=人员 13=电话 15=超链接 17=附件
     """
     import asyncio
+
     from feishu_sync.sync_manager import FeishuSyncManager
 
     if not table_id or not table_id.startswith("tbl"):

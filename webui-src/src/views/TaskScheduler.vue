@@ -267,14 +267,35 @@
             </n-form-item>
             <n-form-item label="回写字段" required>
               <div style="width:100%">
-                <n-input
-                  v-model:value="step._fields_raw"
-                  type="textarea"
-                  :rows="4"
-                  placeholder='{"已入库": true, "入库时间": "now", "状态": "已处理"}'
-                  style="width:100%;font-family:monospace;font-size:12px"
-                />
-                <n-text depth="3" style="font-size:11px">支持魔法值："now" → 当前毫秒时间戳</n-text>
+                <div v-for="(pair, pi) in (step._kv_pairs || [])" :key="pi" style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+                  <n-select
+                    v-if="_fieldCacheState[step.table_id]?.length"
+                    :value="pair.key"
+                    @update:value="(v: string) => { pair.key = v }"
+                    :options="_fieldCacheState[step.table_id]"
+                    filterable
+                    clearable
+                    placeholder="字段名"
+                    style="flex:2;min-width:0"
+                    size="small"
+                  />
+                  <n-input
+                    v-else
+                    v-model:value="pair.key"
+                    placeholder="字段名"
+                    style="flex:2;min-width:0"
+                    size="small"
+                  />
+                  <n-input
+                    v-model:value="pair.value"
+                    placeholder="值（true/false/now/文本/数字）"
+                    style="flex:3;min-width:0"
+                    size="small"
+                  />
+                  <n-button size="tiny" quaternary type="error" @click="step._kv_pairs.splice(pi, 1)">×</n-button>
+                </div>
+                <n-button dashed size="small" block style="margin-top:4px" @click="(step._kv_pairs = step._kv_pairs || []).push({ key: '', value: '' })">+ 添加字段</n-button>
+                <n-text depth="3" style="font-size:11px;margin-top:2px;display:block">支持魔法值："now" → 当前毫秒时间戳；true / false → 复选框布尔值</n-text>
               </div>
             </n-form-item>
             <n-form-item label="出错时跳过">
@@ -372,6 +393,9 @@ async function loadFields(tableId: string): Promise<void> {
 }
 
 // watchEffect \u76d1\u542c\u6240\u6709\u6b65\u9aa4\u7684 table_id \u53d8\u5316\uff0c\u81ea\u52a8\u52a0\u8f7d\u5b57\u6bb5\uff08\u907f\u514d\u5220\u9664\u6b65\u9aa4\u65f6 index \u9519\u4f4d\uff09
+// Pipeline 步骤数组（解耦化核心）
+const pipelineSteps = ref<any[]>([])
+
 watchEffect(() => {
   for (const step of pipelineSteps.value) {
     if (['feishu_pull', 'feishu_push_json', 'feishu_update_records'].includes(step.step)) {
@@ -402,9 +426,6 @@ const newTask = ref({
   platform: 'wechat',
   schedule_type: 'interval',
 })
-
-// Pipeline 步骤数组（解耦化核心）
-const pipelineSteps = ref<any[]>([])
 
 // 订阅账号列表（供步骤表单选择）
 const subscriptionOptions = ref<{ label: string; value: string }[]>([])
@@ -513,7 +534,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
     case 'feishu_push_json':
       return { step: 'feishu_push_json', input: 'step3_csv', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
     case 'feishu_update_records':
-      return { step: 'feishu_update_records', table_id: '', input: 'step3_csv', _fields_raw: '{"已入库": true, "入库时间": "now"}', skip_on_error: true, dry_run: false }
+      return { step: 'feishu_update_records', table_id: '', input: 'step3_csv', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
       return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
     default:
@@ -660,11 +681,19 @@ function buildTaskConfig(): any {
     if (s.step === 'feishu_update_records') {
       if (s.table_id) clean.table_id = s.table_id
       if (s.input) clean.input = s.input
-      try {
-        clean.fields_to_set = JSON.parse(s._fields_raw || '{}')
-      } catch {
-        throw new Error('步骤 feishu_update_records 的"回写字段"不是合法 JSON，请检查格式')
+      const pairs: Array<{key: string; value: string}> = s._kv_pairs || []
+      const fieldsToSet: Record<string, any> = {}
+      for (const pair of pairs) {
+        if (!pair.key) continue
+        const v = pair.value
+        if (v === 'true') fieldsToSet[pair.key] = true
+        else if (v === 'false') fieldsToSet[pair.key] = false
+        else if (v === 'now') fieldsToSet[pair.key] = 'now'
+        else if (v !== '' && !isNaN(Number(v))) fieldsToSet[pair.key] = Number(v)
+        else fieldsToSet[pair.key] = v
       }
+      if (Object.keys(fieldsToSet).length === 0) throw new Error('步骤 feishu_update_records 的"回写字段"不能为空')
+      clean.fields_to_set = fieldsToSet
       clean.skip_on_error = s.skip_on_error !== false
       if (s.dry_run) clean.dry_run = true
     }
@@ -679,7 +708,15 @@ function restorePipelineFromConfig(taskConfig: any, taskType: string, platform: 
   if (taskConfig?.pipeline && Array.isArray(taskConfig.pipeline) && taskConfig.pipeline.length > 0) {
     pipelineSteps.value = taskConfig.pipeline.map((s: any) => {
       const defaults = createDefaultStep(s.step, platform)
-      return { ...defaults, ...s }
+      const merged = { ...defaults, ...s }
+      // feishu_update_records: fields_to_set dict → _kv_pairs array
+      if (s.step === 'feishu_update_records' && s.fields_to_set && typeof s.fields_to_set === 'object') {
+        merged._kv_pairs = Object.entries(s.fields_to_set).map(([k, v]: [string, any]) => ({
+          key: k,
+          value: v === true ? 'true' : v === false ? 'false' : String(v),
+        }))
+      }
+      return merged
     })
   } else {
     pipelineSteps.value = getDefaultPipeline(taskType, platform)

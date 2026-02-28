@@ -187,8 +187,8 @@ class CrawlStep(PipelineStep):
     step_type = "crawl"
 
     async def run(self, ctx: PipelineContext, log: Callable) -> None:
-        from api.services.crawler_manager import crawler_manager
         from api.schemas import CrawlerStartRequest
+        from api.services.crawler_manager import crawler_manager
 
         cfg = self.config
         platform = cfg.get("platform") or ctx.platform
@@ -259,11 +259,12 @@ class SubscriptionCrawlStep(PipelineStep):
     step_type = "subscription_crawl"
 
     async def run(self, ctx: PipelineContext, log: Callable) -> None:
-        from api.services.crawler_manager import crawler_manager
-        from api.schemas import CrawlerStartRequest
-        from database.webui_models import Subscription
-        from database.db_session import get_session
         from sqlalchemy import select
+
+        from api.schemas import CrawlerStartRequest
+        from api.services.crawler_manager import crawler_manager
+        from database.db_session import get_session
+        from database.webui_models import Subscription
 
         cfg = self.config
         platform_filter = cfg.get("platform") or ctx.platform
@@ -519,8 +520,9 @@ class FeishuPullStep(PipelineStep):
             await log(f"[feishu_pull] OK output={output_key} format={output_format} {ref_desc}")
             # 提取 feishu_record_id 列表（供 feishu_update_records 步骤回写使用）
             if dataset_name:
-                from database.db_session import get_async_engine
                 from sqlalchemy import text as _text
+
+                from database.db_session import get_async_engine
                 try:
                     _engine = get_async_engine("sqlite")
                     if _engine:
@@ -763,6 +765,7 @@ class FeishuUpdateRecordsStep(PipelineStep):
 
     async def run(self, ctx: PipelineContext, log: Callable) -> None:
         import asyncio as _asyncio
+
         from feishu_sync.sync_manager import FeishuSyncManager
 
         cfg = self.config
