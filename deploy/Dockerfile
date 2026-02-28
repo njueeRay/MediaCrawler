@@ -18,9 +18,11 @@ FROM python:3.11-slim AS runtime
 # 默认 false：仅 WebUI + 微信 API 模式，镜像更小
 ARG ENABLE_PLAYWRIGHT=false
 
-# 系统依赖（Playwright 浏览器需要）
+# 系统依赖（curl + OpenCV 运行时 + Playwright 浏览器需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -33,6 +35,9 @@ RUN if [ "$ENABLE_PLAYWRIGHT" = "true" ]; then \
     else \
       pip install --no-cache-dir -r requirements-base.txt; \
     fi
+
+# WebSocket + uv 运行时依赖（两种模式都需要）
+RUN pip install --no-cache-dir "uvicorn[standard]" websockets wsproto uv
 COPY . .
 
 # 覆盖前端构建产物

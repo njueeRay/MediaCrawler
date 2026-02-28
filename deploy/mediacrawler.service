@@ -21,20 +21,19 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# ---- 修改为实际用户名 ----
 User=ubuntu
 Group=ubuntu
 
-# ---- 修改为项目实际路径 ----
-WorkingDirectory=/opt/mediacrawler
+WorkingDirectory=/home/ubuntu/MediaCrawler
 
-# ---- 环境变量从 .env 加载（必须存在） ----
-EnvironmentFile=/opt/mediacrawler/.env
+# 环境变量从 .env 加载
+EnvironmentFile=/home/ubuntu/MediaCrawler/.env
 
-# ---- 启动命令 ----
+# PATH 中注入 uv 和虚拟环境 bin
+Environment="PATH=/home/ubuntu/.local/bin:/home/ubuntu/MediaCrawler/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 # 注意: --workers 1 是必须的，APScheduler 使用进程内全局状态
-# 如果 uv 不在 PATH 中，替换为绝对路径: /home/ubuntu/.local/bin/uv
-ExecStart=uv run uvicorn api.main:app \
+ExecStart=/home/ubuntu/.local/bin/uv run uvicorn api.main:app \
     --host 0.0.0.0 \
     --port 8080 \
     --workers 1 \
