@@ -106,6 +106,9 @@ class PipelineContext:
         self.vars: Dict[str, Any] = {}
         self.aborted: bool = False
         self.step_results: List[Dict] = []
+        # M-2 dry-run
+        self.dry_run: bool = False
+        self.dry_run_report: List[str] = []
 
 
 # ─── 基类 ─────────────────────────────────────────────────────────────────────
@@ -195,6 +198,13 @@ class CrawlStep(PipelineStep):
 
         cfg = self.config
         platform = cfg.get("platform") or ctx.platform
+        if ctx.dry_run:
+            _msg = (f"[DRY-RUN] crawl: 平台={platform} 类型={cfg.get('crawler_type','search')}"
+                    f" 关键词={cfg.get('keywords','')!r}")
+            await log(_msg)
+            ctx.dry_run_report.append(_msg)
+            ctx.step_results.append({"step": "crawl", "platform": platform, "status": "dry_run"})
+            return
         retry_count = int(cfg.get("retry_count", 0))
         retry_delay = int(cfg.get("retry_delay", 30))
         timeout = int(cfg.get("timeout_seconds") or PLATFORM_CRAWL_TIMEOUTS.get(platform, 1800))
@@ -271,6 +281,13 @@ class SubscriptionCrawlStep(PipelineStep):
 
         cfg = self.config
         platform_filter = cfg.get("platform") or ctx.platform
+        if ctx.dry_run:
+            _msg = (f"[DRY-RUN] subscription_crawl: 平台过滤={platform_filter or '全部'}"
+                    f" 上限={cfg.get('limit', 0) or '不限'}")
+            await log(_msg)
+            ctx.dry_run_report.append(_msg)
+            ctx.step_results.append({"step": "subscription_crawl", "status": "dry_run"})
+            return
         timeout = int(cfg.get("timeout_seconds", 3600))
         limit = int(cfg.get("limit", 0) or 0)
 
@@ -402,6 +419,13 @@ class FeishuPushStep(PipelineStep):
         table_id = cfg.get("table_id") or os.environ.get("FEISHU_TABLE_ID", "").strip()
         if not table_id:
             await log("[feishu_push] WARNING: table_id 未配置（step config 和 FEISHU_TABLE_ID 均为空），将依赖 sync_to_feishu.py 默认值")
+
+        if ctx.dry_run:
+            _msg = f"[DRY-RUN] feishu_push: 会将平台={platform} 数据推送至飞书表={table_id or 'FEISHU_TABLE_ID'}"
+            await log(_msg)
+            ctx.dry_run_report.append(_msg)
+            ctx.step_results.append({"step": "feishu_push", "status": "dry_run"})
+            return
 
         cmd = [
             "uv", "run", "python", "sync_to_feishu.py",
@@ -649,6 +673,13 @@ class FeishuPushJsonStep(PipelineStep):
             await log("[feishu_push_json] ERROR: 缺少 table_id 或 json_columns")
             return
 
+        if ctx.dry_run:
+            _msg = f"[DRY-RUN] feishu_push_json: 会将 json_columns={json_columns!r} 推送至飞书表={table_id}"
+            await log(_msg)
+            ctx.dry_run_report.append(_msg)
+            ctx.step_results.append({"step": "feishu_push_json", "status": "dry_run"})
+            return
+
         # ── 1. 确定输入来源 ──────────────────────────────────────────────────
         # 优先级：config.snapshot_dataset > config.csv_path > ctx.vars[input]
         input_key = cfg.get("input", "feishu_pull_result")  # 对齐前端 feishu_pull 默认 output key
@@ -864,6 +895,13 @@ class FeishuUpdateRecordsStep(PipelineStep):
         if not raw_fields or not isinstance(raw_fields, dict):
             ctx.aborted = True
             await log("[feishu_update_records] ERROR: fields_to_set 必须为非空字典")
+            return
+
+        if ctx.dry_run:
+            _msg = f"[DRY-RUN] feishu_update_records: 会对飞书表={table_id} 回写字段={list(raw_fields.keys())}"
+            await log(_msg)
+            ctx.dry_run_report.append(_msg)
+            ctx.step_results.append({"step": "feishu_update_records", "status": "dry_run"})
             return
 
         input_key = cfg.get("input", "feishu_pull_result")

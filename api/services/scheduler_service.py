@@ -302,9 +302,28 @@ class SchedulerService:
         """检查执行是否被用户中断"""
         return abort_flags.get(execution_id, False)
 
+    async def dry_run_task(self, session: AsyncSession, task_id: int) -> Optional["TaskExecution"]:
+        """试运行（DRY-RUN）：创建执行记录，所有写入飞书的步骤跳过，仅记录预计操作"""
+        task = await self.get_task(session, task_id)
+        if not task:
+            return None
+        execution = TaskExecution(
+            task_id=task.id,
+            task_name=task.name,
+            status="running",
+            trigger_type="dry_run",
+        )
+        session.add(execution)
+        await session.flush()
+        await session.refresh(execution)
+        asyncio.create_task(
+            self._run_task(execution.id, task.task_type, task.platform, task.task_config or {}, dry_run=True)
+        )
+        return execution
+
     @staticmethod
     async def _run_task(
-        execution_id: int, task_type: str, platform: str, task_config: dict
+        execution_id: int, task_type: str, platform: str, task_config: dict, dry_run: bool = False
     ):
         """执行 crawl / sync / combo 任务并更新执行记录"""
         start_time = datetime.now()
@@ -328,6 +347,7 @@ class SchedulerService:
                 _pipeline_ctx = PipelineContext(
                     task_id=0, execution_id=execution_id, platform=platform or ""
                 )
+                _pipeline_ctx.dry_run = dry_run
                 # 将 abort 检查注入 pipeline context
                 _pipeline_ctx._abort_check = lambda: SchedulerService._is_aborted(execution_id)
 
@@ -342,7 +362,10 @@ class SchedulerService:
                 elif _pipeline_ctx.aborted:
                     status = "failed"
                     error_message = "管道中止（某步骤失败）"
-                result_summary.update({"pipeline_steps": _pipeline_ctx.step_results})
+                result_summary.update({
+                    "pipeline_steps": _pipeline_ctx.step_results,
+                    "dry_run_report": _pipeline_ctx.dry_run_report,
+                })
             # ────────────────────────────────────────────────────────────────
 
             if not _pipeline_mode and task_type in ("subscription_crawl", "subscription_combo"):

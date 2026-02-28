@@ -139,6 +139,53 @@ async def trigger_task(task_id: int, session: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/tasks/{task_id}/dry-run")
+async def dry_run_task(task_id: int, session: AsyncSession = Depends(get_db)):
+    """试运行：跳过所有飞书写入步骤，验证配置正确性"""
+    execution = await scheduler_service.dry_run_task(session, task_id)
+    if not execution:
+        raise HTTPException(404, "任务不存在")
+    return ok(
+        {"execution_id": execution.id, "status": execution.status},
+        message="试运行已触发",
+    )
+
+
+@router.get("/datasets/columns")
+async def get_dataset_columns(table_id: str = Query("")):
+    """根据飞书 table_id 查询最新快照数据集的列名（为 json_columns 选择提供候选）"""
+    from database.db_session import get_async_engine
+    from sqlalchemy import text
+    if not table_id:
+        return ok({"columns": []})
+    engine = get_async_engine("sqlite")
+    if not engine:
+        return ok({"columns": []})
+    try:
+        async with engine.connect() as conn:
+            r = await conn.execute(
+                text("SELECT dataset_name FROM feishu_dataset_latest WHERE source_table_id=:tid"),
+                {"tid": table_id},
+            )
+            row = r.fetchone()
+            if not row:
+                return ok({"columns": []})
+            dataset_name = row[0]
+            r2 = await conn.execute(
+                text("""
+                    SELECT DISTINCT json_each.key
+                    FROM feishu_record_snapshot, json_each(feishu_record_snapshot.data)
+                    WHERE feishu_record_snapshot.dataset_name = :ds
+                    LIMIT 300
+                """),
+                {"ds": dataset_name},
+            )
+            cols = [row[0] for row in r2.fetchall()]
+        return ok({"columns": cols, "dataset_name": dataset_name})
+    except Exception as exc:
+        return ok({"columns": [], "error": str(exc)})
+
+
 # ---------- Abort ----------
 
 @router.post("/executions/{execution_id}/abort")
@@ -222,14 +269,17 @@ async def get_execution_logs(
 
     summary = record.result_summary or {}
     pipeline_steps = summary.get("pipeline_steps", [])
+    dry_run_report = summary.get("dry_run_report", [])
 
     return ok({
         "execution_id": record.id,
         "status": record.status,
+        "trigger_type": record.trigger_type,
         "started_at": str(record.started_at) if record.started_at else None,
         "finished_at": str(record.finished_at) if record.finished_at else None,
         "duration_seconds": record.duration_seconds,
         "pipeline_steps": pipeline_steps,
+        "dry_run_report": dry_run_report,
         "log": text,
     })
 

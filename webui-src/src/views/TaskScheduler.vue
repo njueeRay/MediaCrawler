@@ -46,7 +46,7 @@
     </n-tabs>
 
     <!-- Execution Log Modal -->
-    <n-modal v-model:show="showExecLog" title="执行日志" preset="dialog" style="width: 900px">
+    <n-modal v-model:show="showExecLog" :title="execLogMeta.is_dry_run ? '[试运行] 日志' : '执行日志'" preset="dialog" style="width: 900px">
       <n-space vertical :size="10">
         <div class="text-xs text-gray-500">
           <span v-if="execLogMeta.execution_id">执行ID: {{ execLogMeta.execution_id }}</span>
@@ -60,17 +60,29 @@
           <n-tag
             v-for="(sr, si) in execLogMeta.pipeline_steps"
             :key="si"
-            :type="sr.status === 'ok' ? 'success' : sr.status === 'skipped' ? 'warning' : 'error'"
+            :type="sr.status === 'ok' ? 'success' : sr.status === 'dry_run' ? 'info' : sr.status === 'skipped' ? 'warning' : 'error'"
             size="small"
             round
           >
             {{ si + 1 }}. {{ sr.step }}
             <template v-if="sr.status === 'ok'">✓</template>
+            <template v-else-if="sr.status === 'dry_run'">~</template>
             <template v-else-if="sr.status === 'skipped'">⏭</template>
             <template v-else>✗</template>
             <template v-if="sr.duration_s != null">&nbsp;{{ sr.duration_s }}s</template>
           </n-tag>
         </div>
+        <!-- M-2: 试运行报告 -->
+        <n-alert
+          v-if="execLogMeta.dry_run_report && execLogMeta.dry_run_report.length"
+          type="info" :bordered="false" class="mt-1"
+          title="试运行预览（未执行任何飞书写入）"
+        >
+          <p
+            v-for="(line, li) in execLogMeta.dry_run_report" :key="li"
+            style="margin:2px 0;font-size:12px;font-family:monospace"
+          >{{ line }}</p>
+        </n-alert>
         <n-space v-if="_isPolling" align="center" :size="6" class="mt-1">
           <n-spin size="small" />
           <span class="text-xs" style="color: #2080f0">实时轮询中，每 2 秒刷新…</span>
@@ -273,14 +285,19 @@
               <n-input v-model:value="step.table_id" placeholder="tblYYYYYYY" />
             </n-form-item>
             <n-form-item label="JSON 列名" required>
-              <n-select
-                :value="step.json_columns ? step.json_columns.split(',').map((c:string)=>c.trim()).filter(Boolean) : []"
-                @update:value="(v: string[]) => step.json_columns = v.join(',')"
-                multiple filterable tag
-                placeholder="输入本地数据的 JSON 列名，回车确认（如 AI文本分析）"
-                style="width:100%"
-              />
-              <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">指本地数据集中内容为 JSON 字符串的列名，与目标飞书表列名无关</n-text>
+              <div style="width:100%">
+                <n-select
+                  :value="step.json_columns ? step.json_columns.split(',').map((c:string)=>c.trim()).filter(Boolean) : []"
+                  @update:value="(v: string[]) => step.json_columns = v.join(',')"
+                  multiple filterable tag
+                  :options="(_jsonColsCache[step.table_id] || []).map((c:string) => ({label:c, value:c}))"
+                  :loading="_jsonColsLoading[step.table_id]"
+                  placeholder="在此输入 JSON 列名，回车确认（如 AI文本分析）"
+                  style="width:100%"
+                  @focus="loadJsonColumnsForStep(step.table_id)"
+                />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">指本地数据集中内容为 JSON 字符串的列名，与目标飞书表列名无关</n-text>
+              </div>
             </n-form-item>
             <n-form-item label="主键列">
               <n-input v-model:value="step.json_primary" placeholder="默认: 记录ID" />
@@ -414,7 +431,7 @@ const editingTaskId = ref<number | null>(null)
 const dbNotReady = ref(false)
 const showExecLog = ref(false)
 const execLogText = ref('')
-const execLogMeta = ref<{ execution_id?: number; status?: string; started_at?: string; finished_at?: string; duration_seconds?: number; pipeline_steps?: any[] }>({})
+const execLogMeta = ref<{ execution_id?: number; status?: string; trigger_type?: string; started_at?: string; finished_at?: string; duration_seconds?: number; pipeline_steps?: any[]; dry_run_report?: string[]; is_dry_run?: boolean }>({  })
 const logRef = ref<any>(null)
 const _isPolling = ref(false)
 let _logPollTimer: ReturnType<typeof setInterval> | null = null
@@ -546,6 +563,25 @@ const outputFormatOps = [
   { label: 'CSV', value: 'csv' },
   { label: '两者都输出', value: 'both' },
 ]
+/** M-6: json_columns 动态列名缓存 */
+const _jsonColsCache = ref<Record<string, string[]>>({})
+const _jsonColsLoading = ref<Record<string, boolean>>({})
+
+async function loadJsonColumnsForStep(tableId: string) {
+  if (!tableId || _jsonColsCache.value[tableId] !== undefined) return
+  _jsonColsLoading.value[tableId] = true
+  try {
+    const { data } = await http.get('/scheduler/datasets/columns', { params: { table_id: tableId } })
+    const cols = data?.data?.columns || []
+    _jsonColsCache.value = { ..._jsonColsCache.value, [tableId]: cols }
+  } catch {
+    _jsonColsCache.value = { ..._jsonColsCache.value, [tableId]: [] }
+  } finally {
+    _jsonColsLoading.value[tableId] = false
+    _jsonColsLoading.value = { ..._jsonColsLoading.value }
+  }
+}
+
 /** M-1降级版：获取 idx 步骤的输出变量名（仅 feishu_pull） */
 function getStepOutput(idx: number): string {
   const s = pipelineSteps.value[idx]
@@ -880,10 +916,11 @@ const columns: DataTableColumn[] = [
     },
   },
   {
-    title: '操作', key: 'actions', width: 300,
+    title: '操作', key: 'actions', width: 340,
     render: (row: any) =>
       h(NSpace, { size: 'small' }, () => [
         h(NButton, { size: 'tiny', type: 'primary', onClick: () => triggerTask(row) }, () => '执行'),
+        h(NButton, { size: 'tiny', type: 'warning', onClick: () => dryRunTask(row) }, () => '试运行'),
         h(NButton, { size: 'tiny', type: 'info', onClick: () => openEdit(row) }, () => '编辑'),
         h(NButton, { size: 'tiny', onClick: () => toggleTask(row) }, () => row.is_active ? '禁用' : '启用'),
         h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteTask(row.id) }, () => '删除'),
@@ -894,8 +931,9 @@ const columns: DataTableColumn[] = [
 const execColumns: DataTableColumn[] = [
   { title: '任务', key: 'task_name', width: 160 },
   {
-    title: '触发', key: 'trigger_type', width: 60,
-    render: (row: any) => h(NTag, { size: 'small' }, () => row.trigger_type === 'manual' ? '手动' : '定时'),
+    title: '触发', key: 'trigger_type', width: 70,
+    render: (row: any) => h(NTag, { size: 'small', type: row.trigger_type === 'dry_run' ? 'warning' : 'default' as any }, () =>
+      row.trigger_type === 'manual' ? '手动' : row.trigger_type === 'dry_run' ? '试运行' : '定时'),
   },
   {
     title: '状态', key: 'status', width: 80,
@@ -931,10 +969,13 @@ async function _fetchExecLog(executionId: number): Promise<string | null> {
     execLogMeta.value = {
       execution_id: payload.execution_id,
       status: payload.status,
+      trigger_type: payload.trigger_type,
       started_at: payload.started_at,
       finished_at: payload.finished_at,
       duration_seconds: payload.duration_seconds,
       pipeline_steps: payload.pipeline_steps || [],
+      dry_run_report: payload.dry_run_report || [],
+      is_dry_run: payload.trigger_type === 'dry_run',
     }
     return payload.status || null
   } catch (e: any) {
@@ -1103,6 +1144,18 @@ async function updateTask() {
     loadStatus()
   } catch (e: any) {
     message.error(e.response?.data?.detail || e.message || '更新失败')
+  }
+}
+
+async function dryRunTask(row: any) {
+  try {
+    const { data } = await http.post(`/scheduler/tasks/${row.id}/dry-run`)
+    message.info(data.message || '试运行已触发')
+    loadExecutions()
+    const execId = data?.data?.execution_id
+    if (execId) openExecutionLog(execId)
+  } catch (e: any) {
+    message.error(e.message || '试运行触发失败')
   }
 }
 
