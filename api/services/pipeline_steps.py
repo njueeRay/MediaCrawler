@@ -515,6 +515,29 @@ class FeishuPullStep(PipelineStep):
                 ref_desc = f"dataset={dataset_name}"
 
             await log(f"[feishu_pull] OK output={output_key} format={output_format} {ref_desc}")
+            # 如果飞书源表当前无记录，主动记录警告（方便调试），但不中止 pipeline
+            if dataset_name:
+                from database.db_session import get_async_engine
+                from sqlalchemy import text as _text
+                try:
+                    _engine = get_async_engine("sqlite")
+                    if _engine:
+                        async with _engine.connect() as _conn:
+                            _row = await _conn.execute(
+                                _text(
+                                    "SELECT COUNT(*) FROM feishu_record_snapshot "
+                                    "WHERE dataset=:ds"
+                                ),
+                                {"ds": dataset_name},
+                            )
+                            _count = (_row.fetchone() or (0,))[0]
+                        if _count == 0:
+                            await log(
+                                f"[feishu_pull] ⚠️  飞书表共拉取 0 条记录"
+                                f"（table_id={table_id}），后续推送步骤将被跳过"
+                            )
+                except Exception:
+                    pass  # 计数失败不影响主流程
             ctx.step_results.append({
                 "step": "feishu_pull",
                 "status": "ok",

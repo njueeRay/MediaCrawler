@@ -885,10 +885,12 @@ def main():
                 _load_from_snapshot(args.snapshot_dataset, db_type=snap_db_type)
             )
             if not rows_from_snap:
-                raise RuntimeError(
-                    f"feishu_record_snapshot 中无数据 (dataset={args.snapshot_dataset!r})，"
-                    f"请确认 feishu_pull 步骤已成功执行且 --db-dataset 与此处一致"
+                logger.warning(
+                    "⚠️  feishu_record_snapshot 中无数据 (dataset=%r)，跳过推送"
+                    "（源飞书表当前为空或视图过滤后无记录，属正常情况）",
+                    args.snapshot_dataset,
                 )
+                return  # 0 行不是错误，直接成功退出
 
             rows_from_snap = _apply_range(rows_from_snap, args.range_start, args.range_end)
             ensure_manager_platform(manager, args.platform)
