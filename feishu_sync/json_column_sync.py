@@ -451,6 +451,33 @@ def _resolve_article_id_from_fields(fields: Dict[str, Any]) -> str:
     return ""
 
 
+def _query_cover_url_from_db(article_id: str) -> Optional[str]:
+    """从 SQLite 中查询 wechat_article.cover 字段，无本地图片时作为 fallback。"""
+    import sqlite3
+    try:
+        from config.db_config import sqlite_db_config
+        db_path = sqlite_db_config.get("db_path", "")
+    except Exception:
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "database", "sqlite_tables.db")
+
+    if not db_path or not os.path.isfile(db_path):
+        return None
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute(
+            "SELECT cover FROM wechat_article WHERE article_id = ? LIMIT 1",
+            (article_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0]:
+            return str(row[0]).strip()
+    except Exception as exc:
+        logger.debug("查询 SQLite cover 失败: article_id=%s - %s", article_id, exc)
+    return None
+
+
 def _attach_wechat_cover_images_by_article_id(
     manager: "FeishuSyncManager",
     formatted_records: List[Dict[str, Any]],
@@ -471,20 +498,35 @@ def _attach_wechat_cover_images_by_article_id(
             continue
 
         cover_images = WeChatDataFormatter.find_cover_images(str(article_id))
-        if not cover_images:
-            continue
 
         items = []
-        for image_path in cover_images:
-            if not os.path.isfile(image_path):
-                continue
-            try:
-                token = manager.image_uploader.upload_image(image_path)
-            except Exception as exc:
-                logger.error(f"封面上传失败: {image_path} - {exc}")
-                continue
-            if token:
-                items.append({"file_token": token, "name": os.path.basename(image_path)})
+        if cover_images:
+            # 优先使用本地已下载图片
+            for image_path in cover_images:
+                if not os.path.isfile(image_path):
+                    continue
+                try:
+                    token = manager.image_uploader.upload_image(image_path)
+                except Exception as exc:
+                    logger.error("封面上传失败(本地): %s - %s", image_path, exc)
+                    continue
+                if token:
+                    items.append({"file_token": token, "name": os.path.basename(image_path)})
+
+        if not items:
+            # Fallback：从 SQLite 取 cover URL 直接上传
+            cover_url = _query_cover_url_from_db(article_id)
+            if cover_url:
+                try:
+                    token = manager.image_uploader.upload_image_from_url(
+                        cover_url,
+                        file_name=f"cover_{article_id}.jpg",
+                    )
+                    if token:
+                        items.append({"file_token": token, "name": f"cover_{article_id}.jpg"})
+                        logger.debug("封面 URL 上传成功: article_id=%s", article_id)
+                except Exception as exc:
+                    logger.warning("封面 URL 上传失败: article_id=%s url=%s - %s", article_id, cover_url, exc)
 
         if items:
             existing = fields.get(cover_target_field)

@@ -352,6 +352,12 @@ def main() -> None:
 
     view_id = args.view_id or FeishuReadConfig.VIEW_ID or config.get("view_id") or None
 
+    # 若指定了 view_id，视图自带过滤/排序，显式 filter_info 会覆盖视图逻辑，
+    # 因此二者互斥：有 view_id 时忽略显式过滤参数。
+    if view_id and filter_info is not None:
+        logger.info("已指定 view_id=%s，忽略显式过滤参数（使用视图内置过滤）", view_id)
+        filter_info = None
+
     rows = manager.search_records(
         field_names=field_names or None,
         filter_info=filter_info,
