@@ -506,3 +506,12 @@ class FeishuRecordSnapshot(Base):
     feishu_record_id = Column(String(128), default='', index=True)
     fields_json = Column(Text)
     add_ts = Column(String(32), default='')
+
+
+class FeishuDatasetLatest(Base):
+    """每个飞书 table_id 的最新 feishu_pull dataset 索引（供跨任务引用）"""
+    __tablename__ = 'feishu_dataset_latest'
+    source_table_id = Column(String(128), primary_key=True)
+    dataset_name    = Column(String(192), nullable=False)
+    record_count    = Column(Integer, default=0)
+    updated_at      = Column(String(32), default='')

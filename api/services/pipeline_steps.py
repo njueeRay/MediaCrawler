@@ -455,10 +455,12 @@ class FeishuPullStep(PipelineStep):
 
         output_format = cfg.get("output_format", "sqlite")  # sqlite | csv | both
         platform = cfg.get("platform") or ctx.platform or "default"
-        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+        _now = datetime.now()
+        ts = _now.strftime("%Y%m%d%H%M%S") + f"{_now.microsecond // 1000:03d}"
 
-        # 生成唯一 dataset 名：用于 SQLite 中间层命名空间
-        safe_tid = table_id[:12].replace("-", "")
+        # 生成唯一 dataset 名：用于 SQLite 中间层命名空间（SHA1前8位避免截断碰撞）
+        import hashlib as _hashlib
+        safe_tid = _hashlib.sha1(table_id.encode()).hexdigest()[:8]
         dataset_name = f"pipe_{safe_tid}_{ts}"
 
         cmd = [
@@ -547,6 +549,57 @@ class FeishuPullStep(PipelineStep):
                             await log(f"[feishu_pull] 已提取 {_count} 条 feishu_record_id → 下游可回写")
                 except Exception as _exc:
                     await log(f"[feishu_pull] WARN: 提取 record_ids 失败: {_exc}")
+
+            # ── upsert feishu_dataset_latest（P0: 支持跨任务定位最新 dataset）─────────────
+            try:
+                from database.db_session import get_async_engine as _gae
+                from database.models import FeishuDatasetLatest as _FDL
+                from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+                _upsert_engine = _gae("sqlite")
+                if _upsert_engine:
+                    _rc = len((ctx.vars.get(output_key) or {}).get("record_ids") or [])
+                    async with _upsert_engine.begin() as _wconn:
+                        _ustmt = _sqlite_insert(_FDL).values(
+                            source_table_id=table_id,
+                            dataset_name=dataset_name,
+                            record_count=_rc,
+                            updated_at=datetime.now().isoformat(timespec="seconds"),
+                        ).on_conflict_do_update(
+                            index_elements=["source_table_id"],
+                            set_={"dataset_name": dataset_name,
+                                  "record_count": _rc,
+                                  "updated_at": datetime.now().isoformat(timespec="seconds")},
+                        )
+                        await _wconn.execute(_ustmt)
+                    await log(f"[feishu_pull] ✅ feishu_dataset_latest 已更新 table_id={table_id}")
+            except Exception as _uexc:
+                await log(f"[feishu_pull] WARN: feishu_dataset_latest upsert 失败: {_uexc}")
+
+            # ── P1: 清理旧 dataset（每个 table_id 只保留最近 keep=7 个）─────────────────
+            try:
+                from database.db_session import get_async_engine as _gae2
+                from sqlalchemy import text as _text2
+                _cl_engine = _gae2("sqlite")
+                _keep = int((ctx.vars.get(output_key) or {}).get("__keep_datasets", 7))
+                if _cl_engine:
+                    async with _cl_engine.begin() as _cl_conn:
+                        _dsrows = await _cl_conn.execute(
+                            _text2("SELECT DISTINCT dataset_name FROM feishu_record_snapshot "
+                                   "WHERE source_table_id=:tid ORDER BY dataset_name DESC"),
+                            {"tid": table_id},
+                        )
+                        _all_ds = [r[0] for r in _dsrows.fetchall()]
+                    _old_ds = _all_ds[_keep:]  # 保留最新 keep 个，删除其余
+                    if _old_ds:
+                        async with _cl_engine.begin() as _cl_conn2:
+                            await _cl_conn2.execute(
+                                _text2("DELETE FROM feishu_record_snapshot "
+                                       "WHERE source_table_id=:tid AND dataset_name IN :ds"),
+                                {"tid": table_id, "ds": tuple(_old_ds)},
+                            )
+                        await log(f"[feishu_pull] 🗑 已清理 {len(_old_ds)} 个旧 dataset（保留最新 {_keep} 个）")
+            except Exception as _clexc:
+                await log(f"[feishu_pull] WARN: 旧 dataset 清理失败: {_clexc}")
             ctx.step_results.append({
                 "step": "feishu_pull",
                 "status": "ok",
@@ -596,6 +649,28 @@ class FeishuPushJsonStep(PipelineStep):
             or ctx.vars.get(input_key)
         )
 
+        if not input_ref:
+            # Fallback: 查询 feishu_dataset_latest 索引表（支持跨任务引用）
+            _fbt = cfg.get("input_from_table_id", "") or cfg.get("table_id", "")
+            if _fbt:
+                try:
+                    from database.db_session import get_async_engine as _gae3
+                    from sqlalchemy import text as _text3
+                    _fb_engine = _gae3("sqlite")
+                    if _fb_engine:
+                        async with _fb_engine.connect() as _fc:
+                            _fbr = await _fc.execute(
+                                _text3("SELECT dataset_name, record_count FROM feishu_dataset_latest "
+                                       "WHERE source_table_id=:tid"),
+                                {"tid": _fbt},
+                            )
+                            _fbrow = _fbr.fetchone()
+                        if _fbrow:
+                            input_ref = {"format": "sqlite", "dataset": _fbrow[0]}
+                            await log(f"[feishu_push_json] 🔗 自动关联 feishu_dataset_latest："
+                                      f"dataset={_fbrow[0]} (record_count={_fbrow[1]})")
+                except Exception as _fbexc:
+                    await log(f"[feishu_push_json] WARN: fallback 查询失败: {_fbexc}")
         if not input_ref:
             ctx.aborted = True
             await log(
@@ -783,6 +858,46 @@ class FeishuUpdateRecordsStep(PipelineStep):
 
         input_key = cfg.get("input", "step3_csv")
         input_ref = ctx.vars.get(input_key)
+        # Fallback: 查询 feishu_dataset_latest 索引表（支持跨任务引用）
+        if not input_ref:
+            _fbt2 = cfg.get("input_from_table_id", "") or cfg.get("table_id", "")
+            if _fbt2:
+                try:
+                    from database.db_session import get_async_engine as _gae4
+                    from sqlalchemy import text as _text4
+                    _fb2_engine = _gae4("sqlite")
+                    if _fb2_engine:
+                        async with _fb2_engine.connect() as _fc2:
+                            _fbr2 = await _fc2.execute(
+                                _text4("SELECT dataset_name, record_count FROM feishu_dataset_latest "
+                                       "WHERE source_table_id=:tid"),
+                                {"tid": _fbt2},
+                            )
+                            _fbrow2 = _fbr2.fetchone()
+                        if _fbrow2:
+                            input_ref = {"format": "sqlite", "dataset": _fbrow2[0]}
+                            await log(f"[feishu_update_records] 🔗 自动关联 feishu_dataset_latest："
+                                      f"dataset={_fbrow2[0]} (record_count={_fbrow2[1]})")
+                            # 补充 record_ids
+                            try:
+                                from database.db_session import get_async_engine as _gae5
+                                from sqlalchemy import text as _text5
+                                _re = _gae5("sqlite")
+                                if _re:
+                                    async with _re.connect() as _rc2:
+                                        _rfb = await _rc2.execute(
+                                            _text5("SELECT feishu_record_id FROM feishu_record_snapshot "
+                                                   "WHERE dataset_name=:ds"),
+                                            {"ds": _fbrow2[0]},
+                                        )
+                                        _rids2 = [r[0] for r in _rfb.fetchall() if r[0]]
+                                    if _rids2:
+                                        input_ref["record_ids"] = _rids2
+                                        await log(f"[feishu_update_records] ✅ fallback 提取 {len(_rids2)} 条 record_id")
+                            except Exception as _riexc:
+                                await log(f"[feishu_update_records] WARN: fallback record_ids 提取失败: {_riexc}")
+                except Exception as _fbexc2:
+                    await log(f"[feishu_update_records] WARN: fallback 查询失败: {_fbexc2}")
         if not input_ref:
             ctx.aborted = True
             await log(
