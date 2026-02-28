@@ -580,7 +580,7 @@ class FeishuPullStep(PipelineStep):
                 from database.db_session import get_async_engine as _gae2
                 from sqlalchemy import text as _text2
                 _cl_engine = _gae2("sqlite")
-                _keep = int((ctx.vars.get(output_key) or {}).get("__keep_datasets", 7))
+                _keep = 7
                 if _cl_engine:
                     async with _cl_engine.begin() as _cl_conn:
                         _dsrows = await _cl_conn.execute(
@@ -591,11 +591,15 @@ class FeishuPullStep(PipelineStep):
                         _all_ds = [r[0] for r in _dsrows.fetchall()]
                     _old_ds = _all_ds[_keep:]  # 保留最新 keep 个，删除其余
                     if _old_ds:
+                        # aiosqlite 不支持 IN 绑定 tuple，用安全的占位符拼接（值均为程序生成）
+                        _ph = ",".join(f":d{_i}" for _i in range(len(_old_ds)))
+                        _params = {f"d{_i}": _ds for _i, _ds in enumerate(_old_ds)}
+                        _params["tid"] = table_id
                         async with _cl_engine.begin() as _cl_conn2:
                             await _cl_conn2.execute(
-                                _text2("DELETE FROM feishu_record_snapshot "
-                                       "WHERE source_table_id=:tid AND dataset_name IN :ds"),
-                                {"tid": table_id, "ds": tuple(_old_ds)},
+                                _text2(f"DELETE FROM feishu_record_snapshot "
+                                       f"WHERE source_table_id=:tid AND dataset_name IN ({_ph})"),
+                                _params,
                             )
                         await log(f"[feishu_pull] 🗑 已清理 {len(_old_ds)} 个旧 dataset（保留最新 {_keep} 个）")
             except Exception as _clexc:

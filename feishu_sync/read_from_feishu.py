@@ -281,6 +281,21 @@ async def save_rows_to_db(
     except Exception:
         pass  # 列已存在时 ALTER TABLE 报错，正常忽略
 
+    # 向后兼容迁移：确保 feishu_dataset_latest 表存在（create_all 不低版本安全养死问题）
+    try:
+        from sqlalchemy import text as _text_dl
+        async with engine.begin() as _mdl:
+            await _mdl.execute(_text_dl(
+                "CREATE TABLE IF NOT EXISTS feishu_dataset_latest ("
+                "source_table_id TEXT PRIMARY KEY, "
+                "dataset_name TEXT NOT NULL, "
+                "record_count INTEGER DEFAULT 0, "
+                "updated_at TEXT DEFAULT ''"
+                ")"
+            ))
+    except Exception:
+        pass
+
     AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
