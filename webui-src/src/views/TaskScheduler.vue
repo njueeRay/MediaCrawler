@@ -216,12 +216,38 @@
             <n-form-item label="视图 ID">
               <n-input v-model:value="step.view_id" placeholder="可空" />
             </n-form-item>
+            <n-form-item label="过滤逻辑">
+              <n-select v-model:value="step.filter_conjunction" :options="conjunctionOps" style="width:180px" />
+              <n-text depth="3" style="font-size:11px;margin-left:8px">多个过滤值之间的逻辑关系（默认 AND）</n-text>
+            </n-form-item>
+            <n-form-item label="输出格式">
+              <n-select v-model:value="step.output_format" :options="outputFormatOps" style="width:210px" />
+            </n-form-item>
+            <n-form-item label="输出变量名" required>
+              <div style="width:100%">
+                <n-input v-model:value="step.output" placeholder="feishu_pull_result" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">下游 feishu_push_json / feishu_update_records 通过此名称引用本步骤数据</n-text>
+              </div>
+            </n-form-item>
           </n-form>
         </template>
 
         <!-- feishu_push_json 配置 -->
         <template v-if="step.step === 'feishu_push_json'">
           <n-form label-placement="left" label-width="100" size="small">
+            <n-form-item label="输入引用" required>
+              <div style="width:100%">
+                <n-select
+                  v-if="getUpstreamOutputKeys(idx).length"
+                  v-model:value="step.input"
+                  :options="getUpstreamOutputKeys(idx)"
+                  filterable
+                  placeholder="选择上游 feishu_pull 的输出变量名"
+                />
+                <n-input v-else v-model:value="step.input" placeholder="feishu_pull_result" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">对应上游 feishu_pull 步骤设置的"输出变量名"</n-text>
+              </div>
+            </n-form-item>
             <n-form-item label="目标表 ID" required>
               <n-input v-model:value="step.table_id" placeholder="tblYYYYYYY" />
             </n-form-item>
@@ -256,8 +282,15 @@
             </n-form-item>
             <n-form-item label="输入引用" required>
               <div style="width:100%">
-                <n-input v-model:value="step.input" placeholder="step3_csv" />
-                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">上游步骤的输出键，对齐 feishu_pull 的“output”字段（流水线变量名）</n-text>
+                <n-select
+                  v-if="getUpstreamOutputKeys(idx).length"
+                  v-model:value="step.input"
+                  :options="getUpstreamOutputKeys(idx)"
+                  filterable
+                  placeholder="选择上游 feishu_pull 的输出变量名"
+                />
+                <n-input v-else v-model:value="step.input" placeholder="feishu_pull_result" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">请选择上游 feishu_pull 步骤的输出变量名（未设置时手动填写）</n-text>
               </div>
             </n-form-item>
             <n-form-item label="回写字段" required>
@@ -456,6 +489,23 @@ const dataTypeOptions = [
   { label: '笔记 (note)', value: 'note' },
 ]
 
+const conjunctionOps = [
+  { label: 'AND（全部匹配）', value: 'and' },
+  { label: 'OR（任意匹配）', value: 'or' },
+]
+const outputFormatOps = [
+  { label: 'SQLite（推荐，支持回写）', value: 'sqlite' },
+  { label: 'CSV', value: 'csv' },
+  { label: '两者都输出', value: 'both' },
+]
+/** 获取 stepIdx 之前所有 feishu_pull 步骤已设置的 output key，供下游选择 */
+function getUpstreamOutputKeys(stepIdx: number): Array<{ label: string; value: string }> {
+  return pipelineSteps.value
+    .slice(0, stepIdx)
+    .filter((s: any) => s.step === 'feishu_pull' && s.output)
+    .map((s: any) => ({ label: `${s.output}  ←  feishu_pull`, value: s.output }))
+}
+
 const filterOps = [
   { label: 'contains', value: 'contains' },
   { label: 'is', value: 'is' },
@@ -525,11 +575,11 @@ function createDefaultStep(stepType: string, platform?: string): any {
     case 'feishu_push':
       return { step: 'feishu_push', platform: p, data_type: dataType, table_id: '' }
     case 'feishu_pull':
-      return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', output: 'step3_csv' }
+      return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', filter_conjunction: 'and', output_format: 'sqlite', output: 'feishu_pull_result' }
     case 'feishu_push_json':
-      return { step: 'feishu_push_json', input: 'step3_csv', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
+      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
     case 'feishu_update_records':
-      return { step: 'feishu_update_records', table_id: '', input: 'step3_csv', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
+      return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
       return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
     default:

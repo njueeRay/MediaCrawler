@@ -24,16 +24,29 @@ Or: python -m api.main
 import asyncio
 import os
 import subprocess
+import sys
+
 import uvicorn
+
+# P0-3: Windows 下必须强制使用 ProactorEventLoop
+# 否则 asyncio.create_subprocess_exec 在 SelectorEventLoop 下返回 stdout=None
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .routers import (
-    crawler_router, data_router, websocket_router,
-    config_router, subscription_router, field_mapping_router,
-    feishu_router, scheduler_router, health_router,
+    config_router,
+    crawler_router,
+    data_router,
+    feishu_router,
+    field_mapping_router,
+    health_router,
+    scheduler_router,
+    subscription_router,
+    websocket_router,
 )
 
 app = FastAPI(
@@ -90,8 +103,8 @@ async def webui_startup():
     # ── 1. 建表 + 种子数据 ──────────────────────────────────────────
     try:
         import config as _cfg
-        from database.db_session import get_session, create_tables
         from api.services.webui_init import seed_default_mappings
+        from database.db_session import create_tables, get_session
 
         if _cfg.SAVE_DATA_OPTION not in ("csv", "json"):
             await create_tables(_cfg.SAVE_DATA_OPTION)
@@ -108,10 +121,11 @@ async def webui_startup():
     # P0 FIX: 每次重启后必须重新向 APScheduler 注册数据库中的活跃任务，
     #         否则任务记录存在于 DB 但实际不会被触发。
     try:
-        from api.services.scheduler_service import scheduler_service, _get_scheduler
+        from sqlalchemy import select
+
+        from api.services.scheduler_service import _get_scheduler, scheduler_service
         from database.db_session import get_session
         from database.webui_models import ScheduledTask
-        from sqlalchemy import select
 
         # 确保 APScheduler 已启动
         _get_scheduler()
@@ -157,8 +171,9 @@ async def health_check():
 @app.get("/api/dashboard")
 async def dashboard_data():
     """仪表盘数据聚合 — 爬虫状态 + 数据统计 + 订阅/调度概要"""
-    from api.services.crawler_manager import crawler_manager
     from pathlib import Path
+
+    from api.services.crawler_manager import crawler_manager
 
     # 爬虫状态
     crawler_status = crawler_manager.get_status()
@@ -200,9 +215,9 @@ async def dashboard_data():
     sub_stats = {"total": 0, "active": 0}
     scheduler_stats = {"active_tasks": 0, "total_executions": 0}
     try:
-        from database.db_session import get_session
-        from api.services.subscription_service import subscription_service
         from api.services.scheduler_service import scheduler_service
+        from api.services.subscription_service import subscription_service
+        from database.db_session import get_session
         async with get_session() as session:
             if session:
                 sub_stats = await subscription_service.get_stats(session)

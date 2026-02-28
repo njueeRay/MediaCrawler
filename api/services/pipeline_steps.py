@@ -28,11 +28,11 @@ task_config 示例（pipeline 模式）：
         "filter_field": "信息质量评估",
         "filter_operator": "contains",
         "filter_values": ["优质", "缺失但值得溯源"],
-        "output": "step3_csv"
+        "output": "feishu_pull_result"
       },
       {
         "step": "feishu_push_json",
-        "input": "step3_csv",
+        "input": "feishu_pull_result",
         "table_id": "tblYYY",
         "json_columns": "AI文本分析"
       }
@@ -153,7 +153,10 @@ class PipelineStep(ABC):
             env=env,
         )
 
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            await log("[subprocess] ERROR: proc.stdout is None — 可能是 Windows SelectorEventLoop 未切换为 ProactorEventLoop")
+            await proc.wait()
+            return 1
         while True:
             line = await proc.stdout.readline()
             if not line:
@@ -434,7 +437,7 @@ class FeishuPullStep(PipelineStep):
       filter_conjunction — and | or（默认 or）
       view_id         — 视图 ID（不填则使用默认视图）
       select_fields   — 返回字段（逗号分隔，不填则返回全部）
-      output          — 输出到 ctx.vars 的 key（默认 "step3_csv"，与 feishu_push_json input 默认值对齐）
+      output          — 输出到 ctx.vars 的 key（默认 "feishu_pull_result"，与 feishu_push_json input 默认值对齐）
       output_path     — 强制指定 CSV 输出路径（不填则自动生成，仅 csv/both 模式有效）
       output_format   — sqlite | csv | both（默认 sqlite）
                         sqlite: 仅写 feishu_record_snapshot，ctx.vars 存 dict
@@ -502,7 +505,7 @@ class FeishuPullStep(PipelineStep):
             ctx.aborted = True
             await log(f"[feishu_pull] ERROR exit_code={exit_code}")
         else:
-            output_key = cfg.get("output", "step3_csv")  # 与 feishu_push_json input 默认值对齐
+            output_key = cfg.get("output", "feishu_pull_result")  # 与 feishu_push_json input 默认值对齐
 
             if output_format == "csv":
                 # 向后兼容：字符串路径
@@ -552,9 +555,10 @@ class FeishuPullStep(PipelineStep):
 
             # ── upsert feishu_dataset_latest（P0: 支持跨任务定位最新 dataset）─────────────
             try:
+                from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
                 from database.db_session import get_async_engine as _gae
                 from database.models import FeishuDatasetLatest as _FDL
-                from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
                 _upsert_engine = _gae("sqlite")
                 if _upsert_engine:
                     _rc = len((ctx.vars.get(output_key) or {}).get("record_ids") or [])
@@ -577,8 +581,9 @@ class FeishuPullStep(PipelineStep):
 
             # ── P1: 清理旧 dataset（每个 table_id 只保留最近 keep=7 个）─────────────────
             try:
-                from database.db_session import get_async_engine as _gae2
                 from sqlalchemy import text as _text2
+
+                from database.db_session import get_async_engine as _gae2
                 _cl_engine = _gae2("sqlite")
                 _keep = 7
                 if _cl_engine:
@@ -620,7 +625,7 @@ class FeishuPushJsonStep(PipelineStep):
     自动识别 ctx.vars 中的输入格式：dict → SQLite 快照，str → CSV 路径（向后兼容）。
 
     config keys:
-      input           — 从 ctx.vars 读取引用的 key（默认 "step3_csv"，与 feishu_pull output 默认值对齐）
+      input           — 从 ctx.vars 读取引用的 key（默认 "feishu_pull_result"，与 feishu_pull output 默认值对齐）
       csv_path        — 直接指定 CSV 路径，强制 CSV 模式（优先级 > input）
       snapshot_dataset — 直接指定 dataset 名，强制 SQLite 模式（优先级 > input）
       table_id        — 目标飞书表 ID（必填）
@@ -646,7 +651,7 @@ class FeishuPushJsonStep(PipelineStep):
 
         # ── 1. 确定输入来源 ──────────────────────────────────────────────────
         # 优先级：config.snapshot_dataset > config.csv_path > ctx.vars[input]
-        input_key = cfg.get("input", "step3_csv")  # 对齐前端 feishu_pull 默认 output key
+        input_key = cfg.get("input", "feishu_pull_result")  # 对齐前端 feishu_pull 默认 output key
         input_ref = (
             cfg.get("snapshot_dataset")
             or cfg.get("csv_path")
@@ -658,8 +663,9 @@ class FeishuPushJsonStep(PipelineStep):
             _fbt = cfg.get("input_from_table_id", "") or cfg.get("table_id", "")
             if _fbt:
                 try:
-                    from database.db_session import get_async_engine as _gae3
                     from sqlalchemy import text as _text3
+
+                    from database.db_session import get_async_engine as _gae3
                     _fb_engine = _gae3("sqlite")
                     if _fb_engine:
                         async with _fb_engine.connect() as _fc:
@@ -831,7 +837,7 @@ class FeishuUpdateRecordsStep(PipelineStep):
 
     config keys:
       table_id       — 目标飞书表 ID（必填，通常与 feishu_pull 的 table_id 相同）
-      input          — 从 ctx.vars 读取 feishu_pull 输出的 key（默认 "step3_csv"）
+      input          — 从 ctx.vars 读取 feishu_pull 输出的 key（默认 "feishu_pull_result"）
       fields_to_set  — 要回写的字段字典（必填），示例：
                          {"已入库": true, "入库时间": "now", "状态": "已处理"}
                        魔法值：
@@ -860,15 +866,16 @@ class FeishuUpdateRecordsStep(PipelineStep):
             await log("[feishu_update_records] ERROR: fields_to_set 必须为非空字典")
             return
 
-        input_key = cfg.get("input", "step3_csv")
+        input_key = cfg.get("input", "feishu_pull_result")
         input_ref = ctx.vars.get(input_key)
         # Fallback: 查询 feishu_dataset_latest 索引表（支持跨任务引用）
         if not input_ref:
             _fbt2 = cfg.get("input_from_table_id", "") or cfg.get("table_id", "")
             if _fbt2:
                 try:
-                    from database.db_session import get_async_engine as _gae4
                     from sqlalchemy import text as _text4
+
+                    from database.db_session import get_async_engine as _gae4
                     _fb2_engine = _gae4("sqlite")
                     if _fb2_engine:
                         async with _fb2_engine.connect() as _fc2:
@@ -884,8 +891,11 @@ class FeishuUpdateRecordsStep(PipelineStep):
                                       f"dataset={_fbrow2[0]} (record_count={_fbrow2[1]})")
                             # 补充 record_ids
                             try:
-                                from database.db_session import get_async_engine as _gae5
                                 from sqlalchemy import text as _text5
+
+                                from database.db_session import (
+                                    get_async_engine as _gae5,
+                                )
                                 _re = _gae5("sqlite")
                                 if _re:
                                     async with _re.connect() as _rc2:
@@ -1053,7 +1063,7 @@ async def run_pipeline(
             await step.run(ctx, log)
         except Exception as exc:
             ctx.aborted = True
-            await log(f"[pipeline] EXCEPTION in {step_type}: {exc}")
+            await log(f"[pipeline] EXCEPTION in {step_type}: {type(exc).__name__}: {exc}")
             logger.exception(f"[Pipeline] Step {step_type} raised exception")
             break
 
