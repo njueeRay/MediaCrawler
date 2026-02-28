@@ -80,7 +80,8 @@ BROWSER_LAUNCH_TIMEOUT = _env("BROWSER_LAUNCH_TIMEOUT", 60, int)
 AUTO_CLOSE_BROWSER = _env("AUTO_CLOSE_BROWSER", True, bool)
 
 # 数据保存类型选项配置,支持六种类型：csv、db、json、sqlite、excel、postgres, 最好保存到DB，有排重的功能。
-SAVE_DATA_OPTION = _env("SAVE_DATA_OPTION", "csv")  # csv or db or json or sqlite or excel or postgres
+# WebUI 场景下推荐 sqlite（任务历史/订阅管理均依赖 DB session），如不配置 .env 则以此为默认值。
+SAVE_DATA_OPTION = _env("SAVE_DATA_OPTION", "sqlite")  # csv or db or json or sqlite or excel or postgres
 
 # 用户浏览器缓存的浏览器文件配置
 USER_DATA_DIR = _env("USER_DATA_DIR", "%s_user_data_dir")  # %s will be replaced by platform name

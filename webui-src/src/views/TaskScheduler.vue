@@ -54,7 +54,11 @@
           <span v-if="execLogMeta.started_at" class="ml-3">开始: {{ execLogMeta.started_at }}</span>
           <span v-if="execLogMeta.finished_at" class="ml-3">结束: {{ execLogMeta.finished_at }}</span>
         </div>
-        <n-log :log="execLogText" language="text" :rows="20" />
+        <n-space v-if="_isPolling" align="center" :size="6" class="mt-1">
+          <n-spin size="small" />
+          <span class="text-xs" style="color: #2080f0">实时轮询中，每 2 秒刷新…</span>
+        </n-space>
+        <n-log ref="logRef" :log="execLogText" language="text" :rows="22" />
       </n-space>
       <template #action>
         <n-button @click="showExecLog = false">关闭</n-button>
@@ -235,7 +239,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, onMounted } from 'vue'
+import { ref, h, onMounted, watch, nextTick } from 'vue'
 import { NTag, NButton, NSpace, useMessage, useDialog, NLog } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
 import { useRoute } from 'vue-router'
@@ -253,6 +257,26 @@ const dbNotReady = ref(false)
 const showExecLog = ref(false)
 const execLogText = ref('')
 const execLogMeta = ref<{ execution_id?: number; status?: string; started_at?: string; finished_at?: string }>({})
+const logRef = ref<any>(null)
+const _isPolling = ref(false)
+let _logPollTimer: ReturnType<typeof setInterval> | null = null
+
+function _stopLogPoll() {
+  if (_logPollTimer !== null) {
+    clearInterval(_logPollTimer)
+    _logPollTimer = null
+    _isPolling.value = false
+  }
+}
+
+// 关闭日志弹窗时自动停止轮询
+watch(showExecLog, (val) => { if (!val) _stopLogPoll() })
+
+// 日志内容更新时自动滚动到底部
+watch(execLogText, async () => {
+  await nextTick()
+  logRef.value?.scrollTo({ position: 'bottom' })
+})
 
 const schedulerStatus = ref({ running: false, active_tasks: 0, total_executions: 0, next_run: '' })
 const tasks = ref<any[]>([])
@@ -488,6 +512,8 @@ function buildTaskConfig(): any {
       if (s.keywords) clean.keywords = s.keywords
       if (s.creator_ids) clean.creator_ids = s.creator_ids
       if (s.timeout_seconds && s.timeout_seconds !== 1800) clean.timeout_seconds = s.timeout_seconds
+      if (s.retry_count && Number(s.retry_count) > 0) clean.retry_count = Number(s.retry_count)
+      if (s.retry_delay && Number(s.retry_delay) !== 30) clean.retry_delay = Number(s.retry_delay)
     }
     if (s.step === 'feishu_push') {
       if (s.data_type) clean.data_type = s.data_type
@@ -616,10 +642,7 @@ const execColumns: DataTableColumn[] = [
 
 // ─── API 调用 ────────────────────────────────────────────────────────────────
 
-async function openExecutionLog(executionId: number) {
-  execLogText.value = ''
-  execLogMeta.value = { execution_id: executionId }
-  showExecLog.value = true
+async function _fetchExecLog(executionId: number): Promise<string | null> {
   try {
     const { data } = await http.get(`/scheduler/executions/${executionId}/logs`)
     const payload = unwrapApiData<any>(data) || {}
@@ -630,8 +653,27 @@ async function openExecutionLog(executionId: number) {
       started_at: payload.started_at,
       finished_at: payload.finished_at,
     }
+    return payload.status || null
   } catch (e: any) {
     execLogText.value = `加载失败: ${e.message || e}`
+    return null
+  }
+}
+
+async function openExecutionLog(executionId: number) {
+  _stopLogPoll()
+  execLogText.value = ''
+  execLogMeta.value = { execution_id: executionId }
+  showExecLog.value = true
+  const status = await _fetchExecLog(executionId)
+  // 任务运行中：开启轮询，每 2 秒刷新一次，直到任务结束或弹窗关闭
+  if (status === 'running') {
+    _isPolling.value = true
+    _logPollTimer = setInterval(async () => {
+      if (!showExecLog.value) { _stopLogPoll(); return }
+      const s = await _fetchExecLog(executionId)
+      if (s && s !== 'running') _stopLogPoll()
+    }, 2000)
   }
 }
 
@@ -801,6 +843,9 @@ async function doTriggerTask(id: number) {
     const { data } = await http.post(`/scheduler/tasks/${id}/trigger`)
     message.success(data.message || '任务已触发')
     loadExecutions()
+    // 触发成功后自动打开日志弹窗
+    const execId = data?.data?.execution_id
+    if (execId) openExecutionLog(execId)
   } catch (e: any) {
     message.error(e.message || '触发失败')
   }

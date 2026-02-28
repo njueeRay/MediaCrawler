@@ -48,6 +48,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Type
 
+import config as _global_config
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -175,7 +177,7 @@ class CrawlStep(PipelineStep):
       creator_ids     — 创作者 ID 列表（creator 模式）
       limit           — 采集数量上限
       login_type      — cookie | phone（默认 cookie）
-      save_option     — json | csv | db（默认 json）
+      save_option     — json | csv | db | sqlite（不填则读 SAVE_DATA_OPTION 全局配置，默认 sqlite）
       headless        — 是否无头模式（默认 True）
       timeout_seconds — 等待超时（默认按平台自动选取）
       retry_count     — 失败重试次数（默认 0，XHS建议设为 2）
@@ -211,7 +213,7 @@ class CrawlStep(PipelineStep):
                 crawler_type=cfg.get("crawler_type", "search"),
                 keywords=cfg.get("keywords", ""),
                 creator_ids=cfg.get("creator_ids", ""),
-                save_option=cfg.get("save_option", "json"),
+                save_option=cfg.get("save_option") or _global_config.SAVE_DATA_OPTION,
                 headless=cfg.get("headless", True),
             )
             started = await crawler_manager.start(req)
@@ -317,7 +319,7 @@ class SubscriptionCrawlStep(PipelineStep):
                 login_type=crawl_cfg.get("login_type", "cookie"),
                 crawler_type="creator",
                 creator_ids=sub.creator_id,
-                save_option=crawl_cfg.get("save_option", "json"),
+                save_option=crawl_cfg.get("save_option") or _global_config.SAVE_DATA_OPTION,
                 headless=crawl_cfg.get("headless", True),
             )
             started = await crawler_manager.start(req)
@@ -431,7 +433,7 @@ class FeishuPullStep(PipelineStep):
       filter_conjunction — and | or（默认 or）
       view_id         — 视图 ID（不填则使用默认视图）
       select_fields   — 返回字段（逗号分隔，不填则返回全部）
-      output          — 输出到 ctx.vars 的 key（默认 "feishu_pull_csv"）
+      output          — 输出到 ctx.vars 的 key（默认 "step3_csv"，与 feishu_push_json input 默认值对齐）
       output_path     — 强制指定 CSV 输出路径（不填则自动生成，仅 csv/both 模式有效）
       output_format   — sqlite | csv | both（默认 sqlite）
                         sqlite: 仅写 feishu_record_snapshot，ctx.vars 存 dict
@@ -497,7 +499,7 @@ class FeishuPullStep(PipelineStep):
             ctx.aborted = True
             await log(f"[feishu_pull] ERROR exit_code={exit_code}")
         else:
-            output_key = cfg.get("output", "feishu_pull_csv")
+            output_key = cfg.get("output", "step3_csv")  # 与 feishu_push_json input 默认值对齐
 
             if output_format == "csv":
                 # 向后兼容：字符串路径
@@ -554,7 +556,7 @@ class FeishuPushJsonStep(PipelineStep):
     自动识别 ctx.vars 中的输入格式：dict → SQLite 快照，str → CSV 路径（向后兼容）。
 
     config keys:
-      input           — 从 ctx.vars 读取引用的 key（默认 "feishu_pull_csv"）
+      input           — 从 ctx.vars 读取引用的 key（默认 "step3_csv"，与 feishu_pull output 默认值对齐）
       csv_path        — 直接指定 CSV 路径，强制 CSV 模式（优先级 > input）
       snapshot_dataset — 直接指定 dataset 名，强制 SQLite 模式（优先级 > input）
       table_id        — 目标飞书表 ID（必填）
@@ -580,7 +582,7 @@ class FeishuPushJsonStep(PipelineStep):
 
         # ── 1. 确定输入来源 ──────────────────────────────────────────────────
         # 优先级：config.snapshot_dataset > config.csv_path > ctx.vars[input]
-        input_key = cfg.get("input", "feishu_pull_csv")
+        input_key = cfg.get("input", "step3_csv")  # 对齐前端 feishu_pull 默认 output key
         input_ref = (
             cfg.get("snapshot_dataset")
             or cfg.get("csv_path")
