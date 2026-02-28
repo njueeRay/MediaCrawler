@@ -68,6 +68,7 @@
             <template v-if="sr.status === 'ok'">✓</template>
             <template v-else-if="sr.status === 'skipped'">⏭</template>
             <template v-else>✗</template>
+            <template v-if="sr.duration_s != null">&nbsp;{{ sr.duration_s }}s</template>
           </n-tag>
         </div>
         <n-space v-if="_isPolling" align="center" :size="6" class="mt-1">
@@ -112,7 +113,8 @@
       </n-alert>
 
       <!-- 步骤列表 -->
-      <div v-for="(step, idx) in pipelineSteps" :key="idx" class="mb-3" style="border: 1px solid #e0e0e6; border-radius: 6px; padding: 12px;">
+      <template v-for="(step, idx) in pipelineSteps" :key="idx">
+      <div class="mb-2" style="border: 1px solid #e0e0e6; border-radius: 6px; padding: 12px;">
         <n-space align="center" class="mb-2">
           <n-tag size="small" :type="stepTagType(step.step) as any">步骤 {{ idx + 1 }}</n-tag>
           <n-select v-model:value="step.step" :options="availableStepOptions" style="width: 200px" size="small" @update:value="() => onStepTypeChange(idx)" />
@@ -357,6 +359,33 @@
         </template>
       </div>
 
+      <!-- M-1降级版：步骤间连通性指示 -->
+      <div v-if="idx < pipelineSteps.length - 1" class="step-connector">
+        <template v-if="getStepOutput(idx) && getStepInput(idx + 1)">
+          <div :class="['step-connector-line', getStepOutput(idx) === getStepInput(idx + 1) ? 'connected' : 'mismatch']">
+            <span class="connector-arrow">↓</span>
+            <n-tag
+              size="tiny"
+              :type="getStepOutput(idx) === getStepInput(idx + 1) ? 'success' : 'error'"
+              style="font-size:11px"
+            >
+              <template v-if="getStepOutput(idx) === getStepInput(idx + 1)">
+                ✓ {{ getStepOutput(idx) }}
+              </template>
+              <template v-else>
+                ⚠ {{ getStepOutput(idx) }} ≠ {{ getStepInput(idx + 1) }}
+              </template>
+            </n-tag>
+          </div>
+        </template>
+        <template v-else>
+          <div class="step-connector-line neutral">
+            <span class="connector-arrow">↓</span>
+          </div>
+        </template>
+      </div>
+      </template>
+
       <n-button dashed block size="small" @click="addStep">+ 添加步骤</n-button>
 
       <template #action>
@@ -517,6 +546,22 @@ const outputFormatOps = [
   { label: 'CSV', value: 'csv' },
   { label: '两者都输出', value: 'both' },
 ]
+/** M-1降级版：获取 idx 步骤的输出变量名（仅 feishu_pull） */
+function getStepOutput(idx: number): string {
+  const s = pipelineSteps.value[idx]
+  if (!s) return ''
+  if (s.step === 'feishu_pull') return s.output || ''
+  return ''
+}
+
+/** M-1降级版：获取 idx 步骤所需的输入变量名（feishu_push_json / feishu_update_records） */
+function getStepInput(idx: number): string {
+  const s = pipelineSteps.value[idx]
+  if (!s) return ''
+  if (['feishu_push_json', 'feishu_update_records'].includes(s.step)) return s.input || ''
+  return ''
+}
+
 /** 获取 stepIdx 之前所有 feishu_pull 步骤已设置的 output key，供下游选择 */
 function getUpstreamOutputKeys(stepIdx: number): Array<{ label: string; value: string }> {
   return pipelineSteps.value
@@ -1141,3 +1186,29 @@ onMounted(() => {
   }
 })
 </script>
+
+<style scoped>
+/* M-1 降级版：步骤间连通性指示 */
+.step-connector {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 18px;
+  margin: 2px 0;
+  min-height: 28px;
+}
+.step-connector-line {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.connector-arrow {
+  font-size: 15px;
+  line-height: 1;
+  color: #c0c4cc;
+  transition: color 0.2s;
+}
+.step-connector-line.connected .connector-arrow { color: #18a058; }
+.step-connector-line.mismatch  .connector-arrow { color: #d03050; }
+.step-connector-line.neutral   .connector-arrow { color: #c0c4cc; }
+</style>

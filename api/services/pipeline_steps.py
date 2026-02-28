@@ -1059,12 +1059,21 @@ async def run_pipeline(
             return
 
         step = cls(step_cfg)
+        _n_before = len(ctx.step_results)
+        _t0 = datetime.now()
         try:
             await step.run(ctx, log)
+            _dur = round((datetime.now() - _t0).total_seconds(), 1)
+            for _r in ctx.step_results[_n_before:]:
+                _r.setdefault("duration_s", _dur)
+            await log(f"[pipeline] ⏱ {step_type}: {_dur}s")
         except Exception as exc:
+            _dur = round((datetime.now() - _t0).total_seconds(), 1)
             ctx.aborted = True
             await log(f"[pipeline] EXCEPTION in {step_type}: {type(exc).__name__}: {exc}")
             logger.exception(f"[Pipeline] Step {step_type} raised exception")
+            for _r in ctx.step_results[_n_before:]:
+                _r.setdefault("duration_s", _dur)
             break
 
         if ctx.aborted:
