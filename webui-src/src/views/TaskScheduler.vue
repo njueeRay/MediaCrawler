@@ -46,13 +46,29 @@
     </n-tabs>
 
     <!-- Execution Log Modal -->
-    <n-modal v-model:show="showExecLog" title="执行日志" preset="dialog" style="width: 860px">
+    <n-modal v-model:show="showExecLog" title="执行日志" preset="dialog" style="width: 900px">
       <n-space vertical :size="10">
         <div class="text-xs text-gray-500">
           <span v-if="execLogMeta.execution_id">执行ID: {{ execLogMeta.execution_id }}</span>
           <span v-if="execLogMeta.status" class="ml-3">状态: {{ execLogMeta.status }}</span>
           <span v-if="execLogMeta.started_at" class="ml-3">开始: {{ execLogMeta.started_at }}</span>
           <span v-if="execLogMeta.finished_at" class="ml-3">结束: {{ execLogMeta.finished_at }}</span>
+          <span v-if="execLogMeta.duration_seconds != null" class="ml-3">耗时: {{ execLogMeta.duration_seconds }}s</span>
+        </div>
+        <!-- 步骤状态指示行 -->
+        <div v-if="execLogMeta.pipeline_steps && execLogMeta.pipeline_steps.length" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 0">
+          <n-tag
+            v-for="(sr, si) in execLogMeta.pipeline_steps"
+            :key="si"
+            :type="sr.status === 'ok' ? 'success' : sr.status === 'skipped' ? 'warning' : 'error'"
+            size="small"
+            round
+          >
+            {{ si + 1 }}. {{ sr.step }}
+            <template v-if="sr.status === 'ok'">✓</template>
+            <template v-else-if="sr.status === 'skipped'">⏭</template>
+            <template v-else>✗</template>
+          </n-tag>
         </div>
         <n-space v-if="_isPolling" align="center" :size="6" class="mt-1">
           <n-spin size="small" />
@@ -139,6 +155,9 @@
             </n-form-item>
             <n-form-item label="创作者ID" v-if="step.crawler_type === 'creator'">
               <n-input v-model:value="step.creator_ids" placeholder="逗号分隔" />
+            </n-form-item>
+            <n-form-item label="数量上限">
+              <n-input-number v-model:value="step.limit" :min="0" placeholder="0=不限" style="width:140px" />
             </n-form-item>
             <n-form-item label="超时(秒)">
               <n-input-number v-model:value="step.timeout_seconds" :min="60" style="width:140px" />
@@ -366,7 +385,7 @@ const editingTaskId = ref<number | null>(null)
 const dbNotReady = ref(false)
 const showExecLog = ref(false)
 const execLogText = ref('')
-const execLogMeta = ref<{ execution_id?: number; status?: string; started_at?: string; finished_at?: string }>({})
+const execLogMeta = ref<{ execution_id?: number; status?: string; started_at?: string; finished_at?: string; duration_seconds?: number; pipeline_steps?: any[] }>({})
 const logRef = ref<any>(null)
 const _isPolling = ref(false)
 let _logPollTimer: ReturnType<typeof setInterval> | null = null
@@ -568,6 +587,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
       return {
         step: 'crawl', platform: p,
         crawler_type: 'search', keywords: '', creator_ids: '',
+        limit: 0,
         timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 1800,
         retry_count: needRetry ? 2 : 0,
         retry_delay: 30,
@@ -697,6 +717,7 @@ function buildTaskConfig(): any {
       clean.crawler_type = s.crawler_type || 'search'
       if (s.keywords) clean.keywords = s.keywords
       if (s.creator_ids) clean.creator_ids = s.creator_ids
+      if (s.limit && Number(s.limit) > 0) clean.limit = Number(s.limit)
       if (s.timeout_seconds && s.timeout_seconds !== 1800) clean.timeout_seconds = s.timeout_seconds
       if (s.retry_count && Number(s.retry_count) > 0) clean.retry_count = Number(s.retry_count)
       if (s.retry_delay && Number(s.retry_delay) !== 30) clean.retry_delay = Number(s.retry_delay)
@@ -711,8 +732,10 @@ function buildTaskConfig(): any {
         clean.filter_field = s.filter_field
         clean.filter_operator = s.filter_operator
         clean.filter_values = s.filter_values
+        if (s.filter_conjunction && s.filter_conjunction !== 'and') clean.filter_conjunction = s.filter_conjunction
       }
       if (s.view_id) clean.view_id = s.view_id
+      if (s.output_format && s.output_format !== 'sqlite') clean.output_format = s.output_format
       if (s.output) clean.output = s.output
     }
     if (s.step === 'feishu_push_json') {
@@ -865,6 +888,8 @@ async function _fetchExecLog(executionId: number): Promise<string | null> {
       status: payload.status,
       started_at: payload.started_at,
       finished_at: payload.finished_at,
+      duration_seconds: payload.duration_seconds,
+      pipeline_steps: payload.pipeline_steps || [],
     }
     return payload.status || null
   } catch (e: any) {

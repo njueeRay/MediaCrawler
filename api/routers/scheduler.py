@@ -220,11 +220,16 @@ async def get_execution_logs(
     if tail and len(text) > tail:
         text = text[-tail:]
 
+    summary = record.result_summary or {}
+    pipeline_steps = summary.get("pipeline_steps", [])
+
     return ok({
         "execution_id": record.id,
         "status": record.status,
         "started_at": str(record.started_at) if record.started_at else None,
         "finished_at": str(record.finished_at) if record.finished_at else None,
+        "duration_seconds": record.duration_seconds,
+        "pipeline_steps": pipeline_steps,
         "log": text,
     })
 
