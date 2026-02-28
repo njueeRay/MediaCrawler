@@ -227,21 +227,13 @@
             </n-form-item>
             <n-form-item label="JSON 列名" required>
               <n-select
-                v-if="_fieldCacheState[step.table_id]?.length"
                 :value="step.json_columns ? step.json_columns.split(',').map((c:string)=>c.trim()).filter(Boolean) : []"
-                :options="_fieldCacheState[step.table_id]"
-                :loading="!!_fieldLoading[step.table_id]"
-                multiple filterable
-                placeholder="选择要展开的 JSON 列（可多选）"
-                style="width:100%"
                 @update:value="(v: string[]) => step.json_columns = v.join(',')"
+                multiple filterable tag
+                placeholder="输入本地数据的 JSON 列名，回车确认（如 AI文本分析）"
+                style="width:100%"
               />
-              <n-input
-                v-else
-                v-model:value="step.json_columns"
-                :loading="!!_fieldLoading[step.table_id]"
-                placeholder="例: AI文本分析（逗号分隔多列）"
-              />
+              <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">指本地数据集中内容为 JSON 字符串的列名，与目标飞书表列名无关</n-text>
             </n-form-item>
             <n-form-item label="主键列">
               <n-input v-model:value="step.json_primary" placeholder="默认: 记录ID" />
@@ -262,8 +254,11 @@
             <n-form-item label="目标表 ID" required>
               <n-input v-model:value="step.table_id" placeholder="tblXXXXXXX（通常与 feishu_pull 相同）" />
             </n-form-item>
-            <n-form-item label="输入引用">
-              <n-input v-model:value="step.input" placeholder="step3_csv（对齐 feishu_pull 的 output）" />
+            <n-form-item label="输入引用" required>
+              <div style="width:100%">
+                <n-input v-model:value="step.input" placeholder="step3_csv" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">上游步骤的输出键，对齐 feishu_pull 的“output”字段（流水线变量名）</n-text>
+              </div>
             </n-form-item>
             <n-form-item label="回写字段" required>
               <div style="width:100%">
@@ -398,7 +393,7 @@ const pipelineSteps = ref<any[]>([])
 
 watchEffect(() => {
   for (const step of pipelineSteps.value) {
-    if (['feishu_pull', 'feishu_push_json', 'feishu_update_records'].includes(step.step)) {
+    if (['feishu_pull', 'feishu_update_records'].includes(step.step)) {
       const tid = step.table_id as string | undefined
       if (tid && tid.startsWith('tbl') && tid.length > 6 && !_fieldCacheState.value[tid]) {
         void loadFields(tid)

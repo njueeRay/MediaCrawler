@@ -24,6 +24,8 @@ try:
         CreateAppTableFieldRequest,
         BatchCreateAppTableRecordRequest,
         BatchCreateAppTableRecordRequestBody,
+        BatchUpdateAppTableRecordRequest,
+        BatchUpdateAppTableRecordRequestBody,
         AppTableRecord,
         ListAppTableRecordRequest,
         ListAppTableFieldRequest,

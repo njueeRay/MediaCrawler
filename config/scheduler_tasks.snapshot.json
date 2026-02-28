@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-28T22:25:18",
+  "generated_at": "2026-03-01T00:18:09",
   "tasks": [
     {
       "id": 2,
@@ -41,12 +41,12 @@
           }
         ]
       },
-      "last_run_at": "2026-02-28T22:20:58.822849",
+      "last_run_at": "2026-02-28T23:27:48.848073",
       "next_run_at": null,
-      "run_count": 8,
+      "run_count": 10,
       "fail_count": 0,
       "created_at": "2026-02-27T17:04:25",
-      "updated_at": "2026-02-28T14:20:58"
+      "updated_at": "2026-02-28T15:27:48"
     },
     {
       "id": 4,
@@ -74,12 +74,49 @@
           }
         ]
       },
-      "last_run_at": "2026-02-28T08:00:03.542875",
+      "last_run_at": "2026-02-28T23:27:48.851078",
       "next_run_at": null,
-      "run_count": 1,
-      "fail_count": 4,
+      "run_count": 4,
+      "fail_count": 9,
       "created_at": "2026-02-27T23:59:35",
-      "updated_at": "2026-02-28T14:25:18"
+      "updated_at": "2026-02-28T15:28:10"
+    },
+    {
+      "id": 5,
+      "name": "测试回写",
+      "task_type": "subscription_combo",
+      "platform": "wechat",
+      "is_active": true,
+      "schedule_type": "interval",
+      "schedule_config": {
+        "hours": 6
+      },
+      "task_config": {
+        "pipeline": [
+          {
+            "step": "feishu_pull",
+            "platform": "wechat",
+            "table_id": "tblZn1GWLKNHiR11",
+            "view_id": "vewT7xrAZ5",
+            "output": "step3_csv"
+          },
+          {
+            "step": "feishu_update_records",
+            "table_id": "tblZn1GWLKNHiR11",
+            "input": "step3_csv",
+            "fields_to_set": {
+              "是否已入库": true
+            },
+            "skip_on_error": true
+          }
+        ]
+      },
+      "last_run_at": null,
+      "next_run_at": null,
+      "run_count": 0,
+      "fail_count": 0,
+      "created_at": "2026-02-28T16:11:11",
+      "updated_at": "2026-02-28T16:18:09"
     }
   ]
 }
