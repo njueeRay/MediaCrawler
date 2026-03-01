@@ -502,7 +502,70 @@ class FeishuPushStep(PipelineStep):
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
 
-        exit_code = await self._run_subprocess(cmd, ctx, log)
+        # 在 SyncHistory 中留下记录，使飞书同步页面可见
+        _history_id: Optional[int] = None
+        try:
+            from api.services.feishu_service import feishu_service
+            from database.db_session import get_session
+
+            async with get_session() as _sess:
+                if _sess:
+                    _hist = await feishu_service.start_sync_record(
+                        _sess,
+                        platform=platform,
+                        data_type=data_type,
+                        trigger_type="pipeline",
+                        task_execution_id=ctx.execution_id,
+                    )
+                    _history_id = _hist.id if _hist else None
+        except Exception as _he:
+            await log(f"[feishu_push] WARN: 创建同步历史记录失败: {_he}")
+
+        # 运行子进程并从日志中解析指标
+        _total = 0
+        _success = 0
+        _failed = 0
+        _err_lines: list = []
+
+        async def _log_and_parse(line: str) -> None:
+            nonlocal _total, _success, _failed
+            await log(line)
+            _l = line.lower()
+            if "成功写入" in line or "successfully wrote" in _l:
+                for w in line.split():
+                    if w.isdigit():
+                        _success = max(_success, int(w))
+                        break
+            if "失败" in line or "failed" in _l:
+                for w in line.split():
+                    if w.isdigit():
+                        _failed = max(_failed, int(w))
+                        break
+            if "条记录" in line or "records" in _l or "rows" in _l:
+                for w in line.split():
+                    if w.isdigit():
+                        _total = max(_total, int(w))
+                        break
+            if "error" in _l or "错误" in line:
+                _err_lines.append(line)
+
+        exit_code = await self._run_subprocess(cmd, ctx, _log_and_parse)
+
+        # 更新 SyncHistory 状态
+        if _history_id:
+            try:
+                from api.services.feishu_service import feishu_service
+                await feishu_service.finish_sync_record(
+                    _history_id,
+                    status="failed" if exit_code != 0 else "success",
+                    total_records=_total,
+                    success_count=_success,
+                    failed_count=_failed,
+                    error_message=("\n".join(_err_lines[-3:]) if exit_code != 0 else None),
+                )
+            except Exception as _ue:
+                await log(f"[feishu_push] WARN: 更新同步历史状态失败: {_ue}")
+
         if exit_code != 0:
             ctx.aborted = True
             await log(f"[feishu_push] ERROR exit_code={exit_code}")

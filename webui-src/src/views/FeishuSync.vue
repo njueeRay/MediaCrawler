@@ -60,7 +60,19 @@
     <!-- Sync History -->
     <n-card title="同步历史" size="small">
       <template #header-extra>
-        <n-button size="small" @click="loadHistory">刷新</n-button>
+        <n-space size="small">
+          <n-popconfirm
+            @positive-click="cleanupHistory('failed')"
+            positive-text="确认清理"
+            negative-text="取消"
+          >
+            <template #trigger>
+              <n-button size="small" type="warning">清理失败记录</n-button>
+            </template>
+            将删除 7 天内所有 failed 状态的历史记录，确认？
+          </n-popconfirm>
+          <n-button size="small" @click="loadHistory">刷新</n-button>
+        </n-space>
       </template>
 
       <n-spin :show="loading">
@@ -73,7 +85,7 @@
 
 <script setup lang="ts">
 import { ref, h, computed, onMounted, onUnmounted, watch } from 'vue'
-import { NTag, useMessage } from 'naive-ui'
+import { NTag, NPopconfirm, NSpace, useMessage } from 'naive-ui'
 import http, { isDbError, unwrapApiData } from '@/api'
 import DbRequiredAlert from '@/components/common/DbRequiredAlert.vue'
 
@@ -305,6 +317,19 @@ async function startSync() {
     message.error(e.message || '同步失败')
   } finally {
     syncing.value = false
+  }
+}
+
+async function cleanupHistory(status?: string) {
+  try {
+    const params: any = { keep_days: 7 }
+    if (status) params.status = status
+    const { data } = await http.delete('/feishu/history', { params })
+    const payload = unwrapApiData<any>(data) || {}
+    message.success(`已删除 ${payload.deleted ?? 0} 条记录`)
+    loadHistory()
+  } catch (e: any) {
+    message.error(e.message || '清理失败')
   }
 }
 

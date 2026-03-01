@@ -136,18 +136,17 @@ class FeishuService:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                bufsize=1,
+                text=False,          # 以二进制读取，避免 GBK/非 UTF-8 字节崩溃
+                bufsize=0,
                 cwd=str(PROJECT_ROOT),
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1"},
             )
 
             line_count = 0
             while process.poll() is None:
-                line = await loop.run_in_executor(None, process.stdout.readline)
+                raw = await loop.run_in_executor(None, process.stdout.readline)
+                line = raw.decode("utf-8", errors="replace").strip() if raw else ""
                 if line:
-                    line = line.strip()
                     log_lines.append(line)
                     line_count += 1
                     # 解析同步进度
@@ -194,8 +193,9 @@ class FeishuService:
 
             # 读取剩余输出
             if process.stdout:
-                remaining = await loop.run_in_executor(None, process.stdout.read)
-                if remaining:
+                raw_remaining = await loop.run_in_executor(None, process.stdout.read)
+                if raw_remaining:
+                    remaining = raw_remaining.decode("utf-8", errors="replace")
                     log_lines.extend(remaining.strip().splitlines())
 
             exit_code = process.returncode
@@ -351,6 +351,71 @@ class FeishuService:
             select(SyncHistory).where(SyncHistory.id == history_id)
         )
         return result.scalars().first()
+
+    # ------ Pipeline 轻量方法：不走子进程，仅创建/更新历史记录 ------
+
+    async def start_sync_record(
+        self,
+        session: AsyncSession,
+        *,
+        platform: str,
+        data_type: str,
+        trigger_type: str = "pipeline",
+        task_execution_id: Optional[int] = None,
+    ) -> Optional[SyncHistory]:
+        """创建一条 SyncHistory 记录（状态=running），不启动子进程，供 Pipeline 步骤使用。"""
+        try:
+            record = SyncHistory(
+                platform=platform,
+                data_type=data_type,
+                trigger_type=trigger_type,
+                task_execution_id=task_execution_id,
+                status="running",
+            )
+            session.add(record)
+            await session.flush()
+            await session.refresh(record)
+            return record
+        except Exception as e:
+            logger.warning("[FeishuService] start_sync_record failed: %s", e)
+            return None
+
+    async def finish_sync_record(
+        self,
+        history_id: int,
+        *,
+        status: str = "success",
+        total_records: int = 0,
+        success_count: int = 0,
+        failed_count: int = 0,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """更新 SyncHistory 记录为完成状态，供 Pipeline 步骤使用。耗时自动从 started_at 计算。"""
+        try:
+            from database.db_session import get_session
+
+            async with get_session() as session:
+                if not session:
+                    return
+                result = await session.execute(
+                    select(SyncHistory).where(SyncHistory.id == history_id)
+                )
+                record = result.scalars().first()
+                if record:
+                    now = datetime.now()
+                    record.status = status
+                    record.total_records = total_records
+                    record.success_count = success_count
+                    record.failed_count = failed_count
+                    record.error_message = error_message
+                    record.finished_at = now
+                    if record.started_at:
+                        record.duration_seconds = round(
+                            (now - record.started_at).total_seconds(), 1
+                        )
+                    await session.commit()
+        except Exception as e:
+            logger.warning("[FeishuService] finish_sync_record failed: %s", e)
 
 
 feishu_service = FeishuService()
