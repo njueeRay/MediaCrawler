@@ -492,7 +492,7 @@ class FeishuPushStep(PipelineStep):
             "--data-type", data_type,
         ]
         if table_id:
-            cmd += ["--table-id", table_id]
+            cmd += ["--append-table-id", table_id]
         batch = cfg.get("batch_size")
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
