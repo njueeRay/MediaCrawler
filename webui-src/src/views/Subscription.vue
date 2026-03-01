@@ -104,6 +104,31 @@
           >
             批量采集({{ checkedRowKeys.length }})
           </n-button>
+          <n-button
+            v-if="checkedRowKeys.length"
+            size="small"
+            :loading="batchToggling"
+            @click="batchToggleActive(false)"
+          >
+            批量暂停
+          </n-button>
+          <n-button
+            v-if="checkedRowKeys.length"
+            size="small"
+            :loading="batchToggling"
+            @click="batchToggleActive(true)"
+          >
+            批量恢复
+          </n-button>
+          <n-button
+            v-if="checkedRowKeys.length"
+            size="small"
+            type="error"
+            :loading="batchDeleting"
+            @click="batchDeleteSubs"
+          >
+            批量删除({{ checkedRowKeys.length }})
+          </n-button>
           <n-select
             v-model:value="filterPlatform"
             :options="[{ label: '全部平台', value: '' }, ...platformOptions]"
@@ -177,6 +202,8 @@ const batchCrawling = ref(false)
 const checkedRowKeys = ref<number[]>([])
 const crawlStatusMap = ref<Record<number, { status: string; message: string; updated_at: string }>>({})
 let crawlStatusTimer: any = null
+const batchToggling = ref(false)
+const batchDeleting = ref(false)
 
 const searchPlatform = ref('bili')
 const searchKeyword = ref('')
@@ -328,6 +355,47 @@ async function batchTriggerCrawl() {
     message.error(e.message || '批量采集失败')
   } finally {
     batchCrawling.value = false
+  }
+}
+
+async function batchToggleActive(isActive: boolean) {
+  if (!checkedRowKeys.value.length) return
+  batchToggling.value = true
+  let ok = 0, fail = 0
+  try {
+    await Promise.all(checkedRowKeys.value.map(async (id) => {
+      try {
+        await http.put(`/subscribe/${id}`, { is_active: isActive })
+        ok++
+      } catch { fail++ }
+    }))
+    message.success(`${isActive ? '恢复' : '暂停'}成功 ${ok} 个${fail ? `，${fail} 个失败` : ''}`)
+    checkedRowKeys.value = []
+    loadSubscriptions()
+  } finally {
+    batchToggling.value = false
+  }
+}
+
+async function batchDeleteSubs() {
+  if (!checkedRowKeys.value.length) return
+  const count = checkedRowKeys.value.length
+  if (!window.confirm(`确认删除选中的 ${count} 个订阅？此操作不可恢复。`)) return
+  batchDeleting.value = true
+  let ok = 0, fail = 0
+  try {
+    await Promise.all(checkedRowKeys.value.map(async (id) => {
+      try {
+        await http.delete(`/subscribe/${id}`)
+        ok++
+      } catch { fail++ }
+    }))
+    message.success(`已删除 ${ok} 个${fail ? `，${fail} 个失败` : ''}`)
+    checkedRowKeys.value = []
+    loadSubscriptions()
+    loadStats()
+  } finally {
+    batchDeleting.value = false
   }
 }
 

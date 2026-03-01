@@ -30,6 +30,14 @@
             @update:value="loadData"
           />
           <n-button @click="loadData" size="small">刷新</n-button>
+          <n-button
+            v-if="checkedFileKeys.length"
+            size="small"
+            type="error"
+            @click="batchDeleteFiles"
+          >
+            删除所选({{ checkedFileKeys.length }})
+          </n-button>
         </n-space>
       </template>
 
@@ -41,6 +49,7 @@
           :data="filteredDataFiles"
           size="small"
           :row-key="(r: any) => r.path || r.table"
+          v-model:checked-row-keys="checkedFileKeys"
         />
       </n-spin>
 
@@ -49,13 +58,23 @@
         <n-divider />
         <n-space justify="space-between" align="center" style="margin-bottom: 8px">
           <span class="text-sm font-medium">文件数据 <n-tag size="small" type="info">file</n-tag></span>
-          <n-select
-            v-model:value="fileType"
-            :options="typeOptions"
-            placeholder="文件类型"
-            style="width: 120px"
-            @update:value="loadFileData"
-          />
+          <n-space>
+            <n-select
+              v-model:value="fileType"
+              :options="typeOptions"
+              placeholder="文件类型"
+              style="width: 120px"
+              @update:value="loadFileData"
+            />
+            <n-button
+              v-if="checkedFileKeys.length"
+              size="small"
+              type="error"
+              @click="batchDeleteFiles"
+            >
+              删除所选({{ checkedFileKeys.length }})
+            </n-button>
+          </n-space>
         </n-space>
         <n-spin :show="fileLoading">
           <n-empty v-if="!fileLoading && !filteredFileDataList.length" description="暂无文件数据" />
@@ -65,6 +84,7 @@
             :data="filteredFileDataList"
             size="small"
             :row-key="(r: any) => r.path"
+            v-model:checked-row-keys="checkedFileKeys"
           />
         </n-spin>
       </template>
@@ -104,7 +124,7 @@
 
 <script setup lang="ts">
 import { ref, h, onMounted, computed } from 'vue'
-import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
+import { NButton, NTag, NSpace, NPopconfirm, useMessage } from 'naive-ui'
 import type { DataTableColumn } from 'naive-ui'
 import http, { unwrapApiData } from '@/api'
 
@@ -126,6 +146,40 @@ const isDbMode = computed(() => ['sqlite', 'db', 'postgres'].includes((saveMode.
 // File data for mixed mode (DB mode also shows files)
 const fileDataList = ref<any[]>([])
 const fileLoading = ref(false)
+const checkedFileKeys = ref<string[]>([])
+
+async function deleteFile(path: string) {
+  try {
+    await http.delete(`/data/files/${encodeURIComponent(path)}`)
+    message.success('已删除')
+    loadData()
+    loadStats()
+    if (isDbMode.value) loadFileData()
+  } catch (e: any) {
+    message.error(e.message || '删除失败')
+  }
+}
+
+async function batchDeleteFiles() {
+  if (!checkedFileKeys.value.length) return
+  try {
+    const { data } = await http.post('/data/files/batch-delete', { paths: checkedFileKeys.value })
+    const payload = unwrapApiData<any>(data) || {}
+    const deleted = (payload.deleted || []).length
+    const failed = (payload.failed || []).length
+    if (failed) {
+      message.warning(`已删除 ${deleted} 个，${failed} 个失败`)
+    } else {
+      message.success(`已删除 ${deleted} 个文件`)
+    }
+    checkedFileKeys.value = []
+    loadData()
+    loadStats()
+    if (isDbMode.value) loadFileData()
+  } catch (e: any) {
+    message.error(e.message || '批量删除失败')
+  }
+}
 
 // A-14: 过滤后的数据表
 const filteredDataFiles = computed(() => {
@@ -173,6 +227,7 @@ const typeOptions = [
 ]
 
 const fileColumns: DataTableColumn[] = [
+  { type: 'selection', width: 50 },
   { title: '文件名', key: 'name', ellipsis: { tooltip: true } },
   {
     title: '平台',
@@ -203,11 +258,15 @@ const fileColumns: DataTableColumn[] = [
   {
     title: '操作',
     key: 'actions',
-    width: 140,
+    width: 180,
     render: (row: any) =>
       h(NSpace, { size: 'small' }, () => [
         h(NButton, { size: 'tiny', onClick: () => previewData(row) }, () => '预览'),
         h(NButton, { size: 'tiny', type: 'primary', tag: 'a', href: `/api/data/download/${encodeURIComponent(row.path)}`, target: '_blank' } as any, () => '下载'),
+        h(NPopconfirm, { onPositiveClick: () => deleteFile(row.path) }, {
+          default: () => `确认删除 "${row.name}"？此操作不可恢复。`,
+          trigger: () => h(NButton, { size: 'tiny', type: 'error' }, () => '删除'),
+        }),
       ]),
   },
 ]

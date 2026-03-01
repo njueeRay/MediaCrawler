@@ -24,6 +24,7 @@ from typing import Optional, List, Dict
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from api.schemas.common import ok
 
 router = APIRouter(prefix="/data", tags=["data"])
@@ -187,6 +188,52 @@ async def download_file(file_path: str):
         filename=full_path.name,
         media_type="application/octet-stream"
     )
+
+
+class BatchDeleteRequest(BaseModel):
+    paths: List[str]
+
+
+def _safe_resolve(file_path: str) -> Path:
+    """Resolve path, raise 403 if outside DATA_DIR."""
+    full_path = DATA_DIR / file_path
+    try:
+        full_path.resolve().relative_to(DATA_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return full_path
+
+
+@router.delete("/files/{file_path:path}")
+async def delete_file(file_path: str):
+    """Delete a single data file."""
+    full_path = _safe_resolve(file_path)
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not full_path.is_file():
+        raise HTTPException(status_code=400, detail="Not a file")
+    full_path.unlink()
+    return ok({"deleted": file_path})
+
+
+@router.post("/files/batch-delete")
+async def batch_delete_files(body: BatchDeleteRequest):
+    """Delete multiple data files."""
+    deleted: List[str] = []
+    failed: List[dict] = []
+    for p in body.paths:
+        try:
+            fp = _safe_resolve(p)
+            if not fp.exists() or not fp.is_file():
+                failed.append({"path": p, "error": "not found"})
+                continue
+            fp.unlink()
+            deleted.append(p)
+        except HTTPException as e:
+            failed.append({"path": p, "error": e.detail})
+        except Exception as e:
+            failed.append({"path": p, "error": str(e)})
+    return ok({"deleted": deleted, "failed": failed})
 
 
 @router.get("/stats")

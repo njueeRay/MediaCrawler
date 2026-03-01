@@ -35,6 +35,7 @@
             <n-space>
               <n-select v-model:value="execFilter.status" :options="execStatusOptions" placeholder="状态" style="width: 120px" clearable @update:value="loadExecutions" />
               <n-button size="small" @click="loadExecutions">刷新</n-button>
+              <n-button size="small" type="warning" @click="cleanupExecutions">清理旧记录</n-button>
             </n-space>
           </template>
           <n-spin :show="execLoading">
@@ -1474,6 +1475,25 @@ async function loadExecutions() {
   } finally {
     execLoading.value = false
   }
+}
+
+async function cleanupExecutions() {
+  dialog.warning({
+    title: '清理执行记录',
+    content: '将删除 7 天前已完成/失败/取消的执行记录。确认继续？',
+    positiveText: '确认清理',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const { data } = await http.delete('/scheduler/executions', { params: { before_days: 7 } })
+        const payload = unwrapApiData<any>(data) || {}
+        message.success(`已清理 ${payload.deleted ?? 0} 条记录`)
+        loadExecutions()
+      } catch (e: any) {
+        message.error(e.message || '清理失败')
+      }
+    },
+  })
 }
 
 async function createTask() {

@@ -442,3 +442,24 @@ async def apply_template(
         "task_config": tmpl.task_config or {},
         "suggested_name": f"{tmpl.name} 副本",
     })
+
+
+# ---------- Execution History Cleanup ----------
+
+@router.delete("/executions")
+async def cleanup_executions(
+    before_days: int = Query(7, ge=1, le=365),
+    session: AsyncSession = Depends(get_db),
+):
+    """删除 N 天前（默认 7 天）已完成/失败/取消的执行记录。"""
+    from datetime import timedelta
+    from sqlalchemy import delete as sql_delete
+
+    cutoff = datetime.now() - timedelta(days=before_days)
+    stmt = sql_delete(TaskExecution).where(
+        TaskExecution.started_at < cutoff,
+        TaskExecution.status.in_(["success", "failed", "cancelled"]),
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return ok({"deleted": result.rowcount, "before_days": before_days})
