@@ -1,0 +1,67 @@
+# MediaCrawler WebUI API — systemd 服务单元文件
+#
+# ─── 安装步骤 ───────────────────────────────────────────────────────────────
+# 1. 确保项目已部署到 /opt/mediacrawler（或修改下方路径）
+# 2. 创建专用系统用户（可选，推荐）：
+#      sudo useradd --system --home /opt/mediacrawler --shell /usr/sbin/nologin mediacrawler
+#      sudo chown -R mediacrawler:mediacrawler /opt/mediacrawler
+# 3. 复制本文件：
+#      sudo cp deploy/mediacrawler-api.service /etc/systemd/system/mediacrawler-api.service
+# 4. 重新加载并启动：
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now mediacrawler-api
+# 5. 查看状态/日志：
+#      sudo systemctl status mediacrawler-api
+#      sudo journalctl -u mediacrawler-api -f
+# ────────────────────────────────────────────────────────────────────────────
+
+[Unit]
+Description=MediaCrawler WebUI API Server
+Documentation=https://github.com/NanmiCoder/MediaCrawler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mediacrawler
+Group=mediacrawler
+
+# 项目根目录（请根据实际部署路径修改）
+WorkingDirectory=/opt/mediacrawler
+
+# 环境变量文件（从 .env 加载飞书 Token、数据库配置等）
+EnvironmentFile=/opt/mediacrawler/.env
+
+# ─── 方案 A：使用 uv（推荐，自动管理虚拟环境）───
+ExecStart=/usr/local/bin/uv run python -m uvicorn api.main:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1
+
+# ─── 方案 B：使用手动创建的 .venv（如不使用 uv）───
+# ExecStart=/opt/mediacrawler/.venv/bin/python -m uvicorn api.main:app \
+#     --host 0.0.0.0 \
+#     --port 8080 \
+#     --workers 1
+
+# 进程管理
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+KillMode=mixed
+KillSignal=SIGTERM
+
+# 日志（通过 journalctl -u mediacrawler-api 查看）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediacrawler-api
+
+# 安全加固（按需开启）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mediacrawler/data /opt/mediacrawler/browser_data /opt/mediacrawler/cache /opt/mediacrawler/config /opt/mediacrawler/database
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

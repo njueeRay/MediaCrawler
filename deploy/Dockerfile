@@ -38,10 +38,20 @@ RUN if [ "$ENABLE_PLAYWRIGHT" = "true" ]; then \
 
 # WebSocket + uv 运行时依赖（两种模式都需要）
 RUN pip install --no-cache-dir "uvicorn[standard]" websockets wsproto uv
+
+# 创建非 root 运行用户（最小权限原则）
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
 COPY . .
 
 # 覆盖前端构建产物
 COPY --from=frontend /app/api/webui/ /app/api/webui/
+
+# 创建运行时目录并授权（data / browser_data 应挂载为 volume）
+RUN mkdir -p /app/data /app/browser_data /app/cache && \
+    chown -R appuser:appgroup /app
+
+USER appuser
 
 # 环境变量（可通过 docker-compose 或 -e 覆盖）
 ENV PYTHONUNBUFFERED=1

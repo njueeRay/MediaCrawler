@@ -141,6 +141,7 @@ class ScheduledTask(Base):
     executions = relationship(
         "TaskExecution",
         back_populates="task",
+        cascade="all, delete-orphan",
         order_by="TaskExecution.started_at.desc()",
     )
 

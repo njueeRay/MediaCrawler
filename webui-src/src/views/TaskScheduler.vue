@@ -106,15 +106,45 @@
         <n-form-item label="平台">
           <n-select v-model:value="newTask.platform" :options="platformOptions" clearable @update:value="onPlatformChange" />
         </n-form-item>
-        <n-form-item label="调度类型">
-          <n-select v-model:value="newTask.schedule_type" :options="scheduleTypeOptions" />
+        <n-form-item label="调度方式">
+          <n-select v-model:value="schedulePreset" :options="schedulePresetOptions" style="width:220px" />
         </n-form-item>
-        <n-form-item label="间隔(小时)" v-if="newTask.schedule_type === 'interval'">
-          <n-input-number v-model:value="intervalHours" :min="1" />
+        <!-- 每天：固定时间 -->
+        <n-form-item label="执行时间" v-if="schedulePreset === 'daily'">
+          <n-space align="center" :size="4">
+            <n-select v-model:value="dailyTime.hour" :options="hourOptions" style="width:90px" />
+            <span class="text-gray-400">时</span>
+            <n-select v-model:value="dailyTime.minute" :options="minuteOptions" style="width:80px" />
+            <span class="text-gray-400">分</span>
+          </n-space>
         </n-form-item>
-        <n-form-item label="Cron表达式" v-if="newTask.schedule_type === 'cron'">
-          <n-input v-model:value="cronExpr" placeholder="例: 0 14 * * *（每天14:00）" />
+        <!-- 每周：指定星期+时间 -->
+        <template v-if="schedulePreset === 'weekly'">
+          <n-form-item label="星期">
+            <n-select v-model:value="weeklyDays" :options="weekdayOptions" multiple style="width:300px" placeholder="选择星期（可多选）" />
+          </n-form-item>
+          <n-form-item label="执行时间">
+            <n-space align="center" :size="4">
+              <n-select v-model:value="weeklyTime.hour" :options="hourOptions" style="width:90px" />
+              <span class="text-gray-400">时</span>
+              <n-select v-model:value="weeklyTime.minute" :options="minuteOptions" style="width:80px" />
+              <span class="text-gray-400">分</span>
+            </n-space>
+          </n-form-item>
+        </template>
+        <!-- 每隔N小时 -->
+        <n-form-item label="间隔(小时)" v-if="schedulePreset === 'hourly'">
+          <n-input-number v-model:value="intervalHours" :min="1" :max="168" />
+        </n-form-item>
+        <!-- 自定义 Cron -->
+        <n-form-item label="Cron表达式" v-if="schedulePreset === 'custom'">
+          <n-input v-model:value="cronExpr" placeholder="例: 0 14 * * *（每天14:00）" style="width:220px" />
           <span class="ml-2 text-xs text-gray-400">分 时 日 月 周</span>
+        </n-form-item>
+        <!-- 执行一次 -->
+        <n-form-item label="执行时间" v-if="schedulePreset === 'once'">
+          <n-input v-model:value="onceRunAt" placeholder="2026-06-01T09:00:00" style="width:220px" />
+          <span class="ml-2 text-xs text-gray-400">ISO 格式日期时间</span>
         </n-form-item>
       </n-form>
 
@@ -714,6 +744,11 @@ const tasks = ref<any[]>([])
 const executions = ref<any[]>([])
 const intervalHours = ref(6)
 const cronExpr = ref('')
+const schedulePreset = ref<'daily' | 'weekly' | 'hourly' | 'custom' | 'once'>('hourly')
+const dailyTime = ref({ hour: 8, minute: 0 })
+const weeklyDays = ref<number[]>([1])
+const weeklyTime = ref({ hour: 8, minute: 0 })
+const onceRunAt = ref('')
 const execFilter = ref({ status: '' })
 
 const newTask = ref({
@@ -828,11 +863,23 @@ const platformOptions = [
   { label: '知乎', value: 'zhihu' },
 ]
 
-const scheduleTypeOptions = [
-  { label: '固定间隔', value: 'interval' },
-  { label: 'Cron 表达式', value: 'cron' },
+const schedulePresetOptions = [
+  { label: '每天（固定时间）', value: 'daily' },
+  { label: '每周（指定星期）', value: 'weekly' },
+  { label: '每隔 N 小时', value: 'hourly' },
+  { label: '自定义 Cron', value: 'custom' },
   { label: '执行一次', value: 'once' },
 ]
+
+const weekdayOptions = [
+  { label: '周日', value: 0 }, { label: '周一', value: 1 },
+  { label: '周二', value: 2 }, { label: '周三', value: 3 },
+  { label: '周四', value: 4 }, { label: '周五', value: 5 },
+  { label: '周六', value: 6 },
+]
+
+const hourOptions = Array.from({ length: 24 }, (_, i) => ({ label: `${i} 时`, value: i }))
+const minuteOptions = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => ({ label: `${m} 分`, value: m }))
 
 const execStatusOptions = [
   { label: '运行中', value: 'running' },
@@ -956,9 +1003,75 @@ function onStepTypeChange(idx: number) {
 function resetFormState() {
   editingTaskId.value = null
   newTask.value = { name: '', task_type: 'subscription_combo', platform: 'wechat', schedule_type: 'interval' }
+  schedulePreset.value = 'hourly'
   intervalHours.value = 6
   cronExpr.value = ''
+  dailyTime.value = { hour: 8, minute: 0 }
+  weeklyDays.value = [1]
+  weeklyTime.value = { hour: 8, minute: 0 }
+  onceRunAt.value = ''
   pipelineSteps.value = getDefaultPipeline('subscription_combo', 'wechat')
+}
+
+/** 将当前 schedulePreset + 相关 ref 转换为后端需要的 schedule_type + schedule_config */
+function buildScheduleConfig(): { schedule_type: string; schedule_config: any } {
+  switch (schedulePreset.value) {
+    case 'daily': {
+      const m = String(dailyTime.value.minute).padStart(2, '0')
+      const h = String(dailyTime.value.hour)
+      return { schedule_type: 'cron', schedule_config: { cron: `${m} ${h} * * *` } }
+    }
+    case 'weekly': {
+      if (!weeklyDays.value.length) throw new Error('请至少选择一个星期')
+      const m = String(weeklyTime.value.minute).padStart(2, '0')
+      const h = String(weeklyTime.value.hour)
+      const dow = weeklyDays.value.join(',')
+      return { schedule_type: 'cron', schedule_config: { cron: `${m} ${h} * * ${dow}` } }
+    }
+    case 'hourly':
+      return { schedule_type: 'interval', schedule_config: { hours: intervalHours.value } }
+    case 'custom': {
+      if (!cronExpr.value.trim()) throw new Error('请填写 Cron 表达式')
+      return { schedule_type: 'cron', schedule_config: { cron: cronExpr.value.trim() } }
+    }
+    case 'once':
+      if (!onceRunAt.value.trim()) throw new Error('请填写执行时间')
+      return { schedule_type: 'once', schedule_config: { run_at: onceRunAt.value.trim() } }
+    default:
+      return { schedule_type: 'interval', schedule_config: { hours: 6 } }
+  }
+}
+
+/** 从已保存的 task 恢复调度方式 UI 状态 */
+function restoreScheduleFromTask(task: any) {
+  const st: string = task.schedule_type || 'interval'
+  const sc: any = task.schedule_config || {}
+  if (st === 'interval') {
+    schedulePreset.value = 'hourly'
+    intervalHours.value = sc.hours || 6
+  } else if (st === 'cron') {
+    const expr: string = sc.cron || ''
+    const parts = expr.split(' ')
+    if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+      // 每天
+      schedulePreset.value = 'daily'
+      dailyTime.value = { hour: parseInt(parts[1]) || 8, minute: parseInt(parts[0]) || 0 }
+    } else if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] !== '*') {
+      // 每周
+      schedulePreset.value = 'weekly'
+      weeklyTime.value = { hour: parseInt(parts[1]) || 8, minute: parseInt(parts[0]) || 0 }
+      weeklyDays.value = parts[4].split(',').map(Number).filter((n: number) => !isNaN(n))
+    } else {
+      schedulePreset.value = 'custom'
+      cronExpr.value = expr
+    }
+  } else if (st === 'once') {
+    schedulePreset.value = 'once'
+    onceRunAt.value = sc.run_at || ''
+  } else {
+    schedulePreset.value = 'hourly'
+    intervalHours.value = 6
+  }
 }
 
 function openCreate() {
@@ -1130,7 +1243,25 @@ const columns: DataTableColumn[] = [
         return `每 ${hrs || '-'} 小时`
       }
       if (row.schedule_type === 'cron') {
-        return row.schedule_config?.cron || 'cron'
+        const expr: string = row.schedule_config?.cron || ''
+        const parts = expr.split(' ')
+        if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+          const h = parts[1].padStart(2, '0')
+          const m = parts[0].padStart(2, '0')
+          return `每天 ${h}:${m}`
+        }
+        if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] !== '*') {
+          const h = parts[1].padStart(2, '0')
+          const m = parts[0].padStart(2, '0')
+          const dow = parts[4]
+          const dayNames: Record<string, string> = { '0': '日', '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六' }
+          const days = dow.split(',').map((d: string) => dayNames[d] ?? d).join('/')
+          return `每周${days} ${h}:${m}`
+        }
+        return expr || 'cron'
+      }
+      if (row.schedule_type === 'once') {
+        return `单次 ${row.schedule_config?.run_at?.slice(0, 16) ?? ''}`
       }
       return row.schedule_type
     },
@@ -1279,18 +1410,16 @@ async function loadExecutions() {
 
 async function createTask() {
   if (!newTask.value.name.trim()) { message.warning('请填写任务名称'); return }
-  if (newTask.value.schedule_type === 'cron' && !cronExpr.value.trim()) { message.warning('请填写 Cron 表达式'); return }
+  let scheduleResult: { schedule_type: string; schedule_config: any }
+  try { scheduleResult = buildScheduleConfig() } catch (e: any) { message.warning(e.message || '请完善调度配置'); return }
   try {
-    const scheduleConfig: any = {}
-    if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
-    if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
-
     let taskConfig: any
     try { taskConfig = buildTaskConfig() } catch (e: any) { message.error(e.message || '配置错误'); return }
 
     await http.post('/scheduler/tasks', {
       ...newTask.value,
-      schedule_config: scheduleConfig,
+      schedule_type: scheduleResult.schedule_type,
+      schedule_config: scheduleResult.schedule_config,
       task_config: taskConfig,
     })
     message.success('任务创建成功')
@@ -1312,11 +1441,7 @@ async function openEdit(row: any) {
     platform: row.platform || 'wechat',
     schedule_type: row.schedule_type || 'interval',
   }
-  if (row.schedule_type === 'interval') {
-    intervalHours.value = row.schedule_config?.hours || 6
-  } else if (row.schedule_type === 'cron') {
-    cronExpr.value = row.schedule_config?.cron || ''
-  }
+  restoreScheduleFromTask(row)
 
   // P0-2 FIX: 加载完整 task_config（列表 API 现已返回，但双重保障）
   let taskConfig = row.task_config
@@ -1339,12 +1464,9 @@ async function openEdit(row: any) {
 async function updateTask() {
   if (!editingTaskId.value) return
   if (!newTask.value.name.trim()) { message.warning('请填写任务名称'); return }
-  if (newTask.value.schedule_type === 'cron' && !cronExpr.value.trim()) { message.warning('请填写 Cron 表达式'); return }
+  let scheduleResult: { schedule_type: string; schedule_config: any }
+  try { scheduleResult = buildScheduleConfig() } catch (e: any) { message.warning(e.message || '请完善调度配置'); return }
   try {
-    const scheduleConfig: any = {}
-    if (newTask.value.schedule_type === 'interval') scheduleConfig.hours = intervalHours.value
-    if (newTask.value.schedule_type === 'cron') scheduleConfig.cron = cronExpr.value
-
     let taskConfig: any
     try { taskConfig = buildTaskConfig() } catch (e: any) { message.error(e.message || '配置错误'); return }
 
@@ -1353,8 +1475,8 @@ async function updateTask() {
       name: newTask.value.name,
       task_type: newTask.value.task_type,
       platform: newTask.value.platform,
-      schedule_type: newTask.value.schedule_type,
-      schedule_config: scheduleConfig,
+      schedule_type: scheduleResult.schedule_type,
+      schedule_config: scheduleResult.schedule_config,
       task_config: taskConfig,
     })
     message.success('任务更新成功')

@@ -1,0 +1,46 @@
+# ─── Version control ───
+.git
+.gitignore
+.gitattributes
+
+# ─── Python artifacts ───
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# ─── Node.js (handled in frontend stage) ───
+node_modules/
+webui-src/node_modules/
+webui-src/dist/
+
+# ─── Dev / test artifacts ───
+test/
+tests/
+*.test.*
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ─── Runtime / user data (mount at runtime via volumes) ───
+data/
+browser_data/
+cache/
+
+# ─── IDE & OS ───
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# ─── Docs ───
+docs/
+*.md
