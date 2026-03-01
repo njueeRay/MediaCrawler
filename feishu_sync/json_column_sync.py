@@ -13,11 +13,10 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from .config import FeishuConfig
-from .data_formatter import XHSDataFormatter, WeChatDataFormatter
-
+from .data_formatter import WeChatDataFormatter, XHSDataFormatter
 from .read_from_feishu import FeishuReadConfig
 
 if TYPE_CHECKING:
@@ -237,8 +236,19 @@ def sync_rows_json_column(
     keep_columns: Optional[List[str]] = None,
     attach_wechat_cover: bool = False,
     wechat_cover_field_name: str = "图片",
+    unknown_fields: str = "skip",
+    cover_source_field: str = "",
 ) -> Dict[str, Any]:
-    """从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。"""
+    """
+    从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。
+
+    Args:
+        unknown_fields: 目标表中不存在的字段的处理策略：
+            "skip"  — 静默跳过（默认，不在目标表创建新字段）
+            "warn"  — 打印警告后跳过
+            "error" — 发现未知字段即报错中止
+        cover_source_field: 用于关联封面图的文章 ID 字段名（默认自动识别 文章ID/article_id）
+    """
     if not rows:
         return {"success": 0, "failed": 0, "error": "输入数据为空"}
 
@@ -257,21 +267,67 @@ def sync_rows_json_column(
     if not json_records:
         return {"success": 0, "failed": len(rows), "error": "JSON 列解析为空"}
 
+    # ── 1. 提前获取目标表现有字段（用于未知字段过滤）──────────────────────────
+    existing_type_map: Optional[Dict[str, int]] = None
+    try:
+        existing_fields_obj = manager._list_fields()
+        if existing_fields_obj:
+            existing_type_map = {name: field.type for name, field in existing_fields_obj.items()}
+    except Exception as exc:
+        logger.warning("获取远程字段类型失败，将自动建表: %s", exc)
+
+    # ── 2. 未知字段处理 ───────────────────────────────────────────────────────
+    _effective_cover_src = cover_source_field or "文章ID"
+    if existing_type_map:
+        all_keys: Set[str] = set()
+        for rec in json_records:
+            all_keys.update(rec.keys())
+        unknown_keys = all_keys - set(existing_type_map.keys())
+        unknown_keys.discard(_effective_cover_src)  # 封面索引字段保留（仅供内部图片查找）
+
+        if unknown_keys:
+            if unknown_fields == "error":
+                raise ValueError(
+                    f"[feishu_push_json] 目标表不存在以下字段，已中止: "
+                    f"{sorted(unknown_keys)}。\n"
+                    f"如需忽略请将 unknown_fields 设为 skip 或 warn。"
+                )
+            if unknown_fields == "warn":
+                logger.warning(
+                    "[feishu_push_json] ⚠️  以下字段在目标表中不存在，已跳过: %s",
+                    sorted(unknown_keys),
+                )
+
+        # skip / warn 模式：过滤掉不存在的字段（保留封面索引字段用于内部图片处理）
+        if unknown_fields in ("skip", "warn"):
+            filtered: List[Dict[str, Any]] = []
+            for rec in json_records:
+                new_rec = {
+                    k: v for k, v in rec.items()
+                    if k in existing_type_map or k == _effective_cover_src
+                }
+                filtered.append(new_rec)
+            json_records = filtered
+
+    # ── 3. 建表/补字段（仅在 error 模式或表不存在时执行）─────────────────────
     resolved_primary_field = _resolve_primary_field(json_records, primary_field)
     fields_config = build_fields_config(json_records, resolved_primary_field)
     table_name = table_name or "JSON数据同步"
 
-    ensure_table_and_fields(manager, table_name, fields_config)
+    if unknown_fields == "error" or not existing_type_map:
+        # error 模式：仍走原流程（用户允许创建新字段）
+        ensure_table_and_fields(manager, table_name, fields_config)
+        # 刷新 existing_type_map
+        try:
+            existing_fields_obj2 = manager._list_fields()
+            if existing_fields_obj2:
+                existing_type_map = {name: field.type for name, field in existing_fields_obj2.items()}
+        except Exception:
+            pass
+    # else skip/warn：跳过，不创建任何新字段
 
     if batch_size:
         FeishuConfig.BATCH_SIZE = batch_size
-
-    existing_type_map: Optional[Dict[str, int]] = None
-    try:
-        existing_fields = manager._list_fields()
-        existing_type_map = {name: field.type for name, field in existing_fields.items()}
-    except Exception as exc:
-        logger.warning("获取远程字段类型失败，继续使用本地推断类型: %s", exc)
 
     formatted_records = format_records(
         json_records,
@@ -280,11 +336,17 @@ def sync_rows_json_column(
         field_type_map=existing_type_map,
     )
 
+    # 推送前去掉仅供内部使用的封面索引字段（避免写入不存在的列）
+    if existing_type_map and cover_source_field and cover_source_field not in existing_type_map:
+        for fr in formatted_records:
+            fr.get("fields", {}).pop(cover_source_field, None)
+
     if attach_wechat_cover:
         _attach_wechat_cover_images_by_article_id(
             manager,
             formatted_records,
             cover_target_field=wechat_cover_field_name,
+            cover_source_field=cover_source_field,
         )
 
     result = manager._batch_create_records_with_sdk(formatted_records)
@@ -440,7 +502,15 @@ def format_records(
     return formatted
 
 
-def _resolve_article_id_from_fields(fields: Dict[str, Any]) -> str:
+def _resolve_article_id_from_fields(fields: Dict[str, Any], cover_source_field: str = "") -> str:
+    # 1. 优先用用户指定的字段
+    if cover_source_field:
+        value = fields.get(cover_source_field)
+        if value not in (None, ""):
+            text = str(value).strip()
+            if text:
+                return text
+    # 2. 回退到内置默认字段
     for key in ("文章ID", "article_id"):
         value = fields.get(key)
         if value in (None, ""):
@@ -482,6 +552,7 @@ def _attach_wechat_cover_images_by_article_id(
     manager: "FeishuSyncManager",
     formatted_records: List[Dict[str, Any]],
     cover_target_field: str = "图片",
+    cover_source_field: str = "",
 ) -> None:
     if not formatted_records:
         return
@@ -493,7 +564,7 @@ def _attach_wechat_cover_images_by_article_id(
         if not isinstance(fields, dict):
             continue
 
-        article_id = _resolve_article_id_from_fields(fields)
+        article_id = _resolve_article_id_from_fields(fields, cover_source_field=cover_source_field)
         if not article_id:
             continue
 
@@ -558,6 +629,8 @@ def sync_csv_json_column(
     keep_columns: Optional[List[str]] = None,
     attach_wechat_cover: bool = False,
     wechat_cover_field_name: str = "图片",
+    unknown_fields: str = "skip",
+    cover_source_field: str = "",
 ) -> Dict[str, Any]:
     """
     从 CSV 指定列读取 JSON 并写入飞书。
@@ -588,4 +661,6 @@ def sync_csv_json_column(
         keep_columns=keep_columns,
         attach_wechat_cover=attach_wechat_cover,
         wechat_cover_field_name=wechat_cover_field_name,
+        unknown_fields=unknown_fields,
+        cover_source_field=cover_source_field,
     )

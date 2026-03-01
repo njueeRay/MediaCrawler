@@ -25,13 +25,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from database.db_session import get_async_engine
 from database import models as db_models
-
-from feishu_sync.sync_manager import FeishuSyncManager
-from feishu_sync.data_formatter import XHSDataFormatter, WeChatDataFormatter
+from database.db_session import get_async_engine
 from feishu_sync.config import FeishuConfig
-from feishu_sync.json_column_sync import sync_csv_json_column, sync_rows_json_column, DEFAULT_PRIMARY_FIELD
+from feishu_sync.data_formatter import WeChatDataFormatter, XHSDataFormatter
+from feishu_sync.json_column_sync import (
+    DEFAULT_PRIMARY_FIELD,
+    sync_rows_json_column,
+)
+from feishu_sync.sync_manager import FeishuSyncManager
 
 try:
     from dotenv import load_dotenv
@@ -164,8 +166,9 @@ async def _load_from_snapshot(dataset_name: str, db_type: str = "sqlite") -> Lis
     feishu_pull (Step 3) 写入 -> feishu_record_snapshot -> feishu_push_json (Step 4) 读取。
     完全绕过 CSV 文件，所有状态留在数据库里。
     """
-    from database.models import FeishuRecordSnapshot
     from sqlalchemy import select as sa_select
+
+    from database.models import FeishuRecordSnapshot
 
     norm_db = _normalize_db_type(db_type) or "sqlite"
     engine = get_async_engine(norm_db)
@@ -584,6 +587,8 @@ def sync_file(
     range_end: int = 0,
     upload_date_start: str = "",
     upload_date_end: str = "",
+    unknown_fields: str = "skip",
+    cover_source_field: str = "",
 ) -> Dict:
     logger.info(f"🚀 开始同步文件: {file_path}")
 
@@ -621,6 +626,8 @@ def sync_file(
             batch_size=batch_size,
             attach_wechat_cover=(manager.platform == "wechat"),
             wechat_cover_field_name="image",
+            unknown_fields=unknown_fields,
+            cover_source_field=cover_source_field,
         )
 
     if ext in {".csv", ".json"} and (
@@ -835,6 +842,17 @@ def main():
         help="随JSON记录一起写入的普通列，逗号分隔；为空时自动使用非JSON列",
     )
     parser.add_argument("--append-table-id", default="", help="指定目标表ID（覆盖环境变量 FEISHU_TABLE_ID）")
+    parser.add_argument(
+        "--unknown-fields",
+        default="skip",
+        choices=["skip", "warn", "error"],
+        help="目标表不存在的字段处理方式: skip=默默跳过(默认)/warn=打印警告/error=中止报错",
+    )
+    parser.add_argument(
+        "--cover-source-field",
+        default="",
+        help="封面图片绑定所用的文章ID字段名（默认自动识别文章ID/article_id）",
+    )
     parser.add_argument("--append-extra-field", default="", help="追加写入时额外字段名（如 type）")
     parser.add_argument(
         "--append-extra-type",
@@ -921,6 +939,8 @@ def main():
                 batch_size=args.batch_size,
                 attach_wechat_cover=(manager.platform == "wechat"),
                 wechat_cover_field_name="图片",
+                unknown_fields=args.unknown_fields,
+                cover_source_field=args.cover_source_field,
             )
             failed_snap = result.get("failed", 0)
             logger.info(

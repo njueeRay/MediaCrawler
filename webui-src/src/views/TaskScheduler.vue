@@ -302,6 +302,26 @@
             <n-form-item label="主键列">
               <n-input v-model:value="step.json_primary" placeholder="默认: 记录ID" />
             </n-form-item>
+            <n-form-item label="未知字段">
+              <div style="width:100%">
+                <n-select
+                  v-model:value="step.unknown_fields"
+                  :options="[
+                    {label:'skip — 静默跳过（推荐）', value:'skip'},
+                    {label:'warn — 日志警告后跳过', value:'warn'},
+                    {label:'error — 遇到未知字段报错', value:'error'},
+                  ]"
+                  placeholder="skip（默认）"
+                />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">目标表二中不存在的字段（如正文内容）的处理方式；skip 不会在表二创建多余字段</n-text>
+              </div>
+            </n-form-item>
+            <n-form-item label="封面索引字段">
+              <div style="width:100%">
+                <n-input v-model:value="step.cover_source_field" placeholder="留空自动识别 文章ID / article_id" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">JSON记录中用于查找封面图片的文章ID字段名</n-text>
+              </div>
+            </n-form-item>
             <n-form-item label="范围">
               <n-space>
                 <n-input-number v-model:value="step.range_start" :min="1" placeholder="起始" style="width:100px" />
@@ -678,7 +698,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
     case 'feishu_pull':
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', filter_conjunction: 'and', output_format: 'sqlite', output: 'feishu_pull_result' }
     case 'feishu_push_json':
-      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', range_start: null, range_end: null }
+      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', unknown_fields: 'skip', cover_source_field: '', range_start: null, range_end: null }
     case 'feishu_update_records':
       return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
@@ -824,6 +844,8 @@ function buildTaskConfig(): any {
       if (s.table_id) clean.table_id = s.table_id
       if (s.json_columns) clean.json_columns = s.json_columns
       if (s.json_primary) clean.json_primary = s.json_primary
+      if (s.unknown_fields && s.unknown_fields !== 'skip') clean.unknown_fields = s.unknown_fields
+      if (s.cover_source_field) clean.cover_source_field = s.cover_source_field
       if (s.range_start) clean.range_start = s.range_start
       if (s.range_end) clean.range_end = s.range_end
     }

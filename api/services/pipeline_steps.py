@@ -674,8 +674,10 @@ class FeishuPushJsonStep(PipelineStep):
       table_id        — 目标飞书表 ID（必填）
       json_columns    — 要展开的 JSON 列名（必填，逗号分隔）
       json_primary    — 去重主键列名（默认 "记录ID"）
-      json_keep_columns — 额外保留的列（逗号分隔）
+      json_keep_columns — 额外保留的列（逗号分隔，封面索引时建议加入文章ID）
       json_flatten_sep  — 嵌套 key 分隔符（默认 "."）
+      unknown_fields  — 目标表不存在的字段处理: skip（默认）/ warn / error
+      cover_source_field — 封面关联的文章ID字段名（默认自动识别文章ID）
       range_start     — 只处理第 N 行起（1-based）
       range_end       — 只处理到第 N 行止（1-based）
     """
@@ -780,6 +782,10 @@ class FeishuPushJsonStep(PipelineStep):
             cmd += ["--json-keep-columns", cfg["json_keep_columns"]]
         if cfg.get("json_flatten_sep"):
             cmd += ["--json-flatten-sep", cfg["json_flatten_sep"]]
+        if cfg.get("unknown_fields"):
+            cmd += ["--unknown-fields", cfg["unknown_fields"]]
+        if cfg.get("cover_source_field"):
+            cmd += ["--cover-source-field", cfg["cover_source_field"]]
         if cfg.get("range_start") is not None:
             cmd += ["--range-start", str(cfg["range_start"])]
         if cfg.get("range_end") is not None:
