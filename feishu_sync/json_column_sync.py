@@ -209,6 +209,22 @@ def _build_row_records(
     return records
 
 
+def apply_field_mapping(
+    records: List[Dict[str, Any]],
+    field_mapping: Optional[Dict[str, str]],
+) -> List[Dict[str, Any]]:
+    """对 records 中每条记录按 field_mapping 重命名字段 key（源名→目标名）。
+
+    不在映射中的字段保持原名；如果映射为空则直接返回原列表（不复制）。"""
+    if not field_mapping:
+        return records
+    result: List[Dict[str, Any]] = []
+    for rec in records:
+        new_rec: Dict[str, Any] = {field_mapping.get(k, k): v for k, v in rec.items()}
+        result.append(new_rec)
+    return result
+
+
 def _resolve_json_target_columns(
     json_column: Optional[str] = None,
     json_columns: Optional[List[str]] = None,
@@ -238,6 +254,8 @@ def sync_rows_json_column(
     wechat_cover_field_name: str = "图片",
     unknown_fields: str = "skip",
     cover_source_field: str = "",
+    field_mapping: Optional[Dict[str, str]] = None,
+    wechat_cover_field: str = "",
 ) -> Dict[str, Any]:
     """
     从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。
@@ -248,6 +266,8 @@ def sync_rows_json_column(
             "warn"  — 打印警告后跳过
             "error" — 发现未知字段即报错中止
         cover_source_field: 用于关联封面图的文章 ID 字段名（默认自动识别 文章ID/article_id）
+        field_mapping: 字段重命名映射 {源字段名: 目标字段名}，在过滤前执行
+        wechat_cover_field: 封面图写入的目标字段名；非空时自动启用封面上传（覆盖 attach_wechat_cover）
     """
     if not rows:
         return {"success": 0, "failed": 0, "error": "输入数据为空"}
@@ -266,6 +286,14 @@ def sync_rows_json_column(
 
     if not json_records:
         return {"success": 0, "failed": len(rows), "error": "JSON 列解析为空"}
+
+    # ── 0. 字段映射（重命名），在过滤 / 类型推断之前执行 ─────────────────────
+    if field_mapping:
+        json_records = apply_field_mapping(json_records, field_mapping)
+        logger.info(
+            "🔀 字段映射已应用: %s",
+            {k: v for k, v in field_mapping.items() if k != v},
+        )
 
     # ── 1. 提前获取目标表现有字段（用于未知字段过滤）──────────────────────────
     existing_type_map: Optional[Dict[str, int]] = None
@@ -336,18 +364,23 @@ def sync_rows_json_column(
         field_type_map=existing_type_map,
     )
 
-    # 推送前去掉仅供内部使用的封面索引字段（避免写入不存在的列）
-    if existing_type_map and cover_source_field and cover_source_field not in existing_type_map:
-        for fr in formatted_records:
-            fr.get("fields", {}).pop(cover_source_field, None)
-
-    if attach_wechat_cover:
+    # ── 4. 封面图上传（必须在清除 cover_source 之前执行，否则查不到 article_id）─
+    # wechat_cover_field 非空时优先使用并自动启用；否则回退到 attach_wechat_cover 参数
+    _cover_target = wechat_cover_field or (wechat_cover_field_name if attach_wechat_cover else "")
+    if _cover_target:
         _attach_wechat_cover_images_by_article_id(
             manager,
             formatted_records,
-            cover_target_field=wechat_cover_field_name,
+            cover_target_field=_cover_target,
             cover_source_field=cover_source_field,
         )
+
+    # ── 5. 推送前去掉仅供内部使用的封面索引字段（避免写入不存在的列）──────────
+    # 注意：使用 _effective_cover_src 而非 cover_source_field，
+    # 后者为空字符串时默认回退为 "文章ID"，同样需要清除。
+    if existing_type_map and _effective_cover_src not in existing_type_map:
+        for fr in formatted_records:
+            fr.get("fields", {}).pop(_effective_cover_src, None)
 
     result = manager._batch_create_records_with_sdk(formatted_records)
 
@@ -631,6 +664,8 @@ def sync_csv_json_column(
     wechat_cover_field_name: str = "图片",
     unknown_fields: str = "skip",
     cover_source_field: str = "",
+    field_mapping: Optional[Dict[str, str]] = None,
+    wechat_cover_field: str = "",
 ) -> Dict[str, Any]:
     """
     从 CSV 指定列读取 JSON 并写入飞书。
@@ -663,4 +698,6 @@ def sync_csv_json_column(
         wechat_cover_field_name=wechat_cover_field_name,
         unknown_fields=unknown_fields,
         cover_source_field=cover_source_field,
+        field_mapping=field_mapping,
+        wechat_cover_field=wechat_cover_field,
     )

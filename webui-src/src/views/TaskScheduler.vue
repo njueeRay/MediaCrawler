@@ -322,6 +322,28 @@
                 <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">JSON记录中用于查找封面图片的文章ID字段名</n-text>
               </div>
             </n-form-item>
+            <n-form-item label="封面目标字段">
+              <div style="width:100%">
+                <n-input v-model:value="step.wechat_cover_field" placeholder="image（留空时 wechat 平台自动用 image）" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">封面图写入的飞书字段名；非空时自动启用封面上传，不填则 wechat 平台默认写入 image 字段</n-text>
+              </div>
+            </n-form-item>
+            <n-form-item label="字段映射">
+              <div style="width:100%">
+                <n-dynamic-input
+                  v-model:value="step.field_mapping_rows"
+                  :on-create="() => ({ src: '', dst: '' })"
+                  #default="{ value: row }"
+                >
+                  <div style="display:flex;gap:8px;width:100%;align-items:center">
+                    <n-input v-model:value="row.src" placeholder="原字段名（如 title）" style="flex:1" />
+                    <n-text style="flex-shrink:0">→</n-text>
+                    <n-input v-model:value="row.dst" placeholder="目标字段名（如 活动名称）" style="flex:1" />
+                  </div>
+                </n-dynamic-input>
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">推送前重命名字段（源数据字段 → 目标飞书表字段），在字段过滤之前执行</n-text>
+              </div>
+            </n-form-item>
             <n-form-item label="范围">
               <n-space>
                 <n-input-number v-model:value="step.range_start" :min="1" placeholder="起始" style="width:100px" />
@@ -698,7 +720,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
     case 'feishu_pull':
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', filter_conjunction: 'and', output_format: 'sqlite', output: 'feishu_pull_result' }
     case 'feishu_push_json':
-      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', unknown_fields: 'skip', cover_source_field: '', range_start: null, range_end: null }
+      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', unknown_fields: 'skip', cover_source_field: '', wechat_cover_field: '', field_mapping_rows: [], range_start: null, range_end: null }
     case 'feishu_update_records':
       return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
@@ -846,6 +868,15 @@ function buildTaskConfig(): any {
       if (s.json_primary) clean.json_primary = s.json_primary
       if (s.unknown_fields && s.unknown_fields !== 'skip') clean.unknown_fields = s.unknown_fields
       if (s.cover_source_field) clean.cover_source_field = s.cover_source_field
+      if (s.wechat_cover_field) clean.wechat_cover_field = s.wechat_cover_field
+      // field_mapping_rows [{src, dst}] → field_mapping {src: dst}
+      if (Array.isArray(s.field_mapping_rows) && s.field_mapping_rows.length) {
+        const mapping: Record<string, string> = {}
+        for (const row of s.field_mapping_rows) {
+          if (row.src && row.dst && row.src !== row.dst) mapping[row.src] = row.dst
+        }
+        if (Object.keys(mapping).length) clean.field_mapping = mapping
+      }
       if (s.range_start) clean.range_start = s.range_start
       if (s.range_end) clean.range_end = s.range_end
     }
@@ -886,6 +917,11 @@ function restorePipelineFromConfig(taskConfig: any, taskType: string, platform: 
           key: k,
           value: v === true ? 'true' : v === false ? 'false' : String(v),
         }))
+      }
+      // feishu_push_json: field_mapping {src: dst} → field_mapping_rows [{src, dst}]
+      if (s.step === 'feishu_push_json' && s.field_mapping && typeof s.field_mapping === 'object') {
+        merged.field_mapping_rows = Object.entries(s.field_mapping).map(([src, dst]) => ({ src, dst: String(dst) }))
+        delete merged.field_mapping
       }
       return merged
     })

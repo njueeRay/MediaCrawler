@@ -589,6 +589,8 @@ def sync_file(
     upload_date_end: str = "",
     unknown_fields: str = "skip",
     cover_source_field: str = "",
+    field_mapping: Optional[Dict[str, str]] = None,
+    wechat_cover_field: str = "",
 ) -> Dict:
     logger.info(f"🚀 开始同步文件: {file_path}")
 
@@ -624,10 +626,10 @@ def sync_file(
             primary_field=json_primary,
             flatten_sep=json_flatten_sep,
             batch_size=batch_size,
-            attach_wechat_cover=(manager.platform == "wechat"),
-            wechat_cover_field_name="image",
+            wechat_cover_field=wechat_cover_field or ("image" if manager.platform == "wechat" else ""),
             unknown_fields=unknown_fields,
             cover_source_field=cover_source_field,
+            field_mapping=field_mapping,
         )
 
     if ext in {".csv", ".json"} and (
@@ -853,6 +855,17 @@ def main():
         default="",
         help="封面图片绑定所用的文章ID字段名（默认自动识别文章ID/article_id）",
     )
+    parser.add_argument(
+        "--field-mapping",
+        type=json.loads,
+        default=None,
+        help=r"字段重命名映射，JSON 格式，如 '{\"title\":\"活动名称\",\"host\":\"主办方\"}'",
+    )
+    parser.add_argument(
+        "--wechat-cover-field",
+        default="",
+        help="封面图写入的目标字段名（非空时自动启用封面上传；平台=wechat时默认 image）",
+    )
     parser.add_argument("--append-extra-field", default="", help="追加写入时额外字段名（如 type）")
     parser.add_argument(
         "--append-extra-type",
@@ -937,10 +950,10 @@ def main():
                 primary_field=args.json_primary,
                 flatten_sep=args.json_flatten_sep,
                 batch_size=args.batch_size,
-                attach_wechat_cover=(manager.platform == "wechat"),
-                wechat_cover_field_name="图片",
+                wechat_cover_field=args.wechat_cover_field or ("image" if manager.platform == "wechat" else ""),
                 unknown_fields=args.unknown_fields,
                 cover_source_field=args.cover_source_field,
+                field_mapping=args.field_mapping,
             )
             failed_snap = result.get("failed", 0)
             logger.info(
@@ -1043,6 +1056,10 @@ def main():
                 range_end=args.range_end,
                 upload_date_start=args.upload_date_start,
                 upload_date_end=args.upload_date_end,
+                unknown_fields=args.unknown_fields,
+                cover_source_field=args.cover_source_field,
+                field_mapping=args.field_mapping,
+                wechat_cover_field=args.wechat_cover_field,
             )
             if result.get("failed", 0) > 0:
                 raise RuntimeError(f"同步失败: {result}")

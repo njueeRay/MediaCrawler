@@ -41,6 +41,7 @@ task_config 示例（pipeline 模式）：
 """
 
 import asyncio
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -786,6 +787,10 @@ class FeishuPushJsonStep(PipelineStep):
             cmd += ["--unknown-fields", cfg["unknown_fields"]]
         if cfg.get("cover_source_field"):
             cmd += ["--cover-source-field", cfg["cover_source_field"]]
+        if cfg.get("field_mapping"):
+            cmd += ["--field-mapping", json.dumps(cfg["field_mapping"], ensure_ascii=False)]
+        if cfg.get("wechat_cover_field"):
+            cmd += ["--wechat-cover-field", cfg["wechat_cover_field"]]
         if cfg.get("range_start") is not None:
             cmd += ["--range-start", str(cfg["range_start"])]
         if cfg.get("range_end") is not None:
