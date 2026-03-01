@@ -424,6 +424,11 @@ class SubscriptionCrawlStep(PipelineStep):
                         rec.last_crawled_at = datetime.now()
                         await upd_session.commit()
 
+            final_s = crawler_manager.get_status()
+            if final_s.get("status") not in ("idle", "success", "completed"):
+                skipped += 1
+                await log(f"[subscription_crawl] WARN: {sub.creator_id} 爬虫报告失败，跳过")
+                continue
             crawled += 1
             await log(f"[subscription_crawl] ✓ {sub.creator_id} done")
 
@@ -572,8 +577,7 @@ class FeishuPullStep(PipelineStep):
                 "--filter-field", filter_field,
                 "--filter-operator", cfg.get("filter_operator", "contains"),
             ]
-            for v in filter_values:
-                cmd += ["--filter-values", v]
+            cmd += ["--filter-values", ",".join(str(v) for v in filter_values)]
             if cfg.get("filter_conjunction"):
                 cmd += ["--filter-conjunction", cfg["filter_conjunction"]]
 

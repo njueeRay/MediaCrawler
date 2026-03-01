@@ -710,7 +710,7 @@ class FeishuSyncManager:
         
         if not formatted_records:
             logger.warning("没有有效的格式化数据")
-            return {"success": 0, "failed": len(raw_data)}
+            return {"success": 0, "skipped": 0, "failed": len(raw_data), "total": len(raw_data)}
         
         # 去重处理
         unique_records = self._deduplicate_records(formatted_records)
@@ -751,18 +751,22 @@ class FeishuSyncManager:
         # 尝试使用SDK批量上传，失败时回退到简化版本
         try:
             result = self._batch_create_records_with_sdk(unique_records)
-            
+
             success_count = result.get("success", 0)
-            failed_count = len(raw_data) - success_count
-            
-            logger.info(f"同步完成: 成功 {success_count} 条, 失败 {failed_count} 条")
-            
+            failed_count  = len(unique_records) - success_count   # 真正失败：实际尝试上传 - 成功
+            skipped_count = len(raw_data) - len(unique_records)   # 去重跳过：原始总量 - 去重后
+
+            logger.info(
+                f"同步完成: 成功 {success_count} 条, 跳过(去重) {skipped_count} 条, 失败 {failed_count} 条"
+            )
+
             return {
-                "success": success_count,
-                "failed": failed_count,
-                "total": len(raw_data),
-                "table_id": self.table_id,
-                "app_token": self.app_token
+                "success":   success_count,
+                "skipped":   skipped_count,
+                "failed":    failed_count,
+                "total":     len(raw_data),
+                "table_id":  self.table_id,
+                "app_token": self.app_token,
             }
             
         except Exception as sdk_error:
