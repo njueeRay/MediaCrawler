@@ -17,6 +17,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import re
 import subprocess
 import signal
 import os
@@ -43,10 +44,78 @@ class CrawlerManager:
         self._project_root = Path(__file__).parent.parent.parent
         # Log queue - for pushing to WebSocket
         self._log_queue: Optional[asyncio.Queue] = None
+        # B-04: 进度跟踪
+        self.progress: dict = self._empty_progress()
 
     @property
     def logs(self) -> List[LogEntry]:
         return self._logs
+
+    # ── B-04: 进度跟踪辅助方法 ───────────────────────────────────
+    @staticmethod
+    def _empty_progress() -> dict:
+        return {
+            "crawled_count": 0,   # 已保存条目数
+            "current_page": 0,    # 当前翻页编号
+            "current_keyword": "",  # 当前关键词
+            "last_hint": "",      # 最近一条进度提示文本
+            "percentage": 0,      # 0-100 估算百分比
+        }
+
+    def _update_progress(self, line: str) -> None:
+        """Parse a stdout log line and update self.progress accordingly.
+        Patterns recognised (all case-insensitive):
+          - 'page: N'  / 'page N'  → current_page
+          - 'keyword: TEXT'        → current_keyword
+          - 'update/save.*note/video/article/content' → crawled_count++
+          - 'saved N items'        → crawled_count
+        """
+        p = self.progress
+
+        # 进度提示文本（截断到 120 字符）
+        p["last_hint"] = line[:120]
+
+        # 关键词
+        m = re.search(r"keyword[:\s]+([^,\]\[]+)", line, re.IGNORECASE)
+        if m:
+            p["current_keyword"] = m.group(1).strip()
+
+        # 页码
+        m = re.search(r"\bpage[:\s]+(\d+)", line, re.IGNORECASE)
+        if m:
+            new_page = int(m.group(1))
+            if new_page > p["current_page"]:
+                p["current_page"] = new_page
+
+        # 保存条目计数（各平台用1+ 种日志格式）
+        save_patterns = [
+            r"update_xhs_note",
+            r"update_douyin_video",
+            r"update_weibo_note",
+            r"update_bilibili_video",
+            r"update_kuaishou_video",
+            r"update_wechat_article",
+            r"update_tieba_note",
+            r"update_zhihu",
+            r"saving.*(?:note|video|article|content)",
+            r"(?:note|video|article|content).*saved",
+        ]
+        for pat in save_patterns:
+            if re.search(pat, line, re.IGNORECASE):
+                p["crawled_count"] += 1
+                break
+
+        # 估算百分比：使用 current_page / max_pages
+        try:
+            import config as _cfg
+            max_notes = getattr(_cfg, "CRAWLER_MAX_NOTES_COUNT", 0)
+            items_per_page = 20
+            if max_notes and max_notes > 0:
+                total_pages = max(1, -(-max_notes // items_per_page))
+                pct = min(99, int(p["current_page"] / total_pages * 100))
+                p["percentage"] = pct
+        except Exception:
+            pass
 
     def get_log_queue(self) -> asyncio.Queue:
         """Get or create log queue"""
@@ -99,6 +168,8 @@ class CrawlerManager:
             # Clear old logs
             self._logs = []
             self._log_id = 0
+            # B-04: 重置进度
+            self.progress = self._empty_progress()
 
             # Clear pending queue (don't replace object to avoid WebSocket broadcast coroutine holding old queue reference)
             if self._log_queue is None:
@@ -121,10 +192,25 @@ class CrawlerManager:
                 # Start subprocess
                 # 构造子进程环境变量，注入采集日期范围（各平台读取各自的环境变量）
                 _extra_env: dict = {}
+                _platform_val = config.platform.value if hasattr(config.platform, "value") else str(config.platform)
                 if config.crawl_date_start:
+                    # 微信公众号
                     _extra_env["WECHAT_ARTICLE_DATE_START"] = config.crawl_date_start
+                    # 小红书
+                    if _platform_val == "xhs":
+                        _extra_env["XHS_DATE_START"] = config.crawl_date_start
+                    # 抖音
+                    elif _platform_val == "dy":
+                        _extra_env["DY_DATE_START"] = config.crawl_date_start
                 if config.crawl_date_end:
+                    # 微信公众号
                     _extra_env["WECHAT_ARTICLE_DATE_END"] = config.crawl_date_end
+                    # 小红书
+                    if _platform_val == "xhs":
+                        _extra_env["XHS_DATE_END"] = config.crawl_date_end
+                    # 抖音
+                    elif _platform_val == "dy":
+                        _extra_env["DY_DATE_END"] = config.crawl_date_end
                 self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -205,7 +291,8 @@ class CrawlerManager:
             "platform": self.current_config.platform.value if self.current_config else None,
             "crawler_type": self.current_config.crawler_type.value if self.current_config else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "error_message": None
+            "error_message": None,
+            "progress": self.progress,  # B-04: 嵌入进度信息
         }
 
     def _build_command(self, config: CrawlerStartRequest) -> list:
@@ -254,6 +341,7 @@ class CrawlerManager:
                         level = self._parse_log_level(line)
                         entry = self._create_log_entry(line, level)
                         await self._push_log(entry)
+                        self._update_progress(line)  # B-04
 
             # Read remaining output
             if self.process and self.process.stdout:
@@ -272,6 +360,7 @@ class CrawlerManager:
                 exit_code = self.process.returncode if self.process else -1
                 if exit_code == 0:
                     entry = self._create_log_entry("Crawler completed successfully", "success")
+                    self.progress["percentage"] = 100  # B-04: 完成时置 100%
                 else:
                     entry = self._create_log_entry(f"Crawler exited with code: {exit_code}", "warning")
                 await self._push_log(entry)

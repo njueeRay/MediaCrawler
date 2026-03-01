@@ -63,3 +63,21 @@ async def get_logs(limit: int = 100):
     """Get recent logs"""
     logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
     return ok([log.model_dump() for log in logs])
+
+
+@router.get("/progress")
+async def get_crawler_progress():
+    """B-04: Get real-time crawl progress.
+
+    Returns progress info parsed from crawler stdout:
+      - crawled_count: items saved so far
+      - current_page:  last page number seen in logs
+      - current_keyword: keyword being crawled
+      - last_hint: last log line (max 120 chars)
+      - percentage: estimated completion (0-100)
+      - status: crawler status (idle / running / stopping)
+    """
+    return ok({
+        **crawler_manager.progress,
+        "status": crawler_manager.status,
+    })

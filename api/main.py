@@ -28,6 +28,7 @@ import subprocess
 import sys
 
 import uvicorn
+from contextlib import asynccontextmanager
 
 # P0-3: Windows 下必须强制使用 ProactorEventLoop
 # 否则 asyncio.create_subprocess_exec 在 SelectorEventLoop 下返回 stdout=None
@@ -53,10 +54,68 @@ from .routers import (
     websocket_router,
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """WebUI 首次启动:
+    1. 建表 + 注入默认字段映射方案
+    2. 启动 APScheduler 并恢复全部激活的定时任务
+    """
+    # ── 1. 建表 + 种子数据 ──────────────────────────────────────────
+    try:
+        import config as _cfg
+        from api.services.webui_init import seed_default_mappings
+        from database.db_session import create_tables, get_session
+
+        if _cfg.SAVE_DATA_OPTION not in ("csv", "json"):
+            await create_tables(_cfg.SAVE_DATA_OPTION)
+
+        async with get_session() as session:
+            if session is not None:
+                count = await seed_default_mappings(session)
+                if count > 0:
+                    print(f"[WebUI] Seeded {count} default field mapping schemes")
+    except Exception as e:
+        print(f"[WebUI] Startup seed skipped: {e}")
+
+    # ── 2. 启动 APScheduler + 恢复活跃定时任务 ─────────────────────
+    # P0 FIX: 每次重启后必须重新向 APScheduler 注册数据库中的活跃任务，
+    #         否则任务记录存在于 DB 但实际不会被触发。
+    try:
+        from sqlalchemy import select
+
+        from api.services.scheduler_service import _get_scheduler, scheduler_service
+        from database.db_session import get_session
+        from database.webui_models import ScheduledTask
+
+        # 确保 APScheduler 已启动
+        _get_scheduler()
+
+        async with get_session() as session:
+            if session is not None:
+                result = await session.execute(
+                    select(ScheduledTask).where(ScheduledTask.is_active == True)  # noqa: E712
+                )
+                active_tasks = result.scalars().all()
+                recovered = 0
+                for task in active_tasks:
+                    try:
+                        scheduler_service._register_job(task)
+                        recovered += 1
+                    except Exception as reg_err:
+                        print(f"[WebUI] Failed to recover task #{task.id} '{task.name}': {reg_err}")
+                if recovered:
+                    print(f"[WebUI] Recovered {recovered} scheduled task(s) from DB")
+    except Exception as e:
+        print(f"[WebUI] APScheduler recovery skipped: {e}")
+
+    yield  # ← app 运行期间在此暂停，shutdown 后继续（可做清理）
+
+
 app = FastAPI(
     title="MediaCrawler WebUI API",
     description="API for controlling MediaCrawler from WebUI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Get webui static files directory
@@ -176,61 +235,6 @@ async def _global_error_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "服务器内部错误，请查看服务端日志获取详情"},
     )
-
-
-@app.on_event("startup")
-async def webui_startup():
-    """WebUI 首次启动:
-    1. 建表 + 注入默认字段映射方案
-    2. 启动 APScheduler 并恢复全部激活的定时任务
-    """
-    # ── 1. 建表 + 种子数据 ──────────────────────────────────────────
-    try:
-        import config as _cfg
-        from api.services.webui_init import seed_default_mappings
-        from database.db_session import create_tables, get_session
-
-        if _cfg.SAVE_DATA_OPTION not in ("csv", "json"):
-            await create_tables(_cfg.SAVE_DATA_OPTION)
-
-        async with get_session() as session:
-            if session is not None:
-                count = await seed_default_mappings(session)
-                if count > 0:
-                    print(f"[WebUI] Seeded {count} default field mapping schemes")
-    except Exception as e:
-        print(f"[WebUI] Startup seed skipped: {e}")
-
-    # ── 2. 启动 APScheduler + 恢复活跃定时任务 ─────────────────────
-    # P0 FIX: 每次重启后必须重新向 APScheduler 注册数据库中的活跃任务，
-    #         否则任务记录存在于 DB 但实际不会被触发。
-    try:
-        from sqlalchemy import select
-
-        from api.services.scheduler_service import _get_scheduler, scheduler_service
-        from database.db_session import get_session
-        from database.webui_models import ScheduledTask
-
-        # 确保 APScheduler 已启动
-        _get_scheduler()
-
-        async with get_session() as session:
-            if session is not None:
-                result = await session.execute(
-                    select(ScheduledTask).where(ScheduledTask.is_active == True)  # noqa: E712
-                )
-                active_tasks = result.scalars().all()
-                recovered = 0
-                for task in active_tasks:
-                    try:
-                        scheduler_service._register_job(task)
-                        recovered += 1
-                    except Exception as reg_err:
-                        print(f"[WebUI] Failed to recover task #{task.id} '{task.name}': {reg_err}")
-                if recovered:
-                    print(f"[WebUI] Recovered {recovered} scheduled task(s) from DB")
-    except Exception as e:
-        print(f"[WebUI] APScheduler recovery skipped: {e}")
 
 
 @app.get("/")

@@ -18,7 +18,37 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # 抖音平台配置
-PUBLISH_TIME_TYPE = 0
+# 优先读取环境变量（由 WebUI crawler_manager 注入）
+import os as _os
+from datetime import datetime as _datetime
+
+
+def _date_range_to_publish_type(start: str, end: str) -> int:
+    """根据日期范围推算 PublishTimeType：1d→1, 7d→7, ≤80d→180, 其余→0 """
+    if not start:
+        return 0
+    try:
+        _end = end or _datetime.now().strftime("%Y-%m-%d")
+        days = (_datetime.strptime(_end, "%Y-%m-%d") - _datetime.strptime(start, "%Y-%m-%d")).days
+        if days <= 1:
+            return 1
+        if days <= 7:
+            return 7
+        if days <= 180:
+            return 180
+        return 0
+    except Exception:
+        return 0
+
+
+_DY_DATE_START: str = _os.environ.get("DY_DATE_START", "")
+_DY_DATE_END: str = _os.environ.get("DY_DATE_END", "")
+PUBLISH_TIME_TYPE: int = int(
+    _os.environ.get(
+        "DY_PUBLISH_TIME_TYPE",
+        str(_date_range_to_publish_type(_DY_DATE_START, _DY_DATE_END)),
+    )
+)
 
 # 指定DY视频URL列表 (支持多种格式)
 # 支持格式:

@@ -24,9 +24,13 @@
 SORT_TYPE = "popularity_descending"
 
 # 时间范围筛选（发布时间）
-XHS_ENABLE_TIME_RANGE = False
-START_DAY = "2026-01-01"
-END_DAY = "2026-01-20"
+# 优先读取环境变量（由 WebUI crawler_manager 注入）
+import os as _os
+_XHS_DATE_START: str = _os.environ.get("XHS_DATE_START", "")
+_XHS_DATE_END: str = _os.environ.get("XHS_DATE_END", "")
+XHS_ENABLE_TIME_RANGE: bool = bool(_XHS_DATE_START)
+START_DAY: str = _XHS_DATE_START or "2026-01-01"
+END_DAY: str = _XHS_DATE_END or "2026-01-20"
 
 # 指定笔记URL列表, 必须要携带xsec_token参数
 XHS_SPECIFIED_NOTE_URL_LIST = [
