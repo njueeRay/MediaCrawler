@@ -5,7 +5,10 @@
 """
 
 import asyncio
+import json as _json
 import logging
+import os
+import urllib.request
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -23,6 +26,41 @@ _apscheduler = None
 
 # 全局中断标记：execution_id -> bool
 abort_flags: Dict[int, bool] = {}
+
+
+def _send_feishu_alert(task_name: str, status: str, error_message: str, execution_id: int) -> None:
+    """发送飞书机器人告警消息（同步）。
+    依赖环境变量 FEISHU_ALERT_WEBHOOK_URL，未配置时静默跳过。
+    """
+    webhook_url = os.environ.get("FEISHU_ALERT_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        return
+    icon = "🔴" if status == "failed" else "⚠️"
+    content = (
+        f"{icon} 任务执行通知\n\n"
+        f"任务名称：{task_name}\n"
+        f"执行状态：{status}\n"
+        f"执行 ID：{execution_id}\n"
+        f"时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    )
+    if error_message:
+        short_err = error_message[:300]
+        content += f"错误信息：{short_err}\n"
+    payload = _json.dumps({
+        "msg_type": "text",
+        "content": {"text": content},
+    }, ensure_ascii=False).encode()
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+    except Exception as exc:
+        logger.warning("[Alert] 飞书告警发送失败: %s", exc)
 
 
 def _get_scheduler():
@@ -551,6 +589,17 @@ class SchedulerService:
                             task.fail_count = (task.fail_count or 0) + 1
 
                     await session.commit()
+
+                    # 失败告警（异步线程中发送，避免阻塞）
+                    if status == "failed" and record:
+                        _task_name = record.task_name or f"execution#{execution_id}"
+                        import asyncio as _asyncio
+                        loop2 = _asyncio.get_event_loop()
+                        loop2.run_in_executor(
+                            None,
+                            _send_feishu_alert,
+                            _task_name, status, error_message or "", execution_id,
+                        )
         except Exception as e:
             logger.warning(f"[Scheduler] Failed to update execution record for execution_id={execution_id}: {e}")
 

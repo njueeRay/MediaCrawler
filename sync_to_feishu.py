@@ -591,6 +591,7 @@ def sync_file(
     cover_source_field: str = "",
     field_mapping: Optional[Dict[str, str]] = None,
     wechat_cover_field: str = "",
+    dedup_field: str = "",
 ) -> Dict:
     logger.info(f"🚀 开始同步文件: {file_path}")
 
@@ -630,6 +631,7 @@ def sync_file(
             unknown_fields=unknown_fields,
             cover_source_field=cover_source_field,
             field_mapping=field_mapping,
+            dedup_field=dedup_field,
         )
 
     if ext in {".csv", ".json"} and (
@@ -866,6 +868,11 @@ def main():
         default="",
         help="封面图写入的目标字段名（非空时自动启用封面上传；平台=wechat时默认 image）",
     )
+    parser.add_argument(
+        "--json-dedup",
+        default="",
+        help="按该字段值去重（保留首次出现的记录，过滤重复）；为空则不去重",
+    )
     parser.add_argument("--append-extra-field", default="", help="追加写入时额外字段名（如 type）")
     parser.add_argument(
         "--append-extra-type",
@@ -954,6 +961,7 @@ def main():
                 unknown_fields=args.unknown_fields,
                 cover_source_field=args.cover_source_field,
                 field_mapping=args.field_mapping,
+                dedup_field=args.json_dedup,
             )
             failed_snap = result.get("failed", 0)
             logger.info(
@@ -1060,6 +1068,7 @@ def main():
                 cover_source_field=args.cover_source_field,
                 field_mapping=args.field_mapping,
                 wechat_cover_field=args.wechat_cover_field,
+                dedup_field=args.json_dedup,
             )
             if result.get("failed", 0) > 0:
                 raise RuntimeError(f"同步失败: {result}")

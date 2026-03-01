@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-01T00:18:09",
+  "generated_at": "2026-03-01T11:27:06",
   "tasks": [
     {
       "id": 2,
@@ -24,7 +24,7 @@
       "name": "定时采集-部分公众号测试",
       "task_type": "subscription_crawl",
       "platform": "wechat",
-      "is_active": true,
+      "is_active": false,
       "schedule_type": "once",
       "schedule_config": {},
       "task_config": {
@@ -41,16 +41,16 @@
           }
         ]
       },
-      "last_run_at": "2026-02-28T23:27:48.848073",
+      "last_run_at": "2026-03-01T10:32:03.391800",
       "next_run_at": null,
-      "run_count": 10,
+      "run_count": 28,
       "fail_count": 0,
       "created_at": "2026-02-27T17:04:25",
-      "updated_at": "2026-02-28T15:27:48"
+      "updated_at": "2026-03-01T02:32:05"
     },
     {
       "id": 4,
-      "name": "飞书同步",
+      "name": "拉取-回写入库-json push",
       "task_type": "subscription_combo",
       "platform": "wechat",
       "is_active": true,
@@ -70,23 +70,34 @@
             "input": "step3_csv",
             "table_id": "tbl9RcXEGoCwWJHW",
             "json_columns": "AI文本分析",
-            "json_primary": "title"
+            "json_primary": "title",
+            "cover_source_field": "文章ID",
+            "wechat_cover_field": "image"
+          },
+          {
+            "step": "feishu_update_records",
+            "table_id": "tblZn1GWLKNHiR11",
+            "input": "step3_csv",
+            "fields_to_set": {
+              "是否已入库": "是"
+            },
+            "skip_on_error": true
           }
         ]
       },
-      "last_run_at": "2026-02-28T23:27:48.851078",
+      "last_run_at": "2026-03-01T11:26:59.194219",
       "next_run_at": null,
-      "run_count": 4,
-      "fail_count": 9,
+      "run_count": 41,
+      "fail_count": 25,
       "created_at": "2026-02-27T23:59:35",
-      "updated_at": "2026-02-28T15:28:10"
+      "updated_at": "2026-03-01T03:26:59"
     },
     {
       "id": 5,
       "name": "测试回写",
       "task_type": "subscription_combo",
       "platform": "wechat",
-      "is_active": true,
+      "is_active": false,
       "schedule_type": "interval",
       "schedule_config": {
         "hours": 6
@@ -96,16 +107,16 @@
           {
             "step": "feishu_pull",
             "platform": "wechat",
-            "table_id": "tblZn1GWLKNHiR11",
-            "view_id": "vewT7xrAZ5",
-            "output": "step3_csv"
+            "table_id": "tblWt9xl1ABZqOe7",
+            "view_id": "vew7xGiOfo",
+            "output": "feishu_pull_json"
           },
           {
             "step": "feishu_update_records",
-            "table_id": "tblZn1GWLKNHiR11",
-            "input": "step3_csv",
+            "table_id": "tblWt9xl1ABZqOe7",
+            "input": "feishu_pull_json",
             "fields_to_set": {
-              "是否已入库": true
+              "是否已入库": "是"
             },
             "skip_on_error": true
           }
@@ -114,9 +125,9 @@
       "last_run_at": null,
       "next_run_at": null,
       "run_count": 0,
-      "fail_count": 0,
+      "fail_count": 12,
       "created_at": "2026-02-28T16:11:11",
-      "updated_at": "2026-02-28T16:18:09"
+      "updated_at": "2026-03-01T03:26:50"
     }
   ]
 }

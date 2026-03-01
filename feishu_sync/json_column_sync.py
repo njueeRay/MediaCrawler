@@ -62,6 +62,13 @@ def parse_json_cell(value: Any) -> Optional[Any]:
     if concatenated is not None:
         return concatenated
 
+    # raw_decode 可处理 "Extra data" 场景（有效 JSON 后跟随垃圾文本）
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj
+    except Exception:
+        pass
+
     try:
         return ast.literal_eval(text)
     except Exception as exc:
@@ -256,6 +263,7 @@ def sync_rows_json_column(
     cover_source_field: str = "",
     field_mapping: Optional[Dict[str, str]] = None,
     wechat_cover_field: str = "",
+    dedup_field: str = "",
 ) -> Dict[str, Any]:
     """
     从行数据中解析 JSON 列并写入飞书（支持 CSV/DB 等来源）。
@@ -268,6 +276,7 @@ def sync_rows_json_column(
         cover_source_field: 用于关联封面图的文章 ID 字段名（默认自动识别 文章ID/article_id）
         field_mapping: 字段重命名映射 {源字段名: 目标字段名}，在过滤前执行
         wechat_cover_field: 封面图写入的目标字段名；非空时自动启用封面上传（覆盖 attach_wechat_cover）
+        dedup_field: 按此字段值去重（首次出现的记录保留），为空则不去重
     """
     if not rows:
         return {"success": 0, "failed": 0, "error": "输入数据为空"}
@@ -294,6 +303,24 @@ def sync_rows_json_column(
             "🔀 字段映射已应用: %s",
             {k: v for k, v in field_mapping.items() if k != v},
         )
+
+    # ── 0b. 按 dedup_field 去重（保留首次出现的记录）────────────────────────
+    if dedup_field:
+        _seen: Set[str] = set()
+        _deduped: List[Dict[str, Any]] = []
+        _dup_count = 0
+        for _rec in json_records:
+            _key = str(_rec.get(dedup_field, ""))
+            if _key and _key in _seen:
+                _dup_count += 1
+                continue
+            if _key:
+                _seen.add(_key)
+            _deduped.append(_rec)
+        if _dup_count:
+            logger.info("🔑 按字段 %r 去重：移除 %d 条重复记录，保留 %d 条",
+                        dedup_field, _dup_count, len(_deduped))
+        json_records = _deduped
 
     # ── 1. 提前获取目标表现有字段（用于未知字段过滤）──────────────────────────
     existing_type_map: Optional[Dict[str, int]] = None

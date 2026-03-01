@@ -333,3 +333,112 @@ async def stream_execution_logs(execution_id: int):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------- Task Templates ----------
+
+@router.get("/templates")
+async def list_templates(
+    session: AsyncSession = Depends(get_db),
+):
+    """获取所有任务模板"""
+    from sqlalchemy import select as _select
+
+    from database.webui_models import TaskTemplate
+    rows = (await session.execute(_select(TaskTemplate).order_by(TaskTemplate.created_at.desc()))).scalars().all()
+    return ok([
+        {
+            "id": t.id,
+            "name": t.name,
+            "description": t.description,
+            "task_type": t.task_type,
+            "platform": t.platform,
+            "task_config": t.task_config or {},
+            "tags": t.tags or [],
+            "is_builtin": t.is_builtin,
+            "created_at": str(t.created_at) if t.created_at else None,
+            "updated_at": str(t.updated_at) if t.updated_at else None,
+        }
+        for t in rows
+    ])
+
+
+@router.post("/templates")
+async def create_template(body: dict, session: AsyncSession = Depends(get_db)):
+    """创建任务模板"""
+    from database.webui_models import TaskTemplate
+    tmpl = TaskTemplate(
+        name=body.get("name", "未命名模板"),
+        description=body.get("description", ""),
+        task_type=body.get("task_type", "pipeline"),
+        platform=body.get("platform") or None,
+        task_config=body.get("task_config") or {},
+        tags=body.get("tags") or [],
+        is_builtin=False,
+    )
+    session.add(tmpl)
+    await session.flush()
+    await session.refresh(tmpl)
+    await session.commit()
+    return ok({"id": tmpl.id}, message="模板已保存")
+
+
+@router.put("/templates/{template_id}")
+async def update_template(
+    template_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_db),
+):
+    """更新任务模板（内置模板不可修改）"""
+    from sqlalchemy import select as _select
+
+    from database.webui_models import TaskTemplate
+    result = await session.execute(_select(TaskTemplate).where(TaskTemplate.id == template_id))
+    tmpl = result.scalars().first()
+    if not tmpl:
+        raise HTTPException(404, "模板不存在")
+    if tmpl.is_builtin:
+        raise HTTPException(400, "内置模板不可修改，请先复制")
+    for field in ("name", "description", "task_type", "platform", "task_config", "tags"):
+        if field in body:
+            setattr(tmpl, field, body[field])
+    await session.commit()
+    return ok(message="模板已更新")
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(template_id: int, session: AsyncSession = Depends(get_db)):
+    """删除任务模板（内置模板不可删除）"""
+    from sqlalchemy import select as _select
+
+    from database.webui_models import TaskTemplate
+    result = await session.execute(_select(TaskTemplate).where(TaskTemplate.id == template_id))
+    tmpl = result.scalars().first()
+    if not tmpl:
+        raise HTTPException(404, "模板不存在")
+    if tmpl.is_builtin:
+        raise HTTPException(400, "内置模板不可删除")
+    await session.delete(tmpl)
+    await session.commit()
+    return ok(message="模板已删除")
+
+
+@router.post("/templates/{template_id}/apply")
+async def apply_template(
+    template_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    """将模板应用为新任务（返回 task_config 供前端预填充）"""
+    from sqlalchemy import select as _select
+
+    from database.webui_models import TaskTemplate
+    result = await session.execute(_select(TaskTemplate).where(TaskTemplate.id == template_id))
+    tmpl = result.scalars().first()
+    if not tmpl:
+        raise HTTPException(404, "模板不存在")
+    return ok({
+        "task_type": tmpl.task_type,
+        "platform": tmpl.platform or "",
+        "task_config": tmpl.task_config or {},
+        "suggested_name": f"{tmpl.name} 副本",
+    })

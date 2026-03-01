@@ -681,6 +681,7 @@ class FeishuPushJsonStep(PipelineStep):
       cover_source_field — 封面关联的文章ID字段名（默认自动识别文章ID）
       range_start     — 只处理第 N 行起（1-based）
       range_end       — 只处理到第 N 行止（1-based）
+      json_dedup      — 按该字段值去重（仅保留首次出现，空则不去重）
     """
 
     step_type = "feishu_push_json"
@@ -795,6 +796,8 @@ class FeishuPushJsonStep(PipelineStep):
             cmd += ["--range-start", str(cfg["range_start"])]
         if cfg.get("range_end") is not None:
             cmd += ["--range-end", str(cfg["range_end"])]
+        if cfg.get("json_dedup"):
+            cmd += ["--json-dedup", cfg["json_dedup"]]
 
         exit_code = await self._run_subprocess(cmd, ctx, log)
         if exit_code != 0:

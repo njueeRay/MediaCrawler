@@ -251,3 +251,27 @@ class SubscriptionCrawlStatus(Base):
     last_started_at = Column(DateTime, nullable=True)
     last_finished_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# 7. TaskTemplate — 任务模板（快速开始）
+# ---------------------------------------------------------------------------
+class TaskTemplate(Base):
+    """任务模板：保存可复用的 pipeline 配置"""
+    __tablename__ = "webui_task_template"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False, unique=True)
+    description = Column(Text, default="")
+    # task_type: pipeline | crawl | sync | combo
+    task_type = Column(String(20), nullable=False, default="pipeline")
+    platform = Column(String(20), nullable=True)
+    # 完整 task_config JSON（包含 pipeline 数组或 legacy 配置）
+    task_config = Column(JSON, nullable=False, default=dict)
+    # 标签（便于检索分类）
+    tags = Column(JSON, default=list)
+    # 是否为内置模板（内置模板不可删除但可复制）
+    is_builtin = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

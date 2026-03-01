@@ -328,6 +328,21 @@
                 <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">封面图写入的飞书字段名；非空时自动启用封面上传，不填则 wechat 平台默认写入 image 字段</n-text>
               </div>
             </n-form-item>
+            <n-form-item label="标题去重字段">
+              <div style="width:100%">
+                <n-select
+                  v-if="_fieldCacheState[step.table_id]?.length"
+                  v-model:value="step.json_dedup"
+                  :options="_fieldCacheState[step.table_id]"
+                  filterable
+                  tag
+                  clearable
+                  placeholder="选择去重字段（留空不去重）"
+                />
+                <n-input v-else v-model:value="step.json_dedup" placeholder="按此字段去重（留空不去重，如 title）" />
+                <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">同一字段值多次出现时只保留首条（经字段映射后的字段名）</n-text>
+              </div>
+            </n-form-item>
             <n-form-item label="字段映射">
               <div style="width:100%">
                 <n-dynamic-input
@@ -338,7 +353,22 @@
                   <div style="display:flex;gap:8px;width:100%;align-items:center">
                     <n-input v-model:value="row.src" placeholder="原字段名（如 title）" style="flex:1" />
                     <n-text style="flex-shrink:0">→</n-text>
-                    <n-input v-model:value="row.dst" placeholder="目标字段名（如 活动名称）" style="flex:1" />
+                    <n-select
+                      v-if="_fieldCacheState[step.table_id]?.length"
+                      v-model:value="row.dst"
+                      :options="_fieldCacheState[step.table_id]"
+                      filterable
+                      tag
+                      clearable
+                      placeholder="目标字段名（可手输）"
+                      style="flex:1"
+                    />
+                    <n-input
+                      v-else
+                      v-model:value="row.dst"
+                      placeholder="目标字段名（如 活动名称）"
+                      style="flex:1"
+                    />
                   </div>
                 </n-dynamic-input>
                 <n-text depth="3" style="font-size:11px;width:100%;margin-top:2px;display:block">推送前重命名字段（源数据字段 → 目标飞书表字段），在字段过滤之前执行</n-text>
@@ -448,8 +478,55 @@
       <n-button dashed block size="small" @click="addStep">+ 添加步骤</n-button>
 
       <template #action>
-        <n-button @click="cancelCreate()">取消</n-button>
-        <n-button type="primary" @click="editingTaskId ? updateTask() : createTask()">{{ editingTaskId ? '保存' : '创建' }}</n-button>
+        <n-space style="width:100%;justify-content:space-between">
+          <n-space>
+            <n-button size="small" @click="openTemplateModal">从模板加载</n-button>
+            <n-button size="small" @click="saveAsTemplate">另存为模板</n-button>
+          </n-space>
+          <n-space>
+            <n-button @click="cancelCreate()">取消</n-button>
+            <n-button type="primary" @click="editingTaskId ? updateTask() : createTask()">{{ editingTaskId ? '保存' : '创建' }}</n-button>
+          </n-space>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- Template Picker Modal -->
+    <n-modal v-model:show="showTemplateModal" title="选择任务模板" preset="dialog" style="width: 680px">
+      <n-spin :show="templateLoading">
+        <n-empty v-if="!templates.length && !templateLoading" description="暂无模板，可在编辑任务时选择「另存为模板」来保存" />
+        <n-list bordered v-if="templates.length">
+          <n-list-item v-for="t in templates" :key="t.id">
+            <n-space align="center" justify="space-between">
+              <div>
+                <div style="font-weight:500">{{ t.name }}</div>
+                <div class="text-xs text-gray-400" v-if="t.description">{{ t.description }}</div>
+                <n-space :size="4" style="margin-top:4px" v-if="t.tags?.length">
+                  <n-tag v-for="tag in t.tags" :key="tag" size="tiny">{{ tag }}</n-tag>
+                </n-space>
+              </div>
+              <n-space>
+                <n-button size="small" type="primary" @click="applyTemplate(t.id)">加载</n-button>
+                <n-button size="small" type="error" quaternary :disabled="t.is_builtin" @click="deleteTemplate(t.id)">删除</n-button>
+              </n-space>
+            </n-space>
+          </n-list-item>
+        </n-list>
+      </n-spin>
+      <template #action>
+        <n-button @click="showTemplateModal = false">关闭</n-button>
+      </template>
+    </n-modal>
+    <!-- Save Template Modal -->
+    <n-modal v-model:show="showSaveTemplateModal" title="另存为模板" preset="dialog" style="width: 420px">
+      <n-form label-placement="left" label-width="80">
+        <n-form-item label="模板名称">
+          <n-input v-model:value="saveTemplateName" placeholder="请输入模板名称" @keyup.enter="confirmSaveTemplate" />
+        </n-form-item>
+      </n-form>
+      <template #action>
+        <n-button @click="showSaveTemplateModal = false">取消</n-button>
+        <n-button type="primary" @click="confirmSaveTemplate">保存</n-button>
       </template>
     </n-modal>
   </div>
@@ -477,6 +554,90 @@ const execLogMeta = ref<{ execution_id?: number; status?: string; trigger_type?:
 const logRef = ref<any>(null)
 const _isPolling = ref(false)
 let _logPollTimer: ReturnType<typeof setInterval> | null = null
+
+// ─── 任务模板 ─────────────────────────────────────────────────────────────────
+const showTemplateModal = ref(false)
+const templates = ref<any[]>([])
+const templateLoading = ref(false)
+const showSaveTemplateModal = ref(false)
+const saveTemplateName = ref('')
+const saveTemplateConfig = ref<any>(null)
+
+async function loadTemplates() {
+  templateLoading.value = true
+  try {
+    const res = await http.get('/scheduler/templates')
+    templates.value = unwrapApiData(res.data) || []
+  } catch {
+    templates.value = []
+  } finally {
+    templateLoading.value = false
+  }
+}
+
+async function openTemplateModal() {
+  showTemplateModal.value = true
+  await loadTemplates()
+}
+
+async function applyTemplate(templateId: number) {
+  try {
+    const res = await http.post(`/scheduler/templates/${templateId}/apply`)
+    const data = unwrapApiData(res.data) as any
+    // 预填任务配置
+    newTask.value.task_type = data.task_type || newTask.value.task_type
+    if (data.platform) newTask.value.platform = data.platform
+    restorePipelineFromConfig(data.task_config, data.task_type, data.platform || newTask.value.platform)
+    showTemplateModal.value = false
+    message.success('模板已加载，请确认配置后保存')
+  } catch (e: any) {
+    message.error(`加载模板失败: ${e?.message ?? '未知错误'}`)
+  }
+}
+
+async function saveAsTemplate() {
+  // 先序列化当前 pipeline 配置
+  let taskConfig: any
+  try {
+    taskConfig = buildTaskConfig()
+  } catch (e: any) {
+    message.error(`序列化配置失败: ${e?.message}`)
+    return
+  }
+  const rawName = newTask.value.name || '未命名任务'
+  const suggestedName = rawName + ' 模板'
+  showSaveTemplateModal.value = true
+  saveTemplateName.value = suggestedName
+  saveTemplateConfig.value = taskConfig
+}
+
+async function confirmSaveTemplate() {
+  const name = saveTemplateName.value.trim()
+  if (!name) { message.warning('请输入模板名称'); return }
+  try {
+    await http.post('/scheduler/templates', {
+      name,
+      task_type: newTask.value.task_type || 'pipeline',
+      platform: newTask.value.platform || null,
+      task_config: saveTemplateConfig.value,
+      tags: newTask.value.platform ? [newTask.value.platform] : [],
+    })
+    message.success('模板已保存')
+    showSaveTemplateModal.value = false
+  } catch (e: any) {
+    message.error(`保存失败: ${e?.message}`)
+  }
+}
+
+async function deleteTemplate(templateId: number) {
+  try {
+    await http.delete(`/scheduler/templates/${templateId}`)
+    message.success('模板已删除')
+    await loadTemplates()
+  } catch (e: any) {
+    message.error(`删除失败: ${e?.message}`)
+  }
+}
 
 // 遗书字段缓存（会话级，刷新后清空）
 /** 飞书字段类型 int -> 中文标签 */
@@ -533,7 +694,7 @@ const pipelineSteps = ref<any[]>([])
 
 watchEffect(() => {
   for (const step of pipelineSteps.value) {
-    if (['feishu_pull', 'feishu_update_records'].includes(step.step)) {
+    if (['feishu_pull', 'feishu_update_records', 'feishu_push_json'].includes(step.step)) {
       const tid = step.table_id as string | undefined
       if (tid && tid.startsWith('tbl') && tid.length > 6 && !_fieldCacheState.value[tid]) {
         void loadFields(tid)
@@ -720,7 +881,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
     case 'feishu_pull':
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', filter_conjunction: 'and', output_format: 'sqlite', output: 'feishu_pull_result' }
     case 'feishu_push_json':
-      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', unknown_fields: 'skip', cover_source_field: '', wechat_cover_field: '', field_mapping_rows: [], range_start: null, range_end: null }
+      return { step: 'feishu_push_json', input: 'feishu_pull_result', table_id: '', json_columns: '', json_primary: '记录ID', unknown_fields: 'skip', cover_source_field: '', wechat_cover_field: '', field_mapping_rows: [], range_start: null, range_end: null, json_dedup: '' }
     case 'feishu_update_records':
       return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
@@ -869,6 +1030,7 @@ function buildTaskConfig(): any {
       if (s.unknown_fields && s.unknown_fields !== 'skip') clean.unknown_fields = s.unknown_fields
       if (s.cover_source_field) clean.cover_source_field = s.cover_source_field
       if (s.wechat_cover_field) clean.wechat_cover_field = s.wechat_cover_field
+      if (s.json_dedup) clean.json_dedup = s.json_dedup
       // field_mapping_rows [{src, dst}] → field_mapping {src: dst}
       if (Array.isArray(s.field_mapping_rows) && s.field_mapping_rows.length) {
         const mapping: Record<string, string> = {}
