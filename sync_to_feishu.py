@@ -187,8 +187,11 @@ async def _load_from_snapshot(dataset_name: str, db_type: str = "sqlite") -> Lis
     for snap in snaps:
         try:
             rows.append(json.loads(snap.fields_json))
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning(
+                "[sync_to_feishu] JSON 解析失败，跳过这条记录 (feishu_record_id=%s): %s",
+                getattr(snap, 'feishu_record_id', '?'), _e,
+            )
 
     logger.info(
         "🗄️  从 feishu_record_snapshot 加载 %s 条 (dataset=%s, db_type=%s)",

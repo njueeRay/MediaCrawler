@@ -18,6 +18,11 @@ FROM python:3.11-slim AS runtime
 # 默认 false：仅 WebUI + 微信 API 模式，镜像更小
 ARG ENABLE_PLAYWRIGHT=false
 
+# A-02: 设置 Playwright 浏览器安装目录为 /app/.playwright，
+#       保证 root 安装和非-root 运行时路径一致
+#       （默认 /root/.cache/ms-playwright 对 appuser 不可读）
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright
+
 # 系统依赖（curl + OpenCV 运行时 + Playwright 浏览器需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -48,7 +53,8 @@ COPY . .
 COPY --from=frontend /app/api/webui/ /app/api/webui/
 
 # 创建运行时目录并授权（data / browser_data 应挂载为 volume）
-RUN mkdir -p /app/data /app/browser_data /app/cache && \
+# A-02: 同时创建 Playwright 浏览器目录（路径已由 PLAYWRIGHT_BROWSERS_PATH 指定）
+RUN mkdir -p /app/data /app/browser_data /app/cache /app/.playwright && \
     chown -R appuser:appgroup /app
 
 USER appuser

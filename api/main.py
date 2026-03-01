@@ -22,6 +22,7 @@ Start command: uvicorn api.main:app --port 8080 --reload
 Or: python -m api.main
 """
 import asyncio
+import logging
 import os
 import subprocess
 import sys
@@ -32,10 +33,13 @@ import uvicorn
 # 否则 asyncio.create_subprocess_exec 在 SelectorEventLoop 下返回 stdout=None
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from .routers import (
     config_router,
@@ -80,6 +84,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# A-04: X-API-Key 认证中间件
+# 在 .env 中设置 API_SECRET_KEY=<your-key> 以启用；不设置则不鉴权（开发模式）
+_API_SECRET_KEY: str = os.environ.get("API_SECRET_KEY", "").strip()
+
+# 不鉴权的路径前缀列表（健康检查、WebSocket、静态文件、Swagger）
+_AUTH_SKIP_PREFIXES = ("/api/health", "/ws", "/docs", "/openapi", "/redoc")
+
+
+class _APIKeyMiddleware(BaseHTTPMiddleware):
+    """X-API-Key 简单鉴权中间件。
+    - 仅在 API_SECRET_KEY 有值时生效
+    - OPTIONS 预检请求直接放行（CORS）
+    - WebSocket、健康检查、静态资源、Swagger 路径跳过鉴权
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if not _API_SECRET_KEY:
+            return await call_next(request)
+        path = request.url.path
+        # 放行: OPTIONS 预检、非 /api/ 路径、白名单前缀
+        if (
+            request.method == "OPTIONS"
+            or not path.startswith("/api/")
+            or any(path.startswith(p) for p in _AUTH_SKIP_PREFIXES)
+        ):
+            return await call_next(request)
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key != _API_SECRET_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: invalid or missing X-API-Key"},
+            )
+        return await call_next(request)
+
+
+app.add_middleware(_APIKeyMiddleware)
+
 # Register routers — existing
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
@@ -92,6 +133,49 @@ app.include_router(field_mapping_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
+
+_api_logger = logging.getLogger("api")
+
+
+# A-09: 全局异常处理 — 统一 JSON 格式，不向客户端暴露 traceback
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """422 参数校验失败 — 返回简洁字段错误列表"""
+    errors = [
+        {"field": ".".join(str(x) for x in err["loc"]), "msg": err["msg"]}
+        for err in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "请求参数验证失败", "errors": errors},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def _http_error_handler(request: Request, exc: HTTPException):
+    """4xx/5xx HTTP 异常 — 返回简洁 detail，不含 traceback"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def _global_error_handler(request: Request, exc: Exception):
+    """未捕获异常 — 服务端记录完整 traceback，客户端只收到 500 + 简洁消息"""
+    import traceback as _tb
+
+    _api_logger.error(
+        "Unhandled exception [%s %s]: %s\n%s",
+        request.method,
+        request.url.path,
+        exc,
+        _tb.format_exc(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器内部错误，请查看服务端日志获取详情"},
+    )
 
 
 @app.on_event("startup")

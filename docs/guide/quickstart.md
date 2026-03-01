@@ -154,3 +154,122 @@ uv run auto_scheduler.py
 ```
 
 > 调度任务通过 WebUI 控制台的「任务调度」页面配置，无需手动编辑配置文件。
+
+---
+
+## 服务器生产部署
+
+### 方式一：Docker Compose（推荐）
+
+> 适合 **Linux/macOS 云服务器**，一条命令完成镜像构建和服务启动。
+
+**前置条件：**
+- 安装 [Docker](https://docs.docker.com/engine/install/) 和 [Docker Compose](https://docs.docker.com/compose/install/)
+- 复制并填写 `.env` 文件
+
+```shell
+# 1. 进入项目根目录
+cd MediaCrawler
+
+# 2. 从模板创建 .env
+cp .env.example .env
+$EDITOR .env  # 填写飞书配置和其他环境变量
+
+# 3. 构建并启动（后台运行）
+cd deploy
+docker-compose up -d --build
+
+# 4. 查看日志
+docker-compose logs -f mediacrawler
+```
+
+> **数据持久化：** `data/`, `browser_data/`, `database/` 均通过 Docker Volume 挂载到宿主机，容器重建不会丢失。
+
+**需要 Playwright 浏览器爬虫时（增加 ~400MB 镜像大小）：**
+```shell
+# 在 .env 中追加：
+ENABLE_PLAYWRIGHT=true
+# 然后重新构建
+docker-compose up -d --build
+```
+
+---
+
+### 方式二：Linux 原生 + systemd
+
+> 适合不想用 Docker、直接在服务器上跑 Python 的场景。
+
+```shell
+# 1. 克隆代码
+git clone https://github.com/NanmiCoder/MediaCrawler.git
+cd MediaCrawler
+
+# 2. 安装 uv（如未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 3. 同步依赖（不含 Playwright）
+uv sync --no-dev
+
+# 4. 编译前端
+cd webui-src && npm ci && npm run build && cd ..
+
+# 5. 拷贝并配置 .env
+cp .env.example .env
+nano .env
+```
+
+安装 systemd 服务文件（项目已内置 `deploy/mediacrawler.service`）：
+
+```shell
+# 编辑服务文件中的工作目录和用户（按实际路径修改）
+sudo cp deploy/mediacrawler.service /etc/systemd/system/
+
+# 重载并启动
+sudo systemctl daemon-reload
+sudo systemctl enable mediacrawler
+sudo systemctl start mediacrawler
+
+# 查看状态
+sudo systemctl status mediacrawler
+journalctl -u mediacrawler -f
+```
+
+---
+
+### 关键环境变量
+
+| 变量名 | 说明 | 默认值 |
+|---|---|---|
+| `WEBUI_PORT` | WebUI 对外端口（仅 Docker Compose 生效） | `8080` |
+| `API_SECRET_KEY` | X-API-Key 鉴权密钥（为空则不鉴权） | 空（开发模式不鉴权） |
+| `SAVE_DATA_OPTION` | 数据存储方式：`sqlite` / `mysql` / `json` / `csv` | `sqlite` |
+| `ALLOWED_ORIGINS` | CORS 允许的前端域名列表，逗号分隔 | 本地开发地址 |
+| `TASK_TIMEOUT_SECONDS` | 任务执行超时时间（秒） | `1800` |
+| `FEISHU_APP_ID` | 飞书应用 ID | 空 |
+| `FEISHU_APP_SECRET` | 飞书应用密钥 | 空 |
+| `FEISHU_APP_TOKEN` | 飞书多维表格 App Token | 空 |
+| `TZ` | 服务器时区 | `Asia/Shanghai`（Docker 默认） |
+
+> ⚠️ 生产部署**强烈建议**设置 `API_SECRET_KEY`，防止未授权访问！前端请求时需在 header 中加 `X-API-Key: <your-key>`。
+
+---
+
+### 常见问题
+
+#### 无法访问 WebUI
+
+1. 确认服务已启动：`curl http://<server-ip>:8080/api/health`
+2. 检查防火墙：`sudo ufw allow 8080` 或云服务商安全组放行端口
+3. Docker 网络问题：确认 `ports` 映射正确（`0.0.0.0:8080:8080`，非 `127.0.0.1`）
+
+#### 飞书同步认证失败
+
+- 确认 `.env` 中 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 填写正确
+- lark-oapi SDK 自动管理 `tenant_access_token`，**不需要**手动填写 Token
+- 在飞书开放平台确认应用已发布且权限已申请（多维表格读写权限）
+
+#### 爬虫任务超时
+
+- 增大 `TASK_TIMEOUT_SECONDS`（默认 1800s）
+- 检查网络连通性和 Cookie/登录状态是否有效
+````

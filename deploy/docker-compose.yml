@@ -29,6 +29,9 @@ services:
       - mediacrawler-logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
+      # SAVE_DATA_OPTION=sqlite 是默认模式，也可在 .env 中覆盖
+      - SAVE_DATA_OPTION=${SAVE_DATA_OPTION:-sqlite}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s

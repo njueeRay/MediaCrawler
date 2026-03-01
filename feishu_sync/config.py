@@ -46,6 +46,20 @@ class FeishuConfig:
     REQUEST_TIMEOUT = int(os.getenv("FEISHU_REQUEST_TIMEOUT", "30"))
     RETRY_COUNT = int(os.getenv("FEISHU_RETRY_COUNT", "3"))
     RATE_LIMIT_DELAY = float(os.getenv("FEISHU_RATE_LIMIT_DELAY", "0.1"))
+
+    # A-05: 飞书推送专用分批参数（限流保护）
+    # 飞书 BatchCreate API 建议：不超过 50 条/请求，每批间隔 0.8s
+    CREATE_BATCH_SIZE: int = int(os.getenv("FEISHU_CREATE_BATCH_SIZE", "50"))   # A-05
+    CREATE_RATE_LIMIT_DELAY: float = float(os.getenv("FEISHU_CREATE_RATE_DELAY", "0.8"))  # A-05
+
+    # A-01: 飞书 API 认证失效错误码（部分，常见）
+    AUTH_ERROR_CODES: frozenset = frozenset({
+        99991663,  # tenant_access_token 过期
+        99991664,  # user_access_token 过期
+        99991661,  # 无效的 user_access_token
+        99991671,  # app_access_token 过期
+        99991400,  # header 中 app_access_token 已过期
+    })
     
     # 数据处理配置
     MAX_TITLE_LENGTH = int(os.getenv("MAX_TITLE_LENGTH", "100"))

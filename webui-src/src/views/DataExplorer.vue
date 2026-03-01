@@ -6,6 +6,14 @@
           <n-tag size="small" :type="isDbMode ? 'success' : 'default'">
             存储: {{ saveMode || '-' }}
           </n-tag>
+          <!-- A-14: 搜索框 -->
+          <n-input
+            v-model:value="keyword"
+            placeholder="搜索文件名/表名"
+            clearable
+            size="small"
+            style="width: 180px"
+          />
           <n-select
             v-model:value="platform"
             :options="platformOptions"
@@ -26,11 +34,11 @@
       </template>
 
       <n-spin :show="loading">
-        <n-empty v-if="!loading && !dataFiles.length" description="暂无数据，请先运行爬虫采集" />
+        <n-empty v-if="!loading && !filteredDataFiles.length" description="暂无数据，请先运行爬虫采集" />
         <n-data-table
           v-else
           :columns="currentColumns"
-          :data="dataFiles"
+          :data="filteredDataFiles"
           size="small"
           :row-key="(r: any) => r.path || r.table"
         />
@@ -50,11 +58,11 @@
           />
         </n-space>
         <n-spin :show="fileLoading">
-          <n-empty v-if="!fileLoading && !fileDataList.length" description="暂无文件数据" />
+          <n-empty v-if="!fileLoading && !filteredFileDataList.length" description="暂无文件数据" />
           <n-data-table
             v-else
             :columns="fileColumns"
-            :data="fileDataList"
+            :data="filteredFileDataList"
             size="small"
             :row-key="(r: any) => r.path"
           />
@@ -108,6 +116,7 @@ const showPreview = ref(false)
 
 const platform = ref('')
 const fileType = ref('')
+const keyword = ref('')  // A-14: 搜索关键词
 const dataFiles = ref<any[]>([])
 const stats = ref<any>({})
 const saveMode = ref('')
@@ -117,6 +126,26 @@ const isDbMode = computed(() => ['sqlite', 'db', 'postgres'].includes((saveMode.
 // File data for mixed mode (DB mode also shows files)
 const fileDataList = ref<any[]>([])
 const fileLoading = ref(false)
+
+// A-14: 过滤后的数据表
+const filteredDataFiles = computed(() => {
+  if (!keyword.value) return dataFiles.value
+  const kw = keyword.value.toLowerCase()
+  return dataFiles.value.filter(r =>
+    (r.name || '').toLowerCase().includes(kw) ||
+    (r.path || '').toLowerCase().includes(kw) ||
+    (r.table || '').toLowerCase().includes(kw)
+  )
+})
+
+const filteredFileDataList = computed(() => {
+  if (!keyword.value) return fileDataList.value
+  const kw = keyword.value.toLowerCase()
+  return fileDataList.value.filter(r =>
+    (r.name || '').toLowerCase().includes(kw) ||
+    (r.path || '').toLowerCase().includes(kw)
+  )
+})
 
 const previewFile = ref('')
 const previewType = ref('json')

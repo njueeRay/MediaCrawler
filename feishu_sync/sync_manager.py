@@ -122,8 +122,8 @@ class FeishuSyncManager:
                 fields_config = self.formatter.get_table_fields()
                 primary_name = fields_config[0]["field_name"] if fields_config else self.PRIMARY_FIELD_NAME
                 self._rename_primary_field(primary_name, fields_config)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("[FeishuSync] setup_table: 主字段重命名跳过: %s", _e)
             return self.table_id
         
         try:
@@ -416,6 +416,27 @@ class FeishuSyncManager:
                 success_count += cnt
                 logger.info(f"batch_update 第{i // BATCH + 1}批：{cnt} 条成功")
             else:
+                # A-01: auth 失败时重建 client 并重试一次
+                if response.code in FeishuConfig.AUTH_ERROR_CODES:
+                    logger.warning(
+                        "[FeishuSync] batch_update 认证错误 code=%s，重建客户端后重试",
+                        response.code,
+                    )
+                    self.client = self._create_lark_client()
+                    response = self.client.bitable.v1.app_table_record.batch_update(
+                        request, self._get_request_option()
+                    )
+                    if response.success():
+                        cnt = (
+                            len(response.data.records)
+                            if response.data and response.data.records
+                            else len(batch)
+                        )
+                        success_count += cnt
+                        logger.info(f"batch_update 第{i // BATCH + 1}批重试成功：{cnt} 条")
+                        if i + BATCH < len(record_ids):
+                            time.sleep(FeishuConfig.RATE_LIMIT_DELAY)
+                        continue
                 msg = (
                     f"batch_update 第{i // BATCH + 1}批失败 "
                     f"Code={response.code} Msg={response.msg}"
@@ -758,7 +779,8 @@ class FeishuSyncManager:
             创建结果
         """
         success_count = 0
-        batch_size = min(FeishuConfig.BATCH_SIZE, 500)  # 飞书API限制
+        # A-05: 使用 CREATE_BATCH_SIZE(50) 和 CREATE_RATE_LIMIT_DELAY(0.8s) 防止触发飞书限流
+        batch_size = min(FeishuConfig.CREATE_BATCH_SIZE, 500)
 
         logger.info(f"开始批量上传，总计 {len(records)} 条记录，批量大小: {batch_size}")
 
@@ -796,25 +818,50 @@ class FeishuSyncManager:
                     success_count += batch_success
                     logger.info(f"第 {batch_num} 批成功上传 {batch_success} 条记录")
                 else:
-                    error_msg = f"第 {batch_num} 批上传失败 - Code: {response.code}, Msg: {response.msg}"
-                    logger.error(error_msg)
-                    logger.error(
-                        "请求体(仅字段): %s",
-                        json.dumps(request_payload, ensure_ascii=False)
-                    )
-                    if hasattr(response, 'raw') and response.raw:
-                        try:
-                            error_detail = json.loads(response.raw.content)
-                            logger.error(f"详细错误: {json.dumps(error_detail, indent=2, ensure_ascii=False)}")
-                        except Exception:
+                    # A-01: 检测 auth 失败，尝试重建客户端并重试一次
+                    if response.code in FeishuConfig.AUTH_ERROR_CODES:
+                        logger.warning(
+                            "[FeishuSync] 认证错误 code=%s (%s)，重建客户端后重试第 %d 批",
+                            response.code, response.msg, batch_num,
+                        )
+                        self.client = self._create_lark_client()
+                        response = self.client.bitable.v1.app_table_record.batch_create(
+                            request, self._get_request_option()
+                        )
+                        if response.success():
+                            batch_success = (
+                                len(response.data.records)
+                                if response.data and response.data.records
+                                else len(batch_records)
+                            )
+                            success_count += batch_success
+                            logger.info(f"第 {batch_num} 批重试成功，上传 {batch_success} 条记录")
+                        else:
+                            logger.error(
+                                "[FeishuSync] 认证重试后仍失败 code=%s msg=%s",
+                                response.code, response.msg,
+                            )
+                    else:
+                        error_msg = f"第 {batch_num} 批上传失败 - Code: {response.code}, Msg: {response.msg}"
+                        logger.error(error_msg)
+                        logger.error(
+                            "请求体(仅字段): %s",
+                            json.dumps(request_payload, ensure_ascii=False)
+                        )
+                        if hasattr(response, 'raw') and response.raw:
                             try:
-                                raw_text = response.raw.content.decode("utf-8", errors="ignore")
-                                logger.error(f"响应体(原始): {raw_text}")
+                                error_detail = json.loads(response.raw.content)
+                                logger.error(f"详细错误: {json.dumps(error_detail, indent=2, ensure_ascii=False)}")
                             except Exception:
-                                pass
+                                try:
+                                    raw_text = response.raw.content.decode("utf-8", errors="ignore")
+                                    logger.error(f"响应体(原始): {raw_text}")
+                                except Exception as _decode_err:  # noqa: F841
+                                    pass  # 解码失败，释放，不影响主流程
 
+                # A-05: 批次间等待，避免触发飞书限流
                 if i + batch_size < len(records):
-                    time.sleep(FeishuConfig.RATE_LIMIT_DELAY)
+                    time.sleep(FeishuConfig.CREATE_RATE_LIMIT_DELAY)
 
             except Exception as e:
                 logger.error(f"第 {batch_num} 批处理失败: {e}")

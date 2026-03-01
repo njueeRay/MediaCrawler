@@ -293,8 +293,8 @@ async def save_rows_to_db(
                 "updated_at TEXT DEFAULT ''"
                 ")"
             ))
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("[read_from_feishu] feishu_dataset_latest 建表跳过: %s", _e)
 
     AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

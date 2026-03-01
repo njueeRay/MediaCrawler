@@ -64,14 +64,31 @@ def _send_feishu_alert(task_name: str, status: str, error_message: str, executio
 
 
 def _get_scheduler():
-    """获取或创建 APScheduler 实例"""
+    """获取或创建 APScheduler 实例（A-03: 使用 SQLAlchemyJobStore 持久化任务调度状态）"""
     global _apscheduler
     if _apscheduler is not None:
         return _apscheduler
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-        _apscheduler = AsyncIOScheduler()
+        # A-03: SQLAlchemyJobStore — jobs 重启后不丢失（next_run_time 精确恢复）
+        scheduler_kwargs: dict = {"timezone": "Asia/Shanghai"}
+        try:
+            import os as _os
+            from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
+            _proj_root = _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))
+            _db_path = _os.path.join(_proj_root, "config", "scheduler_jobs.db")
+            scheduler_kwargs["jobstores"] = {
+                "default": SQLAlchemyJobStore(url=f"sqlite:///{_db_path}")
+            }
+            logger.info("[Scheduler] Using SQLAlchemyJobStore: %s", _db_path)
+        except ImportError:
+            logger.warning("[Scheduler] SQLAlchemyJobStore unavailable, falling back to MemoryJobStore")
+        except Exception as _je:
+            logger.warning("[Scheduler] SQLAlchemyJobStore init failed (%s), using MemoryJobStore", _je)
+
+        _apscheduler = AsyncIOScheduler(**scheduler_kwargs)
         _apscheduler.start()
         logger.info("[Scheduler] APScheduler started")
         return _apscheduler
@@ -328,8 +345,37 @@ class SchedulerService:
                 execution_id = execution.id
                 await session.commit()
 
-            # 执行任务
-            await scheduler_service._run_task(execution_id, task_type, platform, task_config)
+            # 执行任务 — A-06: 全局超时保护（默认 1800s，可通过环境变量覆盖）
+            _timeout = int(os.environ.get("TASK_TIMEOUT_SECONDS", "1800"))
+            try:
+                await asyncio.wait_for(
+                    scheduler_service._run_task(execution_id, task_type, platform, task_config),
+                    timeout=_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[Scheduler] Task %s timed out after %ss", task_id, _timeout
+                )
+                await SchedulerService.append_execution_log(
+                    execution_id,
+                    f"[TIMEOUT] 任务超时 {_timeout}s，已强制中断",
+                )
+                # 更新执行记录状态
+                try:
+                    from database.db_session import get_session as _gs
+                    async with _gs() as _s:
+                        if _s:
+                            _r = await _s.execute(
+                                select(TaskExecution).where(TaskExecution.id == execution_id)
+                            )
+                            _ex = _r.scalars().first()
+                            if _ex:
+                                _ex.status = "failed"
+                                _ex.error_message = f"任务执行超时 ({_timeout}s)"
+                                _ex.finished_at = datetime.now()
+                                await _s.commit()
+                except Exception as _ue:
+                    logger.warning("[Scheduler] Failed to update timeout status: %s", _ue)
         except Exception as e:
             logger.error(f"[Scheduler] Scheduled execution failed for task {task_id}: {e}")
 

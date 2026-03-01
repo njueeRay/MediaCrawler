@@ -66,8 +66,8 @@ def parse_json_cell(value: Any) -> Optional[Any]:
     try:
         obj, _ = json.JSONDecoder().raw_decode(text)
         return obj
-    except Exception:
-        pass
+    except Exception:  # noqa: S110 第三次 fallback，异常由后续 ast.literal_eval 外层报告
+        pass  # fallback to ast.literal_eval below
 
     try:
         return ast.literal_eval(text)
@@ -377,8 +377,8 @@ def sync_rows_json_column(
             existing_fields_obj2 = manager._list_fields()
             if existing_fields_obj2:
                 existing_type_map = {name: field.type for name, field in existing_fields_obj2.items()}
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[json_column_sync] 刷新字段类型映射失败（已忽略）: %s", _e)
     # else skip/warn：跳过，不创建任何新字段
 
     if batch_size:
