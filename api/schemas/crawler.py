@@ -72,6 +72,9 @@ class CrawlerStartRequest(BaseModel):
     save_option: SaveDataOptionEnum = SaveDataOptionEnum.SQLITE  # 与 SAVE_DATA_OPTION 默认值保持一致
     cookies: str = ""
     headless: bool = False
+    # 采集日期范围（由 Pipeline step 在运行时计算并传入）
+    crawl_date_start: str = ""  # YYYY-MM-DD，空=不限制
+    crawl_date_end: str = ""    # YYYY-MM-DD，空=不限制
 
 
 class CrawlerStatusResponse(BaseModel):

@@ -185,6 +185,20 @@
             <n-form-item label="超时(秒)">
               <n-input-number v-model:value="step.timeout_seconds" :min="60" style="width:140px" />
             </n-form-item>
+            <n-form-item label="内容日期范围">
+              <n-space vertical :size="4">
+                <n-select v-model:value="step.date_range_type" :options="dateRangeOptions" style="width:220px" />
+                <span class="text-xs text-gray-400">只采集该时段内发布的内容（微信已支持；其他平台陆续适配）</span>
+              </n-space>
+            </n-form-item>
+            <template v-if="step.date_range_type === 'custom'">
+              <n-form-item label="开始日期">
+                <n-date-picker v-model:formatted-value="step.date_range_start" type="date" value-format="yyyy-MM-dd" clearable style="width:165px" />
+              </n-form-item>
+              <n-form-item label="结束日期">
+                <n-date-picker v-model:formatted-value="step.date_range_end" type="date" value-format="yyyy-MM-dd" clearable style="width:165px" />
+              </n-form-item>
+            </template>
           </n-form>
         </template>
 
@@ -210,6 +224,20 @@
               <n-input-number v-model:value="step.retry_count" :min="0" :max="5" style="width:100px" />
               <span class="ml-2 text-xs text-gray-400">次（XHS/抖音建议 2）</span>
             </n-form-item>
+            <n-form-item label="内容日期范围">
+              <n-space vertical :size="4">
+                <n-select v-model:value="step.date_range_type" :options="dateRangeOptions" style="width:220px" />
+                <span class="text-xs text-gray-400">只采集该时段内发布的内容（微信已支持；其他平台陆续适配）</span>
+              </n-space>
+            </n-form-item>
+            <template v-if="step.date_range_type === 'custom'">
+              <n-form-item label="开始日期">
+                <n-date-picker v-model:formatted-value="step.date_range_start" type="date" value-format="yyyy-MM-dd" clearable style="width:165px" />
+              </n-form-item>
+              <n-form-item label="结束日期">
+                <n-date-picker v-model:formatted-value="step.date_range_end" type="date" value-format="yyyy-MM-dd" clearable style="width:165px" />
+              </n-form-item>
+            </template>
           </n-form>
         </template>
 
@@ -237,9 +265,25 @@
 
         <!-- feishu_push 配置 -->
         <template v-if="step.step === 'feishu_push'">
-          <n-form label-placement="left" label-width="100" size="small">
-            <n-form-item label="数据类型">
-              <n-select v-model:value="step.data_type" :options="dataTypeOptions" style="width:140px" />
+          <n-form label-placement="left" label-width="110" size="small">
+            <n-form-item>
+              <template #label>
+                <span>数据表类型</span>
+                <n-tooltip placement="right" trigger="hover" style="max-width:280px">
+                  <template #trigger>
+                    <n-icon class="ml-1 cursor-pointer" style="font-size:13px;color:#aaa;vertical-align:-2px">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    </n-icon>
+                  </template>
+                  <div style="font-size:12px;line-height:1.9">
+                    <b>系统已根据平台自动匹配，一般无需修改：</b><br/>
+                    • 微信公众号 → 文章 (article)<br/>
+                    • 小红书/抖音/B站/微博 → 笔记/视频 (note)<br/>
+                    • 创作者爬取模式 → 账号信息 (creator)
+                  </div>
+                </n-tooltip>
+              </template>
+              <n-select v-model:value="step.data_type" :options="dataTypeOptions" style="width:260px" />
             </n-form-item>
             <n-form-item label="目标表 ID">
               <n-input v-model:value="step.table_id" placeholder="tblXXXXXXX（不填读环境变量）" />
@@ -787,9 +831,18 @@ const crawlerTypeOptions = [
 ]
 
 const dataTypeOptions = [
-  { label: '文章 (article)', value: 'article' },
-  { label: '创作者 (creator)', value: 'creator' },
-  { label: '笔记 (note)', value: 'note' },
+  { label: '文章 — 微信公众号采集内容', value: 'article' },
+  { label: '笔记/视频 — 小红书·抖音·B站·微博等', value: 'note' },
+  { label: '创作者 — 账号/用户元信息', value: 'creator' },
+]
+
+const dateRangeOptions = [
+  { label: '不限制（全部内容）', value: 'all' },
+  { label: '过去 1 天', value: 'past_1d' },
+  { label: '过去 3 天', value: 'past_3d' },
+  { label: '过去 7 天（约1周）', value: 'past_7d' },
+  { label: '过去 30 天（约1月）', value: 'past_30d' },
+  { label: '自定义日期范围', value: 'custom' },
 ]
 
 const conjunctionOps = [
@@ -913,7 +966,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
   const needRetry = PLAYWRIGHT_PLATFORMS.has(p)
   switch (stepType) {
     case 'subscription_crawl':
-      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 3600, only_creator_ids: [] }
+      return { step: 'subscription_crawl', platform: p, limit: 0, timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 3600, only_creator_ids: [], date_range_type: 'all', date_range_start: '', date_range_end: '' }
     case 'crawl':
       return {
         step: 'crawl', platform: p,
@@ -922,6 +975,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
         timeout_seconds: p === 'xhs' || p === 'dy' ? 2700 : 1800,
         retry_count: needRetry ? 2 : 0,
         retry_delay: 30,
+        date_range_type: 'all', date_range_start: '', date_range_end: '',
       }
     case 'feishu_push':
       return { step: 'feishu_push', platform: p, data_type: dataType, table_id: '' }
@@ -1109,6 +1163,13 @@ function buildTaskConfig(): any {
       if (s.limit > 0) clean.limit = s.limit
       if (s.timeout_seconds && s.timeout_seconds !== 3600) clean.timeout_seconds = s.timeout_seconds
       if (s.only_creator_ids && s.only_creator_ids.length > 0) clean.only_creator_ids = s.only_creator_ids
+      if (s.date_range_type && s.date_range_type !== 'all') {
+        clean.date_range_type = s.date_range_type
+        if (s.date_range_type === 'custom') {
+          if (s.date_range_start) clean.date_range_start = s.date_range_start
+          if (s.date_range_end) clean.date_range_end = s.date_range_end
+        }
+      }
     }
     if (s.step === 'crawl') {
       clean.crawler_type = s.crawler_type || 'search'
@@ -1118,6 +1179,13 @@ function buildTaskConfig(): any {
       if (s.timeout_seconds && s.timeout_seconds !== 1800) clean.timeout_seconds = s.timeout_seconds
       if (s.retry_count && Number(s.retry_count) > 0) clean.retry_count = Number(s.retry_count)
       if (s.retry_delay && Number(s.retry_delay) !== 30) clean.retry_delay = Number(s.retry_delay)
+      if (s.date_range_type && s.date_range_type !== 'all') {
+        clean.date_range_type = s.date_range_type
+        if (s.date_range_type === 'custom') {
+          if (s.date_range_start) clean.date_range_start = s.date_range_start
+          if (s.date_range_end) clean.date_range_end = s.date_range_end
+        }
+      }
     }
     if (s.step === 'feishu_push') {
       if (s.data_type) clean.data_type = s.data_type

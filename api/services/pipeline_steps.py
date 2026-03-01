@@ -45,7 +45,7 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Type
 
@@ -192,6 +192,34 @@ class PipelineStep(ABC):
 
 # ─── 步骤实现 ─────────────────────────────────────────────────────────────────
 
+
+def _compute_date_range(step_cfg: dict) -> tuple:
+    """将 step 配置中的相对日期类型转换为绝对日期字符串 (start, end)。
+
+    date_range_type 取值：
+      all      — 不限制（返回空字符串）
+      past_1d  — 过去 1 天
+      past_3d  — 过去 3 天
+      past_7d  — 过去 7 天
+      past_30d — 过去 30 天
+      custom   — 自定义（读 date_range_start / date_range_end）
+    """
+    range_type = step_cfg.get("date_range_type", "all")
+    if not range_type or range_type == "all":
+        return "", ""
+    if range_type == "custom":
+        return (
+            step_cfg.get("date_range_start", "") or "",
+            step_cfg.get("date_range_end", "") or "",
+        )
+    _days_map = {"past_1d": 1, "past_3d": 3, "past_7d": 7, "past_30d": 30}
+    days = _days_map.get(range_type, 0)
+    if days:
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        return start, ""
+    return "", ""
+
+
 class CrawlStep(PipelineStep):
     """
     通用爬虫采集步骤（search / creator 模式）。
@@ -240,6 +268,7 @@ class CrawlStep(PipelineStep):
                 await log("[crawl] ERROR: 另一个爬虫任务正在运行，中止管道")
                 return
 
+            _date_start, _date_end = _compute_date_range(cfg)
             req = CrawlerStartRequest(
                 platform=platform,
                 login_type=cfg.get("login_type", "cookie"),
@@ -248,6 +277,8 @@ class CrawlStep(PipelineStep):
                 creator_ids=cfg.get("creator_ids", ""),
                 save_option=cfg.get("save_option") or _global_config.SAVE_DATA_OPTION,
                 headless=cfg.get("headless", True),
+                crawl_date_start=_date_start,
+                crawl_date_end=_date_end,
             )
             started = await crawler_manager.start(req)
             if not started:
@@ -355,6 +386,11 @@ class SubscriptionCrawlStep(PipelineStep):
             if sub.crawl_config:
                 crawl_cfg.update(sub.crawl_config)
 
+            # 计算采集日期范围（step 级别优先，crawl_config 次之）
+            _sub_date_start, _sub_date_end = _compute_date_range(cfg)
+            if not _sub_date_start and crawl_cfg.get("date_range_type"):
+                _sub_date_start, _sub_date_end = _compute_date_range(crawl_cfg)
+
             req = CrawlerStartRequest(
                 platform=sub.platform,
                 login_type=crawl_cfg.get("login_type", "cookie"),
@@ -362,6 +398,8 @@ class SubscriptionCrawlStep(PipelineStep):
                 creator_ids=sub.creator_id,
                 save_option=crawl_cfg.get("save_option") or _global_config.SAVE_DATA_OPTION,
                 headless=crawl_cfg.get("headless", True),
+                crawl_date_start=_sub_date_start,
+                crawl_date_end=_sub_date_end,
             )
             started = await crawler_manager.start(req)
             if not started:

@@ -119,6 +119,12 @@ class CrawlerManager:
 
             try:
                 # Start subprocess
+                # 构造子进程环境变量，注入采集日期范围（各平台读取各自的环境变量）
+                _extra_env: dict = {}
+                if config.crawl_date_start:
+                    _extra_env["WECHAT_ARTICLE_DATE_START"] = config.crawl_date_start
+                if config.crawl_date_end:
+                    _extra_env["WECHAT_ARTICLE_DATE_END"] = config.crawl_date_end
                 self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -127,7 +133,7 @@ class CrawlerManager:
                     encoding='utf-8',
                     bufsize=1,
                     cwd=str(self._project_root),
-                    env={**os.environ, "PYTHONUNBUFFERED": "1"}
+                    env={**os.environ, "PYTHONUNBUFFERED": "1", **_extra_env}
                 )
 
                 self.status = "running"
