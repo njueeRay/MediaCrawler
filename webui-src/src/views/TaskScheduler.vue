@@ -289,6 +289,57 @@
             <n-form-item label="目标表 ID">
               <n-input v-model:value="step.table_id" placeholder="tblXXXXXXX（不填读环境变量）" />
             </n-form-item>
+            <n-form-item>
+              <template #label>
+                <span>发布时间（起）</span>
+                <n-tooltip placement="right" trigger="hover" style="max-width:300px">
+                  <template #trigger>
+                    <n-icon class="ml-1 cursor-pointer" style="font-size:13px;color:#aaa;vertical-align:-2px">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    </n-icon>
+                  </template>
+                  <div style="font-size:12px;line-height:1.9">
+                    <b>按文章/笔记发布时间过滤 DB 数据（可选）</b><br/>
+                    只上传发布时间 ≥ 该日期的内容，跳过历史旧数据。<br/>
+                    • 微信：对应 create_time_str 字段（字符串比较）<br/>
+                    • 小红书：对应 time 字段（Unix 秒）<br/>
+                    不填则不过滤（上传全部）
+                  </div>
+                </n-tooltip>
+              </template>
+              <n-date-picker
+                v-model:formatted-value="step.publish_date_start"
+                value-format="yyyy-MM-dd"
+                type="date"
+                clearable
+                placeholder="不填则不限起始"
+                style="width:200px"
+              />
+            </n-form-item>
+            <n-form-item>
+              <template #label>
+                <span>发布时间（止）</span>
+                <n-tooltip placement="right" trigger="hover" style="max-width:280px">
+                  <template #trigger>
+                    <n-icon class="ml-1 cursor-pointer" style="font-size:13px;color:#aaa;vertical-align:-2px">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    </n-icon>
+                  </template>
+                  <div style="font-size:12px;line-height:1.9">
+                    只上传发布时间 ≤ 该日期的内容。<br/>
+                    仅填日期（YYYY-MM-DD）时自动包含当天末尾（23:59:59）。
+                  </div>
+                </n-tooltip>
+              </template>
+              <n-date-picker
+                v-model:formatted-value="step.publish_date_end"
+                value-format="yyyy-MM-dd"
+                type="date"
+                clearable
+                placeholder="不填则不限截止"
+                style="width:200px"
+              />
+            </n-form-item>
           </n-form>
         </template>
 
@@ -979,7 +1030,7 @@ function createDefaultStep(stepType: string, platform?: string): any {
         date_range_type: 'all', date_range_start: '', date_range_end: '',
       }
     case 'feishu_push':
-      return { step: 'feishu_push', platform: p, data_type: dataType, table_id: '' }
+      return { step: 'feishu_push', platform: p, data_type: dataType, table_id: '', publish_date_start: null, publish_date_end: null }
     case 'feishu_pull':
       return { step: 'feishu_pull', platform: p, table_id: '', filter_field: '', filter_operator: 'contains', filter_values: [], view_id: '', filter_conjunction: 'and', output_format: 'sqlite', output: 'feishu_pull_result' }
     case 'feishu_push_json':
@@ -1191,6 +1242,8 @@ function buildTaskConfig(): any {
     if (s.step === 'feishu_push') {
       if (s.data_type) clean.data_type = s.data_type
       if (s.table_id) clean.table_id = s.table_id
+      if (s.publish_date_start) clean.publish_date_start = s.publish_date_start
+      if (s.publish_date_end) clean.publish_date_end = s.publish_date_end
     }
     if (s.step === 'feishu_pull') {
       if (s.table_id) clean.table_id = s.table_id
