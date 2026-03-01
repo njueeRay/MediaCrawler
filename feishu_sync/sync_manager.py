@@ -516,7 +516,7 @@ class FeishuSyncManager:
         if field_type == 7:  # 复选框：直接传 bool
             if isinstance(value, bool):
                 return value
-            return str(value).lower() in {"1", "true", "yes", "y"}
+            return str(value).strip().lower() in {"1", "true", "yes", "y", "是", "✓", "checked"}
         return str(value)
 
     def _coerce_records_by_field_types(
