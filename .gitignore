@@ -179,6 +179,7 @@ agent_zone
 debug_tools
 
 database/*.db
+config/scheduler_jobs.db
 
 
 # webui
