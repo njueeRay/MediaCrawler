@@ -501,14 +501,14 @@
                   />
                   <n-input
                     v-model:value="pair.value"
-                    placeholder="值（true/是/false/否/now/文本/数字）"
+                    placeholder="复选框: true/false  时间戳: now  文本/单选: 原始值"
                     style="flex:3;min-width:0"
                     size="small"
                   />
                   <n-button size="tiny" quaternary type="error" @click="step._kv_pairs.splice(pi, 1)">×</n-button>
                 </div>
                 <n-button dashed size="small" block style="margin-top:4px" @click="(step._kv_pairs = step._kv_pairs || []).push({ key: '', value: '' })">+ 添加字段</n-button>
-                <n-text depth="3" style="font-size:11px;margin-top:2px;display:block">复选框字段填 true / 是 / false / 否；时间戳填 now；文本/单选直接填值</n-text>
+                <n-text depth="3" style="font-size:11px;margin-top:2px;display:block">复选框字段填 true / false；时间戳填 now；文本/单选（含"是"/"否" 选项）直接填写原始值</n-text>
               </div>
             </n-form-item>
             <n-form-item label="出错时跳过">
@@ -1232,8 +1232,11 @@ function buildTaskConfig(): any {
       for (const pair of pairs) {
         if (!pair.key) continue
         const v = pair.value
-        if (v === 'true' || v === '是' || v === '✓') fieldsToSet[pair.key] = true
-        else if (v === 'false' || v === '否') fieldsToSet[pair.key] = false
+        // 仅将显式的英文 true/false 转为 boolean；
+        // 中文"是"/"否" 原样保留为字符串，后端 _coerce_value_by_type 对复选框字段会自动识别。
+        // 这样单选字段（选项为"是"/"否"）填写的值也能正确写入。
+        if (v === 'true') fieldsToSet[pair.key] = true
+        else if (v === 'false') fieldsToSet[pair.key] = false
         else if (v === 'now') fieldsToSet[pair.key] = 'now'
         else if (v !== '' && !isNaN(Number(v))) fieldsToSet[pair.key] = Number(v)
         else fieldsToSet[pair.key] = v
