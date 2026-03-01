@@ -452,8 +452,10 @@ class FeishuPushStep(PipelineStep):
       data_type         — article | creator | note（默认 wechat=article，其他=note）
       table_id          — 目标飞书表 ID（不填则读 FEISHU_TABLE_ID 环境变量）
       batch_size        — 批次大小（默认 500，不传）
-      publish_date_start — 按发布时间过滤的起始日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）
-      publish_date_end   — 按发布时间过滤的截止日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）
+      publish_date_range  — 快捷发布时间范围: all（不限）/ 7d / 15d / 30d / 90d / custom
+                            预设值在每次执行时动态计算起始日期（从今天往前推 N 天）
+      publish_date_start — 自定义起始日期（仅 publish_date_range=custom 时生效）
+      publish_date_end   — 自定义截止日期（仅 publish_date_range=custom 时生效）
       since_id           — 仅读取 DB id 大于该值的记录
     """
 
@@ -504,10 +506,22 @@ class FeishuPushStep(PipelineStep):
         batch = cfg.get("batch_size")
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
-        if cfg.get("publish_date_start"):
-            cmd += ["--publish-date-start", str(cfg["publish_date_start"])]
-        if cfg.get("publish_date_end"):
-            cmd += ["--publish-date-end", str(cfg["publish_date_end"])]
+
+        # ── 发布时间过滤（支持快捷预设 + 自定义两种模式）──────────────────────
+        _date_range = cfg.get("publish_date_range", "all")
+        _PRESET_DAYS: dict = {"7d": 7, "15d": 15, "30d": 30, "90d": 90}
+        if _date_range in _PRESET_DAYS:
+            from datetime import date as _date, timedelta as _td
+            _start = (_date.today() - _td(days=_PRESET_DAYS[_date_range])).strftime("%Y-%m-%d")
+            cmd += ["--publish-date-start", _start]
+            await log(f"[feishu_push] 发布时间过滤: 近 {_PRESET_DAYS[_date_range]} 天（>= {_start}）")
+        elif _date_range == "custom":
+            if cfg.get("publish_date_start"):
+                cmd += ["--publish-date-start", str(cfg["publish_date_start"])]
+            if cfg.get("publish_date_end"):
+                cmd += ["--publish-date-end", str(cfg["publish_date_end"])]
+        # else "all"：不添加任何过滤参数
+
         if cfg.get("since_id"):
             cmd += ["--db-since-id", str(cfg["since_id"])]
 
