@@ -365,3 +365,108 @@ v1.2+（长期）
 *纪要记录人：Brain*  
 *归档路径：`docs/ops/meetings/2026-03-01-milestone-retrospective-and-vision.md`*  
 *下次会议触发条件：v1.0 正式部署完成 + 首周运行稳定性报告*
+
+---
+
+## 七、会后执行追踪（2026-03-01 当日）
+
+### 7.1 v1.1 里程碑完成状态（A-01 → A-17，commit 439fa51）
+
+| ID | 行动项 | 状态 | 备注 |
+|----|--------|------|------|
+| A-01 | 飞书 Token 自动续签 | ✅ 完成 | `AUTH_ERROR_CODES` + 客户端重建 + 单次重试 |
+| A-02 | Dockerfile Playwright 路径 | ✅ 完成 | `PLAYWRIGHT_BROWSERS_PATH=/app/.playwright`，在 USER 前设置 |
+| A-03 | APScheduler SQLAlchemyJobStore | ✅ 完成 | 带 ImportError 优雅回退到 MemoryJobStore |
+| A-04 | X-API-Key 认证中间件 | ✅ 完成 | 空 key 时自动旁路，health/ws/docs 跳过验证 |
+| A-05 | 飞书推送分批限流 | ✅ 完成 | `CREATE_BATCH_SIZE=50`、`CREATE_RATE_LIMIT_DELAY=0.8s` |
+| A-06 | 任务执行超时保护 | ✅ 完成 | `asyncio.wait_for(1800s)`，超时标记为 failed |
+| A-07 | TZ=Asia/Shanghai | ✅ 完成 | 写入 `deploy/docker-compose.yml` |
+| A-08 | FeishuSync loading 状态 | ✅ 已有 | 代码审查确认早已实现 |
+| A-09 | 错误提示去 traceback | ✅ 完成 | 全局三个 exception handler，客户端只见 detail |
+| A-10 | 服务器部署文档 | ✅ 完成 | `docs/guide/quickstart.md` 补充完整生产部署章节 |
+| A-11 | Pipeline 智能输入 | ✅ 已有 | `getUpstreamOutputKeys()` 早已实现 |
+| A-12 | 消灭 except:pass | ✅ 完成 | 4 个关键文件改为 logger.debug/warning |
+| A-13 | Config 单一数据源 | ✅ 已有 | `config_service.get()` + `reload_from_env()` 早已实现 |
+| A-14 | DataBrowser 搜索框 | ✅ 完成 | DataExplorer.vue 增加 keyword computed 过滤 |
+| A-15 | WebSocket 断线重连 | ✅ 已有 | 指数退避重连早已在两个 Vue 组件中实现 |
+| A-16 | Pipeline dry-run 模式 | ⏳ 待做 | 列入 v1.1.1 |
+| A-17 | 后端单元测试（≥50%） | ✅ 完成 | `tests/test_v11_features.py`，30/30 通过 |
+
+---
+
+### 7.2 本次额外 UX 改进（commit 65b366e）
+
+> **触发背景**：用户在使用数据类型下拉时反馈「article/creator/note 是什么意思」，以及希望能在任务里直接设定采集内容的时间范围，而不用去配置中心手动改日期变量。
+
+#### UX-08 数据表类型标签友好化
+
+| 文件 | 改动内容 |
+|------|---------|
+| `webui-src/src/views/TaskScheduler.vue` | `dataTypeOptions` 标签改为中文描述（文章—微信/笔记/视频—小红书·抖音等/创作者—账号元信息） |
+| `webui-src/src/views/TaskScheduler.vue` | `feishu_push` 步骤增加 ⓘ tooltip，悬停显示平台→类型完整映射 |
+
+#### UX-09 采集日期范围（相对时间选择器）
+
+| 文件 | 改动内容 |
+|------|---------|
+| `api/schemas/crawler.py` | `CrawlerStartRequest` 新增 `crawl_date_start`、`crawl_date_end` 字段 |
+| `api/services/crawler_manager.py` | `start()` 将日期注入子进程环境变量（`WECHAT_ARTICLE_DATE_START/END`） |
+| `api/services/pipeline_steps.py` | 新增 `_compute_date_range()` 辅助函数，相对类型→绝对日期；`timedelta` 补充导入 |
+| `api/services/pipeline_steps.py` | `CrawlStep` 和 `SubscriptionCrawlStep` 均调用 `_compute_date_range`，写入 `CrawlerStartRequest` |
+| `webui-src/src/views/TaskScheduler.vue` | `dateRangeOptions`（不限制/过去1天/3天/7天/30天/自定义），在两种采集步骤下显示；选「自定义」后显示 `n-date-picker` 区间选择 |
+
+**支持的时间类型**：
+
+| 值 | 含义 | 后端计算 |
+|----|------|---------|
+| `all` | 不限制 | 不传日期环境变量 |
+| `past_1d` | 过去 1 天 | `today - 1d` |
+| `past_3d` | 过去 3 天 | `today - 3d` |
+| `past_7d` | 过去 7 天（约1周） | `today - 7d` |
+| `past_30d` | 过去 30 天（约1月） | `today - 30d` |
+| `custom` | 自定义 | 读 `date_range_start` / `date_range_end` 字段 |
+
+> ⚠️ 当前日期过滤在微信平台已有效（`WECHAT_ARTICLE_DATE_START/END` 由 `wechat_config.py` 读取）；其他平台（小红书、抖音等）列入 v1.2 B-08 适配。
+
+---
+
+### 7.3 后续版本行动清单（更新后）
+
+#### v1.1.1 — 稳定窗口（本周内）
+
+| ID | 行动项 | 负责人 | 关键文件 | 完成标准 |
+|----|--------|--------|---------|---------|
+| B-01-a | Pipeline dry-run「测试运行」按钮 | Dev | `api/routers/pipeline.py` + `TaskScheduler.vue` | 点击后仅校验配置，输出 dry-run 报告，不实际执行 |
+| B-01-b | `api/main.py` `@app.on_event` → lifespan 迁移 | Dev | `api/main.py` | 消除 FastAPI deprecation warning |
+| B-01-c | XHS/抖音日期范围过滤参数适配 | Dev | `config/xhs_config.py`、`config/dy_config.py` | 选择日期范围后 XHS/抖音采集也能过滤 |
+
+#### v1.2 — 功能扩展（约1个月）
+
+| ID | 行动项 | 价值 | 估时 | 关键文件 |
+|----|--------|------|------|---------|
+| B-02 | 多用户 + JWT Bearer Token 认证 | ★★★★★ | 4d | `api/middleware/`、`database/webui_models.py` |
+| B-03 | Alembic 数据库迁移支持 | ★★★★☆ | 2d | `alembic/`、`database/` |
+| B-04 | 采集进度实时推送（已采 N 条/进度条） | ★★★★☆ | 3d | `api/services/crawler_manager.py`、前端 |
+| B-05 | GitHub Actions CI/CD（pytest + docker build） | ★★★★☆ | 2d | `.github/workflows/` |
+| B-06 | Pipeline 可视化流图（vue-flow 连线版） | ★★★☆☆ | 5d | `webui-src/src/views/TaskScheduler.vue` |
+| B-07 | VitePress 文档站上线 | ★★★☆☆ | 2d | `docs/` |
+| B-08 | OpenAPI 外部调用接口（第三方触发采集） | ★★★☆☆ | 2d | `api/routers/` |
+| B-09 | XHS/抖音日期范围过滤适配（接 B-01-c） | ★★★☆☆ | 1d | `config/xhs_config.py`、`media_platform/xhs/` |
+
+---
+
+### 7.4 更新后的版本 Roadmap
+
+```
+v1.0-rc1 ──(P0完成)──▶ v1.0 ──(P1+P2)──▶ v1.1 ──(稳定)──▶ v1.1.1 ──▶ v1.2
+   │                    │                   │                │              │
+当前已完成          部署稳定底线          功能完善          小稳定窗口    大版本扩展
+A-01~A-04           Token续签             A-05~A-17         B-01-a dry-run 多用户JWT
+                    Jobstore              Pipeline智能输入   lifespan迁移   Alembic
+                    API认证               DataExplorer搜索   XHS日期适配    采集进度推送
+                    TZ时区                WebSocket重连                     CI/CD
+                    ──────────────────────────────────────
+                    ✅ v1.1 已于 2026-03-01 提交（commit 65b366e）
+```
+
+
