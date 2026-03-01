@@ -619,6 +619,10 @@ def _attach_wechat_cover_images_by_article_id(
 
     manager.create_field_if_missing({"field_name": cover_target_field, "type": 17})
 
+    ok_count = 0
+    skip_count = 0
+    fail_count = 0
+
     for record in formatted_records:
         fields = record.get("fields", {})
         if not isinstance(fields, dict):
@@ -626,6 +630,7 @@ def _attach_wechat_cover_images_by_article_id(
 
         article_id = _resolve_article_id_from_fields(fields, cover_source_field=cover_source_field)
         if not article_id:
+            skip_count += 1
             continue
 
         cover_images = WeChatDataFormatter.find_cover_images(str(article_id))
@@ -657,7 +662,17 @@ def _attach_wechat_cover_images_by_article_id(
                         items.append({"file_token": token, "name": f"cover_{article_id}.jpg"})
                         logger.debug("封面 URL 上传成功: article_id=%s", article_id)
                 except Exception as exc:
-                    logger.warning("封面 URL 上传失败: article_id=%s url=%s - %s", article_id, cover_url, exc)
+                    logger.warning(
+                        "封面 URL 上传失败: article_id=%s url=%s - %s "
+                        "(可能原因：微信CDN链接已过期，建议重新爬取或检查本地封面图)",
+                        article_id, cover_url, exc,
+                    )
+            else:
+                logger.debug(
+                    "封面跳过: article_id=%s 无本地封面文件也无数据库 cover URL "
+                    "(data/wechat/images 目录下是否有该文章目录？)",
+                    article_id,
+                )
 
         if items:
             existing = fields.get(cover_target_field)
@@ -665,6 +680,24 @@ def _attach_wechat_cover_images_by_article_id(
                 fields[cover_target_field] = existing + items
             else:
                 fields[cover_target_field] = items
+            ok_count += 1
+        else:
+            fail_count += 1
+
+    total = len(formatted_records)
+    if ok_count or fail_count:
+        logger.info(
+            "🖼️  封面上传完成: 成功=%d, 无封面=%d, 无ID跳过=%d / 共%d条",
+            ok_count, fail_count, skip_count, total,
+        )
+    if fail_count > 0:
+        logger.warning(
+            "⚠️  %d 条记录未能上传封面。常见原因：\n"
+            "  1. data/wechat/images/<公众号>/<文章ID>/cover_*.jpg 文件不存在\n"
+            "  2. 微信CDN封面URL已过期（请重新爬取文章）\n"
+            "  3. cover_source_field 配置有误（当前值: %r）",
+            fail_count, cover_source_field or "（默认 文章ID/article_id）",
+        )
 
 
 def ensure_table_and_fields(manager: "FeishuSyncManager", table_name: str, fields_config: List[Dict[str, Any]]) -> None:

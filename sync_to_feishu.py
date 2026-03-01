@@ -114,6 +114,8 @@ async def _load_from_db(
     limit: int = 0,
     offset: int = 0,
     since_id: int = 0,
+    publish_date_start: str = "",
+    publish_date_end: str = "",
 ) -> List[Dict]:
     engine = get_async_engine(db_type)
     if not engine:
@@ -133,6 +135,30 @@ async def _load_from_db(
         stmt = select(model)
         if since_id > 0:
             stmt = stmt.where(model.id > since_id)
+
+        # ── 发布日期范围过滤（DB 查询层）────────────────────────────────────
+        if platform == "wechat" and model is db_models.WechatArticle:
+            # create_time_str 格式: "YYYY-MM-DD HH:MM:SS"，字符串大小比较有效
+            if publish_date_start:
+                stmt = stmt.where(db_models.WechatArticle.create_time_str >= publish_date_start.strip())
+            if publish_date_end:
+                end_str = publish_date_end.strip()
+                if len(end_str) == 10:  # 仅日期 YYYY-MM-DD，扩展到当天末尾
+                    end_str = end_str + " 23:59:59"
+                stmt = stmt.where(db_models.WechatArticle.create_time_str <= end_str)
+        elif platform == "xhs" and model is db_models.XhsNote:
+            # XhsNote.time 为 Unix 秒级时间戳（10位）
+            if publish_date_start:
+                start_ts = _parse_datetime_to_unix_seconds(publish_date_start)
+                if start_ts:
+                    stmt = stmt.where(db_models.XhsNote.time >= start_ts)
+            if publish_date_end:
+                end_ts = _parse_datetime_to_unix_seconds(publish_date_end)
+                if end_ts:
+                    if len(publish_date_end.strip()) == 10:  # 仅日期，加一天减一秒
+                        end_ts += 86399
+                    stmt = stmt.where(db_models.XhsNote.time <= end_ts)
+
         stmt = stmt.order_by(model.id.desc())
         if offset > 0:
             stmt = stmt.offset(offset)
@@ -143,7 +169,12 @@ async def _load_from_db(
         rows = result.scalars().all()
         data = [_row_to_dict(row) for row in rows]
 
-    logger.info(f"🗄️  从数据库加载 {len(data)} 条记录 (platform={platform}, type={data_type})")
+    logger.info(
+        "🗄️  从数据库加载 %d 条记录 (platform=%s, type=%s%s%s)",
+        len(data), platform, data_type,
+        f", since={publish_date_start}" if publish_date_start else "",
+        f", until={publish_date_end}" if publish_date_end else "",
+    )
     return data
 
 
@@ -896,8 +927,20 @@ def main():
     parser.add_argument("--db-limit", type=int, default=0, help="DB 读取条数限制（0 表示不限制）")
     parser.add_argument("--db-offset", type=int, default=0, help="DB 读取偏移量")
     parser.add_argument("--db-since-id", type=int, default=0, help="仅读取 id 大于该值的记录")
-    parser.add_argument("--upload-date-start", default=os.environ.get("WECHAT_ARTICLE_DATE_START", ""), help="上传阶段日期起点（微信，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
-    parser.add_argument("--upload-date-end", default=os.environ.get("WECHAT_ARTICLE_DATE_END", ""), help="上传阶段日期终点（微信，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
+    parser.add_argument(
+        "--publish-date-start",
+        default="",
+        help="DB 模式：按发布时间过滤，起始日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）。"
+             "wechat 对应 create_time_str，xhs 对应 time（Unix 秒）。",
+    )
+    parser.add_argument(
+        "--publish-date-end",
+        default="",
+        help="DB 模式：按发布时间过滤，截止日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）。"
+             "仅传日期时自动包含当天末尾 23:59:59。",
+    )
+    parser.add_argument("--upload-date-start", default=os.environ.get("WECHAT_ARTICLE_DATE_START", ""), help="上传阶段日期起点（微信文件模式，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
+    parser.add_argument("--upload-date-end", default=os.environ.get("WECHAT_ARTICLE_DATE_END", ""), help="上传阶段日期终点（微信文件模式，YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）")
 
     args = parser.parse_args()
 
@@ -995,6 +1038,8 @@ def main():
                     limit=args.db_limit,
                     offset=args.db_offset,
                     since_id=args.db_since_id,
+                    publish_date_start=args.publish_date_start,
+                    publish_date_end=args.publish_date_end,
                 )
             )
             raw_data = _apply_range(raw_data, args.range_start, args.range_end)

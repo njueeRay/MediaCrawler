@@ -447,11 +447,14 @@ class FeishuPushStep(PipelineStep):
     将本地 DB（SQLite/MySQL）数据推送到飞书表 1（原 Step 2）。
 
     config keys:
-      platform    — 平台（优先级 > ctx.platform）
-      db_type     — sqlite | db（mysql）| postgres（不填则读 SAVE_DATA_OPTION 环境变量）
-      data_type   — article | creator | note（默认 wechat=article，其他=note）
-      table_id    — 目标飞书表 ID（不填则读 FEISHU_TABLE_ID 环境变量）
-      batch_size  — 批次大小（默认 500，不传）
+      platform          — 平台（优先级 > ctx.platform）
+      db_type           — sqlite | db（mysql）| postgres（不填则读 SAVE_DATA_OPTION 环境变量）
+      data_type         — article | creator | note（默认 wechat=article，其他=note）
+      table_id          — 目标飞书表 ID（不填则读 FEISHU_TABLE_ID 环境变量）
+      batch_size        — 批次大小（默认 500，不传）
+      publish_date_start — 按发布时间过滤的起始日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）
+      publish_date_end   — 按发布时间过滤的截止日期（YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）
+      since_id           — 仅读取 DB id 大于该值的记录
     """
 
     step_type = "feishu_push"
@@ -501,6 +504,12 @@ class FeishuPushStep(PipelineStep):
         batch = cfg.get("batch_size")
         if batch and int(batch) != 500:
             cmd += ["--batch-size", str(batch)]
+        if cfg.get("publish_date_start"):
+            cmd += ["--publish-date-start", str(cfg["publish_date_start"])]
+        if cfg.get("publish_date_end"):
+            cmd += ["--publish-date-end", str(cfg["publish_date_end"])]
+        if cfg.get("since_id"):
+            cmd += ["--db-since-id", str(cfg["since_id"])]
 
         # 在 SyncHistory 中留下记录，使飞书同步页面可见
         _history_id: Optional[int] = None
@@ -783,7 +792,9 @@ class FeishuPushJsonStep(PipelineStep):
       json_keep_columns — 额外保留的列（逗号分隔，封面索引时建议加入文章ID）
       json_flatten_sep  — 嵌套 key 分隔符（默认 "."）
       unknown_fields  — 目标表不存在的字段处理: skip（默认）/ warn / error
-      cover_source_field — 封面关联的文章ID字段名（默认自动识别文章ID）
+      wechat_cover_field — 【封面上传】封面图写入的目标飞书字段名（填写后自动启用封面上传，如 "封面"）
+      cover_source_field — 【封面上传】用于关联封面的文章ID字段名（默认自动识别 文章ID/article_id）
+      field_mapping   — 字段重命名映射（JSON 字典格式）
       range_start     — 只处理第 N 行起（1-based）
       range_end       — 只处理到第 N 行止（1-based）
       json_dedup      — 按该字段值去重（仅保留首次出现，空则不去重）
