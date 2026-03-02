@@ -24,8 +24,8 @@
 
 import asyncio
 import os
-# import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
 from asyncio import Task
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from playwright.async_api import (
@@ -139,6 +139,7 @@ class WeiboCrawler(AbstractCrawler):
         :return:
         """
         utils.logger.info("[WeiboCrawler.search] Begin search weibo keywords")
+        time_range = self._get_date_range()
         weibo_limit_count = 10  # weibo limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < weibo_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = weibo_limit_count
@@ -176,6 +177,8 @@ class WeiboCrawler(AbstractCrawler):
                     if note_item:
                         mblog: Dict = note_item.get("mblog")
                         if mblog:
+                            if time_range and not self._is_within_date_range(mblog.get("created_at"), time_range):
+                                continue
                             note_id_list.append(mblog.get("id"))
                             await weibo_store.update_weibo_note(note_item)
                             await self.get_note_images(mblog)
@@ -187,6 +190,39 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                 await self.batch_get_notes_comments(note_id_list)
+
+    @staticmethod
+    def _get_date_range() -> Optional[Tuple[int, int]]:
+        """读取 WEIBO_DATE_START/END 环境变量，返回 Unix 时间戳范围。未配置则返回 None。"""
+        if not getattr(config, "WEIBO_ENABLE_DATE_FILTER", False):
+            return None
+        start = getattr(config, "WEIBO_DATE_START", "")
+        end = getattr(config, "WEIBO_DATE_END", "")
+        if not start:
+            return None
+        try:
+            start_dt = datetime.strptime(start, "%Y-%m-%d")
+            end_dt = datetime.strptime(end, "%Y-%m-%d") if end else datetime.now()
+        except ValueError:
+            utils.logger.warning("[WeiboCrawler] 日期格式错误，期望 YYYY-MM-DD，跳过日期过滤")
+            return None
+        if start_dt > end_dt:
+            utils.logger.warning("[WeiboCrawler] WEIBO_DATE_START 晚于 END，跳过日期过滤")
+            return None
+        end_dt_inclusive = end_dt + timedelta(days=1) - timedelta(seconds=1)
+        return int(start_dt.timestamp()), int(end_dt_inclusive.timestamp())
+
+    @staticmethod
+    def _is_within_date_range(created_at: Optional[str], time_range: Tuple[int, int]) -> bool:
+        """判断微博 mblog.created_at（RFC2822 格式）是否在时间范围内。"""
+        if not created_at:
+            return False
+        try:
+            ts = utils.rfc2822_to_timestamp(created_at)
+            start_ts, end_ts = time_range
+            return start_ts <= ts <= end_ts
+        except Exception:
+            return False
 
     async def get_specified_notes(self):
         """
@@ -231,7 +267,7 @@ class WeiboCrawler(AbstractCrawler):
         :return:
         """
         if not config.ENABLE_GET_COMMENTS:
-            utils.logger.info(f"[WeiboCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
+            utils.logger.info("[WeiboCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
             return
 
         utils.logger.info(f"[WeiboCrawler.batch_get_notes_comments] note ids:{note_id_list}")
@@ -275,7 +311,7 @@ class WeiboCrawler(AbstractCrawler):
         :return:
         """
         if not config.ENABLE_GET_MEIDAS:
-            utils.logger.info(f"[WeiboCrawler.get_note_images] Crawling image mode is not enabled")
+            utils.logger.info("[WeiboCrawler.get_note_images] Crawling image mode is not enabled")
             return
 
         pics: List = mblog.get("pics")

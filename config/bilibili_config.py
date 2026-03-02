@@ -43,11 +43,15 @@ BILI_CREATOR_ID_LIST = [
 ]
 
 # 指定时间范围
-START_DAY = "2024-01-01"
-END_DAY = "2024-01-01"
+# 优先读取环境变量（由 WebUI crawler_manager 注入）
+import os as _os
+_BILI_DATE_START: str = _os.environ.get("BILI_DATE_START", "")
+_BILI_DATE_END: str = _os.environ.get("BILI_DATE_END", "")
+START_DAY = _BILI_DATE_START or "2024-01-01"
+END_DAY = _BILI_DATE_END or "2024-01-01"
 
-# 搜索模式
-BILI_SEARCH_MODE = "normal"
+# 搜索模式：当 BILI_DATE_START 被注入时自动切换为时间范围模式
+BILI_SEARCH_MODE = "all_in_time_range" if _BILI_DATE_START else "normal"
 
 # 视频清晰度（qn）配置，常见取值：
 # 16=360p, 32=480p, 64=720p, 80=1080p, 112=1080p高码率, 116=1080p60, 120=4K

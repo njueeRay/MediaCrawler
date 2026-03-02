@@ -1,6 +1,6 @@
 # Pipeline 步骤参考手册
 
-> **版本**：v1.3 | **最后更新**：2026-03-02
+> **版本**：v1.3.0 | **最后更新**：2026-03-20
 >
 > 本文档说明 MediaCrawler Pipeline 中每个步骤（step）的完整参数。
 > Pipeline 配置存储在 `ScheduledTask.task_config.pipeline` 数组中，数组元素即为步骤对象。
@@ -66,7 +66,7 @@
 | `save_option` | str | env `SAVE_DATA_OPTION` | `sqlite` \| `csv` \| `json` \| `db`（MySQL）\| `postgres` |
 | `headless` | bool | `true` | 是否无头浏览器模式 |
 | `timeout_seconds` | int | 平台默认 | 爬虫最大等待时长（秒）。各平台默认：xhs=1800, dy=1800, wechat=3600 |
-| `publish_date_range` | str | — | 发布日期筛选：`7d` \| `14d` \| `30d` \| `90d` \| `custom`（仅 XHS·DY 有效） |
+| `publish_date_range` | str | — | 发布日期筛选：`7d` \| `14d` \| `30d` \| `90d` \| `custom`（XHS·DY·bili·wb 均支持，wechat 另有独立机制，详见通用机制§"平台日期过滤实现方式"） |
 | `publish_date_start` | str | — | 自定义起始日期，格式 `YYYY-MM-DD`（`publish_date_range=custom` 时有效） |
 | `publish_date_end` | str | — | 自定义截止日期，格式 `YYYY-MM-DD` |
 | `since_id` | int | — | 只爬取 DB 内 id 大于该值的记录（增量模式） |
@@ -329,7 +329,21 @@
 ]
 ```
 
-### 4. 完整 Pipeline 示例（小红书采集 + 飞书同步）
+### 4. 平台日期过滤实现方式
+
+`publish_date_range` / `publish_date_start` / `publish_date_end` 最终由 `crawler_manager` 以环境变量形式注入子进程：
+
+| 平台 | 注入的环境变量 | 过滤实现方式 |
+|------|-------------|-------------|
+| wechat | `WECHAT_ARTICLE_DATE_START/END` | 文章发布时间服务端过滤 |
+| xhs | `XHS_DATE_START/END` | 笔记发布时间比对 |
+| dy | `DY_DATE_START/END` | 视频发布时间比对 |
+| bili | `BILI_DATE_START/END` | 自动切换为 `all_in_time_range` 搜索模式 |
+| wb | `WEIBO_DATE_START/END` | 解析 RFC2822 创建时间并客户端过滤 |
+
+---
+
+### 5. 完整 Pipeline 示例（小红书采集 + 飞书同步）
 
 ```jsonc
 {
@@ -352,7 +366,7 @@
 }
 ```
 
-### 5. 平台标识符速查
+### 6. 平台标识符速查
 
 | 平台 | 标识符 | 说明 |
 |------|--------|------|
@@ -367,4 +381,4 @@
 
 ---
 
-*本文档由 Dev 于 2026-03-02 初稿，后续随代码变更同步更新。*
+*本文档由 Dev 于 2026-03-02 初稿，2026-03-20 更新（C-01 bili/wb 日期过滤），后续随代码变更同步更新。*

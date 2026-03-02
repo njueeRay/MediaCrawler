@@ -22,7 +22,14 @@
 
 # 搜索类型，具体的枚举值在media_platform/weibo/field.py中
 WEIBO_SEARCH_TYPE = "default"
-
+# 日期过滤（发布时间）
+# 优先读取环境变量（由 WebUI crawler_manager 注入）
+import os as _os
+_WEIBO_DATE_START: str = _os.environ.get("WEIBO_DATE_START", "")
+_WEIBO_DATE_END: str = _os.environ.get("WEIBO_DATE_END", "")
+WEIBO_ENABLE_DATE_FILTER: bool = bool(_WEIBO_DATE_START)
+WEIBO_DATE_START: str = _WEIBO_DATE_START
+WEIBO_DATE_END: str = _WEIBO_DATE_END
 # 指定微博ID列表
 WEIBO_SPECIFIED_ID_LIST = [
     "4982041758140155",

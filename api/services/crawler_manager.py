@@ -211,6 +211,12 @@ class CrawlerManager:
                     # 抖音
                     elif _platform_val == "dy":
                         _extra_env["DY_DATE_START"] = config.crawl_date_start
+                    # B 站（C-01）
+                    elif _platform_val == "bili":
+                        _extra_env["BILI_DATE_START"] = config.crawl_date_start
+                    # 微博（C-01）
+                    elif _platform_val == "wb":
+                        _extra_env["WEIBO_DATE_START"] = config.crawl_date_start
                 if config.crawl_date_end:
                     # 微信公众号
                     _extra_env["WECHAT_ARTICLE_DATE_END"] = config.crawl_date_end
@@ -220,6 +226,12 @@ class CrawlerManager:
                     # 抖音
                     elif _platform_val == "dy":
                         _extra_env["DY_DATE_END"] = config.crawl_date_end
+                    # B 站（C-01）
+                    elif _platform_val == "bili":
+                        _extra_env["BILI_DATE_END"] = config.crawl_date_end
+                    # 微博（C-01）
+                    elif _platform_val == "wb":
+                        _extra_env["WEIBO_DATE_END"] = config.crawl_date_end
                 self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,

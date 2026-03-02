@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Sprint — v1.3 Week 2（2026-03-09）：安全层 MVP
+### Sprint — v1.3 Week 3（2026-03-20）：飞书历史补全 + B站/微博日期过滤 + 步骤文档
+
+#### Added — F-01 飞书同步历史补全
+- **`api/routers/feishu.py`**: `/api/feishu/history`（列表）和 `/api/feishu/history/{id}`（详情）响应中新增 `task_execution_id` 字段，追溯 pipeline 触发的同步记录
+- **`api/services/pipeline_steps.py`** (已有): `FeishuPushStep.run()` 在执行前调用 `feishu_service.start_sync_record(trigger_type="pipeline", task_execution_id=ctx.execution_id)`，完成后调用 `feishu_service.finish_sync_record()`，飞书同步历史页面可见 pipeline 触发记录
+
+#### Added — C-01 B站/微博日期过滤
+- **`config/bilibili_config.py`**: 新增 `BILI_DATE_START`/`BILI_DATE_END` 环境变量读取；设置后自动将 `BILI_SEARCH_MODE` 切换为 `"all_in_time_range"`（复用已有的 `search_by_keywords_in_time_range()` 逻辑）
+- **`config/weibo_config.py`**: 新增 `WEIBO_DATE_START`/`WEIBO_DATE_END` 环境变量读取及 `WEIBO_ENABLE_DATE_FILTER` 开关
+- **`api/services/crawler_manager.py`**: `_extra_env` 注入逻辑补充 `bili`/`wb` 平台分支，将 `crawl_date_start`/`crawl_date_end` 分别映射为 `BILI_DATE_START/END` 和 `WEIBO_DATE_START/END`
+- **`media_platform/weibo/core.py`**: `WeiboCrawler.search()` 新增客户端日期过滤——调用 `_get_date_range()` 获取日期范围（读取 `config.WEIBO_ENABLE_DATE_FILTER`），逐条解析 `mblog.created_at`（RFC2822 格式）经 `utils.rfc2822_to_timestamp()` 转换后比对；新增 `_get_date_range()` 和 `_is_within_date_range()` 两个静态方法
+
+#### Added — D-02 Pipeline 步骤文档扩展
+- **`docs/reference/pipeline-steps.md`**: 通用机制新增"平台日期过滤实现方式"表（wechat/xhs/dy/bili/wb 各平台注入的环境变量与实现方式）；`crawl` 步骤参数说明扩展至 bili/wb；版本更新至 v1.3.0
+
+
 
 #### Added — S-01 JWT 认证
 - **`database/webui_models.py`**: 新增 `WebuiUser`（id/username/hashed_password/is_active/is_admin/email/timestamps）与 `WebuiApiKey`（id/name/key_prefix/key_hash/scope/owner_id/is_active/timestamps）ORM 模型
