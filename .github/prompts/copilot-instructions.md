@@ -128,54 +128,44 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 当前迭代状态
 
-> 最后更新：2026-02-27（第二轮验收复查 Bug 修复后）
+> 最后更新：2026-03-20（v1.3.0 发版，Week 3 全部完成）
 
-**当前 Sprint：** #002+ — 验收第二轮 Bug 修复 + Linux 部署准备  
-**Sprint 目标：** 修复任务调度新建状态残留 + 微信搜索 auth 不一致问题，本地多任务编排跑通后部署到 Linux。  
-**团队状态：** P0 Bug 已修复，Docker 部署骨架已输出，等待用户本地验证通过后进入服务器部署。
+**当前 Sprint：** v1.3 已结束（tag: v1.3.0），等待 v1.4 Sprint 规划  
+**Sprint 目标：** ✅ F-01/C-01/D-02 全部交付，96 tests passed，ruff F规则归零  
+**团队状态：** v1.3 DoD 100% 达成，待开启下一迭代
 
-### 已完成
-- [x] Sprint #001: 全员阅读项目上下文，形成统一认知
-- [x] Sprint #001: 交接启动会已召开，纪要存档 (`docs/ops/meetings/2026-02-26-handover-kickoff.md`)
-- [x] Sprint #001: `CHANGELOG.md`、`design-decisions.md`、`copilot-instructions.md` 已优化
-- [x] Sprint #002: **P0-1** 修复——`webui_startup()` 添加 APScheduler 任务恢复循环
-- [x] Sprint #002: **P0-3** 修复——CORS `allow_origins` 改为读取 `ALLOWED_ORIGINS` env var
-- [x] Sprint #002: **P0-4** 修复——`apscheduler` + `lark-oapi` 加入 `pyproject.toml`（全体复盘新发现）
-- [x] Sprint #002: **P1-1** 修复——`subscription_combo` 循环 `raise` → `continue`
-- [x] Sprint #002: **P1-3** 修复——`/api/config/platforms` 添加微信平台
-- [x] Sprint #002: 微信测试连接增强（连通性+认证双重检测）
-- [x] Sprint #002: XHS/DY 创作者搜索实现
-- [x] Sprint #002: 任务调度编辑功能实现
-- [x] Sprint #002: 前端平台搜索提示优化
-- [x] Sprint #002: `auto_scheduler.py` 正式废弃
-- [x] Sprint #002: `deploy/mediacrawler.service` systemd 模板创建
-- [x] Sprint #002+: **P0-BugA** 修复——任务调度「新建」按钮状态残留（editingTaskId/newTask/pipelineCfg 未重置）
-- [x] Sprint #002+: **P0-BugB** 修复——微信搜索 auth key 读取源与测试连接不一致（改为优先读 .env）
-- [x] Sprint #002+: 微信测试连接 auth 验证假阳性修复（except Exception: pass → 记录 warning + 明确提示）
-- [x] Sprint #002+: 文档归档治理（会议纪要统一到 docs/ops/meetings/）
-- [x] Sprint #002+: Docker 部署骨架输出（Dockerfile + docker-compose.yml）
+### 已完成（v1.3 全量）
+- [x] **v1.3 Week 1** `218ee97` — P-01 legacy 分支清除 / P-03 cachetools / P-04 并发锁 / P-09 auto_crawl过滤
+- [x] **v1.3 Week 2 backend** `166f8dd` — S-01 JWT / S-02 API Key / Alembic 0002 / 15 tests
+- [x] **v1.3 Week 2 frontend** `2e9b7f3` — W-01 Vue Router Guard + 登录页 + Bearer token
+- [x] **v1.3 Week 3** `8afd896` — F-01 飞书历史 task_execution_id / C-01 bili+wb 日期过滤 / D-02 步骤文档扩展
+- [x] **v1.3 release** `abe2f19` — CHANGELOG [1.3.0] 完成 + tag v1.3.0
 
-### 待执行（服务器层——用户按序操作）
-- [ ] `git pull` + `uv sync`（确认输出含 apscheduler + lark-oapi）
-- [ ] 服务器 `.env` 填写关键变量：`SAVE_DATA_OPTION=sqlite`、飞书双表配置、`WECHAT_AUTH_KEY`、`ALLOWED_ORIGINS`
-- [ ] 选择部署方式：systemd（`deploy/mediacrawler.service`）或 Docker（`deploy/docker-compose.yml`）
-- [ ] DB 批量插入 Subscription 记录（首次部署必做，SQL 或 WebUI API）
-- [ ] WebUI 创建 ScheduledTask，手动触发 → 验证飞书「表1」有写入
-- [ ] 配置 cron 运行 `wechat_feishu_workflow.sh` 完成表2同步
-- [ ] 本地端到端多任务编排验证：cron 定时 → 采集 → 飞书同步 → JSON 解析
+### v1.3 已完成的技术细节
 
-### 待执行（代码层——团队操作）
-- [ ] 迁移 `@app.on_event` → `lifespan`（P1-2，FastAPI deprecated 警告）
-- [ ] `WECHAT_AUTH_KEY` 轮换机制文档化 + cron 模板（每 3 天）
-- [ ] Docker 部署正式验证（Sprint #003）
-- [ ] **Sprint #003 P0**：建立 CI 套件（link-check + markdown-lint）
+#### F-01：飞书同步历史补全
+- `FeishuPushStep.run()` 已调用 `feishu_service.start_sync_record(trigger_type="pipeline", task_execution_id=ctx.execution_id)`
+- `/api/feishu/history` 响应新增 `task_execution_id` 字段
 
-### 已知风险（最高优先级排查）
-- 🔴 `SAVE_DATA_OPTION` 未设为 `sqlite` → WebUI 全部 DB 功能静默失败（无报错）
+#### C-01：B站/微博日期过滤
+- `config/bilibili_config.py`：读取 `BILI_DATE_START/END`，自动激活 `all_in_time_range` 模式
+- `config/weibo_config.py`：读取 `WEIBO_DATE_START/END`，`WEIBO_ENABLE_DATE_FILTER` 开关
+- `api/services/crawler_manager.py`：bili/wb 平台分支注入对应 env vars
+- `media_platform/weibo/core.py`：`_get_date_range()` + `_is_within_date_range()` 客户端过滤（RFC2822 → timestamp）
+
+#### D-02：步骤文档
+- `docs/reference/pipeline-steps.md`：新增"平台日期过滤实现方式"表，bili/wb 条目，版本升至 v1.3.0
+
+### 待执行（下一迭代）
+- [ ] Sprint v1.4 规划（迁移 `@app.on_event` → `lifespan`，CI 套件建立）
+- [ ] `WECHAT_AUTH_KEY` 轮换机制文档化 + cron 模板
+- [ ] Docker 部署正式验证
+
+### 已知风险
 - 🔴 `WECHAT_AUTH_KEY` 约 4 天过期 → 微信爬取 100% 失败
-- 🟡 DB 中无 Subscription 记录 → `subscription_combo` 静默空转（total=0）
-- 🟡 systemd 服务文件路径未修改 → 服务无法启动
-- 🟡 `FEISHU_TABLE_ID` 与 `TABLE1_ID` 双命名，`.env` 必须同时配置（相同值）
+- 🟡 `SAVE_DATA_OPTION` 未设为 `sqlite` → WebUI DB 功能静默失败
+- 🟡 `FEISHU_TABLE_ID` 与 `TABLE1_ID` 双命名，`.env` 必须同时配置
+
 
 ## 已决定的设计选择
 
