@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] — 2026-03-20
+
 ### Sprint — v1.3 Week 3（2026-03-20）：飞书历史补全 + B站/微博日期过滤 + 步骤文档
 
 #### Added — F-01 飞书同步历史补全
