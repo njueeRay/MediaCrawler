@@ -35,6 +35,15 @@
             <template #checked>🌙</template>
             <template #unchecked>☀️</template>
           </n-switch>
+          <!-- 用户信息 + 退出登录 -->
+          <n-dropdown :options="userMenuOptions" @select="handleUserMenu">
+            <n-button text style="font-size: 13px">
+              <template #icon>
+                <n-icon :component="PersonCircleOutline" />
+              </template>
+              {{ authStore.user?.username || 'admin' }}
+            </n-button>
+          </n-dropdown>
         </div>
       </n-layout-header>
       <n-layout-content content-style="padding: 24px;" :native-scrollbar="false">
@@ -58,10 +67,14 @@ import {
   CloudUploadOutline,
   TimerOutline,
   TerminalOutline,
+  PersonCircleOutline,
+  LogOutOutline,
 } from '@vicons/ionicons5'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -88,5 +101,20 @@ const menuOptions: MenuOption[] = [
 
 function handleMenuClick(key: string) {
   router.push({ name: key })
+}
+
+const userMenuOptions = [
+  {
+    label: '退出登录',
+    key: 'logout',
+    icon: () => h(NIcon, null, { default: () => h(LogOutOutline) }),
+  },
+]
+
+function handleUserMenu(key: string) {
+  if (key === 'logout') {
+    authStore.logout()
+    router.push({ name: 'Login' })
+  }
 }
 </script>

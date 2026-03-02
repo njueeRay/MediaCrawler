@@ -4,10 +4,20 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    // ── 公开路由（无需鉴权）──────────────────────────────────────────────────
+    {
+      path: '/login',
+      name: 'Login',
+      component: () => import('@/views/Login.vue'),
+      meta: { title: '登录', public: true },
+    },
+
+    // ── 受保护路由（需要登录）────────────────────────────────────────────────
     {
       path: '/',
       component: AppLayout,
       redirect: '/dashboard',
+      meta: { requiresAuth: true },
       children: [
         {
           path: 'dashboard',
@@ -60,6 +70,25 @@ const router = createRouter({
       ],
     },
   ],
+})
+
+// ── 全局导航守卫（W-01）──────────────────────────────────────────────────────
+router.beforeEach((to) => {
+  const token = localStorage.getItem('mc_access_token')
+  const isAuthenticated = !!token
+
+  // 访问登录页：已登录 → 跳转 dashboard
+  if (to.name === 'Login' && isAuthenticated) {
+    return { name: 'Dashboard' }
+  }
+
+  // 访问受保护页：未登录 → 跳转登录（携带来源路径）
+  const requiresAuth = to.matched.some((r) => r.meta?.requiresAuth)
+  if (requiresAuth && !isAuthenticated) {
+    return { name: 'Login', query: { redirect: to.fullPath } }
+  }
+
+  return true
 })
 
 export default router

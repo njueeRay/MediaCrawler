@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`pyproject.toml`**: 新增 `[tool.pytest.ini_options] asyncio_mode = "auto"`，消除 pytest-asyncio strict 模式下异步 fixture 报错
 - **`api/routers/__init__.py`**: 导出 `auth_router`
 
+#### Added — W-01 前端 Vue Router 守卫 + 登录页
+- **`webui-src/src/stores/auth.ts`**: 新增 Pinia auth store — `accessToken`/`refreshToken` 持久化到 `localStorage`；`login()`、`logout()`、`fetchUser()`、`refreshAccessToken()` 全套方法
+- **`webui-src/src/api/index.ts`**: 请求拦截器注入 `Authorization: Bearer <token>`；响应拦截器处理 401 — 自动调用 `refresh_token` 换新 token，并将并发请求排队重放；refresh 失败则清空登录态并跳转 `/login`
+- **`webui-src/src/views/Login.vue`**: 登录页 — 用户名/密码表单（Naive UI）、错误提示、登录后跳回来源页（`?redirect=` 参数）
+- **`webui-src/src/router/index.ts`**: 新增 `/login` 公开路由；所有 AppLayout 子路由标记 `requiresAuth: true`；`beforeEach` 守卫：未登录访问受保护路由 → 跳转登录，已登录访问登录页 → 跳转 Dashboard
+- **`webui-src/src/components/layout/AppLayout.vue`**: 头部显示当前用户名 + 退出登录下拉菜单（`LogOutOutline` 图标）
+
 ### Sprint — v1.3 Week 1（2026-03-02）：基础设施清账
 
 #### Changed — P-01 Legacy 分支清除
