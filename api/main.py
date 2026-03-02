@@ -54,6 +54,29 @@ from .routers import (
     websocket_router,
 )
 
+async def _run_alembic_upgrade() -> None:
+    """Run `alembic upgrade head` in a thread executor (I-01).
+    WebUI tables (webui_*) are managed exclusively by Alembic.
+    Safe to call on every startup: Alembic is idempotent (already-applied revs skipped).
+    """
+    from pathlib import Path as _Path
+
+    def _upgrade() -> None:
+        try:
+            from alembic.config import Config as _AlembicConfig
+            from alembic import command as _alembic_cmd
+            _proj_root = _Path(__file__).resolve().parent.parent
+            _alembic_cfg = _AlembicConfig(str(_proj_root / "alembic.ini"))
+            _alembic_cfg.set_main_option("script_location", str(_proj_root / "alembic"))
+            _alembic_cmd.upgrade(_alembic_cfg, "head")
+            print("[WebUI] Alembic upgrade head: OK")
+        except Exception as _exc:
+            print(f"[WebUI] Alembic upgrade skipped: {_exc}")
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _upgrade)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """WebUI 首次启动:
@@ -68,6 +91,8 @@ async def lifespan(app: FastAPI):
 
         if _cfg.SAVE_DATA_OPTION not in ("csv", "json"):
             await create_tables(_cfg.SAVE_DATA_OPTION)
+            # I-01: webui_* 表由 Alembic 统一管理，幂等安全
+            await _run_alembic_upgrade()
 
         async with get_session() as session:
             if session is not None:

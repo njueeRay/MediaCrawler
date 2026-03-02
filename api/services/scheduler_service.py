@@ -24,8 +24,13 @@ logger = logging.getLogger(__name__)
 # APScheduler 实例 (延迟初始化，避免导入循环)
 _apscheduler = None
 
-# 全局中断标记：execution_id -> bool
-abort_flags: Dict[int, bool] = {}
+# P-03: TTLCache 防内存泄漏（maxsize=1000, ttl=1h）。
+# 多 worker 布署时中断命令需改为写 TaskExecution.is_aborted 列才能跳过进程隔离问题。
+try:
+    from cachetools import TTLCache as _TTLCache
+    abort_flags: _TTLCache = _TTLCache(maxsize=1000, ttl=3600)
+except ImportError:
+    abort_flags: Dict[int, bool] = {}  # fallback: 无 TTL 自动清除
 
 
 def _send_feishu_alert(task_name: str, status: str, error_message: str, execution_id: int) -> None:

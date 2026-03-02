@@ -88,13 +88,24 @@ def get_async_engine(db_type: str = None):
 
 
 async def create_tables(db_type: str = None):
+    """Create legacy (non-webui_*) crawler data tables.
+    I-01: WebUI tables (webui_*) are managed exclusively by Alembic migrations,
+    not by create_all. Running both concurrently causes schema drift on upgrades.
+    """
     if db_type is None:
         db_type = config.SAVE_DATA_OPTION
     await create_database_if_not_exists(db_type)
     engine = get_async_engine(db_type)
     if engine:
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            # Only create legacy crawler data tables; webui_* tables use Alembic.
+            legacy_tables = [
+                t for t in Base.metadata.sorted_tables
+                if not t.name.startswith("webui_")
+            ]
+            await conn.run_sync(
+                lambda sync_conn: Base.metadata.create_all(sync_conn, tables=legacy_tables)
+            )
 
 
 @asynccontextmanager

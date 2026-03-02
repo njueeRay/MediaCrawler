@@ -80,8 +80,17 @@ class CrawlerManager:
         if m:
             p["current_keyword"] = m.group(1).strip()
 
-        # 页码
+        # 页码（英文 page N / 中文 第N页 / 各平台变体）
         m = re.search(r"\bpage[:\s]+(\d+)", line, re.IGNORECASE)
+        if not m:
+            m = re.search(r"第\s*(\d+)\s*[页P]", line)
+        if not m:
+            m = re.search(r"当前第\s*(\d+)", line)
+        if not m:
+            # NN/MM 格式（如 B站: 3/10页）
+            mp = re.search(r"\b(\d+)\s*/\s*\d+\s*页", line)
+            if mp:
+                m = mp
         if m:
             new_page = int(m.group(1))
             if new_page > p["current_page"]:
