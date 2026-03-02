@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import config as _global_config
 from api.services.scheduler_snapshot import dump_tasks_snapshot
-from database.webui_models import ScheduledTask, Subscription, TaskExecution
+from database.webui_models import ScheduledTask, TaskExecution  # Subscription removed: P-01 legacy cleanup
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,18 @@ try:
     abort_flags: _TTLCache = _TTLCache(maxsize=1000, ttl=3600)
 except ImportError:
     abort_flags: Dict[int, bool] = {}  # fallback: 无 TTL 自动清除
+
+# P-04: 全局并发执行锁 — 防止手动触发与定时触发同时运行多个任务
+# asyncio.Lock 不能在模块加载时创建（需要事件循环），使用 None 延迟初始化
+_run_task_lock: Optional[asyncio.Lock] = None
+
+
+def _get_run_task_lock() -> asyncio.Lock:
+    """获取或创建并发执行锁（P-04）"""
+    global _run_task_lock
+    if _run_task_lock is None:
+        _run_task_lock = asyncio.Lock()
+    return _run_task_lock
 
 
 def _send_feishu_alert(task_name: str, status: str, error_message: str, execution_id: int) -> None:
@@ -412,198 +424,96 @@ class SchedulerService:
     async def _run_task(
         execution_id: int, task_type: str, platform: str, task_config: dict, dry_run: bool = False
     ):
-        """执行 crawl / sync / combo 任务并更新执行记录"""
+        """执行任务 — 仅支持 Pipeline 模式（P-01: legacy 分支已于 v1.3 移除）。
+
+        P-04: 使用全局并发锁，防止手动触发与定时触发同时执行多个任务。
+        若已有任务执行中，新触发立即标记为 failed，不阻塞等待。
+
+        存量任务迁移：请运行 scripts/migrate_tasks_to_pipeline.py
+        """
         start_time = datetime.now()
         status = "success"
         error_message = None
         result_summary: Dict = {}
 
-        try:
-            await SchedulerService.append_execution_log(
-                execution_id,
-                f"start task_type={task_type} platform={platform}",
-            )
+        # P-04: 尝试获取并发锁 — 若另一任务正在执行，立即失败（不阻塞等待）
+        _lock = _get_run_task_lock()
+        if _lock.locked():
+            status = "failed"
+            error_message = "另一任务正在执行中，请等待其完成后再触发（P-04 并发防护）"
+            logger.warning("[Scheduler] execution_id=%s 被并发锁拒绝", execution_id)
+            try:
+                from database.db_session import get_session as _gs
+                async with _gs() as _s:
+                    if _s:
+                        _r = await _s.execute(
+                            select(TaskExecution).where(TaskExecution.id == execution_id)
+                        )
+                        _rec = _r.scalars().first()
+                        if _rec:
+                            _rec.status = status
+                            _rec.error_message = error_message
+                            _rec.finished_at = datetime.now()
+                            _rec.duration_seconds = 0.0
+                        await _s.commit()
+            except Exception:
+                pass
+            return
 
-            # ─── Pipeline 模式检测 ──────────────────────────────────────────
-            # 若 task_config 含 "pipeline" 列表，则走模块化步骤引擎，
-            # 否则回退到 legacy task_type 判断分支（向后兼容）。
-            _pipeline_mode = "pipeline" in task_config
-            if _pipeline_mode:
-                from api.services.pipeline_steps import PipelineContext, run_pipeline
-
-                _pipeline_ctx = PipelineContext(
-                    task_id=0, execution_id=execution_id, platform=platform or ""
+        async with _lock:
+            try:
+                await SchedulerService.append_execution_log(
+                    execution_id,
+                    f"start task_type={task_type} platform={platform}",
                 )
-                _pipeline_ctx.dry_run = dry_run
-                # 将 abort 检查注入 pipeline context
-                _pipeline_ctx._abort_check = lambda: SchedulerService._is_aborted(execution_id)
 
-                async def _log(line: str) -> None:
-                    await SchedulerService.append_execution_log(execution_id, line)
+                # ─── Pipeline 模式（唯一支持模式，P-01）────────────────────
+                # task_config 必须包含 "pipeline" 列表。
+                # legacy task_type (crawl/sync/combo/subscription_crawl/subscription_combo)
+                # 已于 v1.3 P-01 清除，存量任务请迁移：
+                #   python scripts/migrate_tasks_to_pipeline.py
+                _pipeline_mode = "pipeline" in task_config
+                if _pipeline_mode:
+                    from api.services.pipeline_steps import PipelineContext, run_pipeline
 
-                await run_pipeline(task_config["pipeline"], _pipeline_ctx, _log)
+                    _pipeline_ctx = PipelineContext(
+                        task_id=0, execution_id=execution_id, platform=platform or ""
+                    )
+                    _pipeline_ctx.dry_run = dry_run
+                    # 将 abort 检查注入 pipeline context
+                    _pipeline_ctx._abort_check = lambda: SchedulerService._is_aborted(execution_id)
 
+                    async def _log(line: str) -> None:
+                        await SchedulerService.append_execution_log(execution_id, line)
+
+                    await run_pipeline(task_config["pipeline"], _pipeline_ctx, _log)
+
+                    if SchedulerService._is_aborted(execution_id):
+                        status = "cancelled"
+                        error_message = "用户手动中断"
+                    elif _pipeline_ctx.aborted:
+                        status = "failed"
+                        error_message = "管道中止（某步骤失败）"
+                    result_summary.update({
+                        "pipeline_steps": _pipeline_ctx.step_results,
+                        "dry_run_report": _pipeline_ctx.dry_run_report,
+                    })
+                else:
+                    # P-01: legacy 分支已移除，提示用户迁移
+                    raise ValueError(
+                        f"task_type='{task_type}' 使用了 legacy 格式（task_config 缺少 'pipeline' 键）。"
+                        f"请运行 scripts/migrate_tasks_to_pipeline.py 将存量任务迁移至 pipeline 模式。"
+                    )
+                # ─────────────────────────────────────────────────────────────
+
+            except Exception as e:
                 if SchedulerService._is_aborted(execution_id):
                     status = "cancelled"
                     error_message = "用户手动中断"
-                elif _pipeline_ctx.aborted:
+                else:
                     status = "failed"
-                    error_message = "管道中止（某步骤失败）"
-                result_summary.update({
-                    "pipeline_steps": _pipeline_ctx.step_results,
-                    "dry_run_report": _pipeline_ctx.dry_run_report,
-                })
-            # ────────────────────────────────────────────────────────────────
-
-            if not _pipeline_mode and task_type in ("subscription_crawl", "subscription_combo"):
-                if not platform:
-                    raise ValueError("subscription_* 任务必须指定 platform")
-
-                from api.schemas import CrawlerStartRequest
-                from api.services.crawler_manager import crawler_manager
-                from database.db_session import get_session
-
-                only_creator_ids = set(SchedulerService._parse_csv_ids(task_config.get("only_creator_ids", "")))
-                limit = int(task_config.get("limit", 0) or 0)
-                timeout_seconds = int(task_config.get("timeout_seconds", 1800) or 1800)
-
-                async with get_session() as session:
-                    if not session:
-                        raise RuntimeError("数据库不可用")
-
-                    q = select(Subscription).where(
-                        Subscription.platform == platform,
-                        Subscription.is_active == True,  # noqa: E712
-                        Subscription.auto_crawl == True,  # noqa: E712
-                    ).order_by(Subscription.updated_at.desc())
-                    subs = (await session.execute(q)).scalars().all()
-
-                    if only_creator_ids:
-                        subs = [s for s in subs if s.creator_id in only_creator_ids]
-                    if limit and limit > 0:
-                        subs = subs[:limit]
-
-                    crawled = 0
-                    skipped_running = 0
-                    for sub in subs:
-                        await SchedulerService.append_execution_log(
-                            execution_id,
-                            f"crawl creator {sub.creator_name}({sub.creator_id})",
-                        )
-                        # 避免并发：已有爬虫运行则跳过本条订阅（不中断整批任务）
-                        crawler_status = crawler_manager.get_status()
-                        if crawler_status.get("status") == "running":
-                            skipped_running += 1
-                            await SchedulerService.append_execution_log(
-                                execution_id,
-                                f"skip {sub.creator_id}: 爬虫正忙，稍后重试",
-                            )
-                            continue  # P1-1 FIX: 原为 raise，会导致整批任务失败
-
-                        crawl_config = dict(task_config.get("crawl_config") or {})
-                        if sub.crawl_config:
-                            crawl_config.update(sub.crawl_config)
-
-                        start_request = CrawlerStartRequest(
-                            platform=sub.platform,
-                            login_type=crawl_config.get("login_type", "cookie"),
-                            crawler_type="creator",
-                            creator_ids=sub.creator_id,
-                            save_option=crawl_config.get("save_option") or _global_config.SAVE_DATA_OPTION,
-                            headless=crawl_config.get("headless", True),
-                        )
-
-                        started = await crawler_manager.start(start_request)
-                        if not started:
-                            raise RuntimeError(f"爬虫启动失败: {sub.creator_name}({sub.creator_id})")
-
-                        await SchedulerService._wait_crawler_done(timeout_seconds=timeout_seconds)
-
-                        await SchedulerService.append_execution_log(
-                            execution_id,
-                            f"crawl done creator {sub.creator_id}",
-                        )
-
-                        sub.last_crawled_at = datetime.now()
-                        await session.flush()
-                        await session.commit()
-                        crawled += 1
-
-                    result_summary.update({
-                        "subscription_total": len(subs),
-                        "subscription_crawled": crawled,
-                        "subscription_skipped_running": skipped_running,
-                    })
-
-            if not _pipeline_mode and task_type in ("crawl", "combo"):
-                # 调用 CrawlerManager
-                from api.schemas import CrawlerStartRequest
-                from api.services.crawler_manager import crawler_manager
-
-                crawler_status = crawler_manager.get_status()
-                if crawler_status.get("status") == "running":
-                    raise RuntimeError("另一个爬虫任务正在运行")
-
-                request = CrawlerStartRequest(
-                    platform=platform,
-                    login_type=task_config.get("login_type", "cookie"),
-                    crawler_type=task_config.get("crawler_type", "search"),
-                    keywords=task_config.get("keywords", ""),
-                    creator_ids=task_config.get("creator_ids", ""),
-                    save_option=task_config.get("save_option") or _global_config.SAVE_DATA_OPTION,
-                    headless=task_config.get("headless", True),
-                )
-                started = await crawler_manager.start(request)
-                if not started:
-                    raise RuntimeError("爬虫启动失败")
-
-                # 等待爬虫完成 (最多 30 分钟)，支持中断
-                for _ in range(1800):
-                    if SchedulerService._is_aborted(execution_id):
-                        await crawler_manager.stop()
-                        raise RuntimeError("用户手动中断")
-                    await asyncio.sleep(1)
-                    s = crawler_manager.get_status()
-                    if s.get("status") != "running":
-                        break
-
-            if not _pipeline_mode and task_type in ("sync", "combo", "subscription_combo"):
-                # 调用飞书同步
-                from api.services.feishu_service import feishu_service
-                from database.db_session import get_session
-
-                async with get_session() as session:
-                    if session:
-                        data_type = task_config.get(
-                            "data_type",
-                            "article" if platform == "wechat" else "note",
-                        )
-                        history = await feishu_service.start_sync(session, {
-                            "platform": platform,
-                            "data_type": data_type,
-                            "trigger_type": "scheduled",
-                            "task_execution_id": execution_id,
-                        })
-                        await session.commit()
-
-                        await SchedulerService.append_execution_log(
-                            execution_id,
-                            f"feishu sync triggered history_id={getattr(history, 'id', None)}",
-                        )
-
-                        result_summary.update({
-                            "sync_history_id": getattr(history, "id", None),
-                            "sync_data_type": data_type,
-                        })
-
-        except Exception as e:
-            if SchedulerService._is_aborted(execution_id):
-                status = "cancelled"
-                error_message = "用户手动中断"
-            else:
-                status = "failed"
-                error_message = str(e)
-            await SchedulerService.append_execution_log(execution_id, f"error: {error_message}")
+                    error_message = str(e)
+                await SchedulerService.append_execution_log(execution_id, f"error: {error_message}")
 
         # 清理 abort flag
         abort_flags.pop(execution_id, None)

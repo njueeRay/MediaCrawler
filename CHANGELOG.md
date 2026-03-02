@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint — v1.3 Week 1（2026-03-02）：基础设施清账
+
+#### Changed — P-01 Legacy 分支清除
+- **`api/services/scheduler_service.py`**: 删除 `_run_task` 内 3 个 legacy `if not _pipeline_mode` 分支（`crawl/sync/combo/subscription_crawl/subscription_combo`）。所有任务必须使用 `task_config["pipeline"]` 格式；尝试运行 legacy 格式任务将立即失败并提示运行迁移脚本
+- **`api/services/pipeline_steps.py`** (P-09): `SubscriptionCrawlStep` 补全 `auto_crawl=True` 过滤，与 legacy scheduler_service 行为对齐
+
+#### Added — P-01 存量迁移工具
+- **`scripts/migrate_tasks_to_pipeline.py`**: 存量任务迁移脚本——自动将 DB 中 legacy 格式的 `ScheduledTask` 转换为等效 pipeline 步骤。支持 `--dry-run` 预览。5 种 legacy task_type 均已覆盖映射规则
+
+#### Added — P-04 并发锁
+- **`api/services/scheduler_service.py`**: 新增模块级 `_run_task_lock (asyncio.Lock)` 及 `_get_run_task_lock()` 工厂函数。`_run_task` 入口检测锁状态，若已被占用则**立即**将新 execution 标记为 `failed`（不阻塞等待），防止手动触发与定时触发的竞争条件
+
+#### Fixed — P-03 依赖补全
+- **`pyproject.toml`**: 补充 `cachetools>=5.0.0` 声明（`abort_flags TTLCache` 已使用但之前未入依赖清单）
+
+### Sprint — v1.3 准备（2026-03-01）
+
 ### Sprint #003 — UI+后端协同大修 + Roadmap v1 启动
 
 #### Fixed

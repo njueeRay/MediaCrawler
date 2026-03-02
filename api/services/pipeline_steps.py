@@ -349,7 +349,7 @@ class SubscriptionCrawlStep(PipelineStep):
         else:
             only_ids = set(raw_ids)
 
-        # 加载订阅列表
+        # 加载订阅列表（P-09: 只爬 auto_crawl=True 的活跃订阅，和 scheduler_service legacy 行为对齐）
         async with get_session() as session:
             if not session:
                 ctx.aborted = True
@@ -358,6 +358,7 @@ class SubscriptionCrawlStep(PipelineStep):
 
             q = select(Subscription).where(
                 Subscription.is_active == True,  # noqa: E712
+                Subscription.auto_crawl == True,  # noqa: E712
             )
             if platform_filter:
                 q = q.where(Subscription.platform == platform_filter)
