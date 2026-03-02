@@ -276,3 +276,52 @@ class TaskTemplate(Base):
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# 8. WebuiUser — 登录账户（S-01/W-01）
+# ---------------------------------------------------------------------------
+class WebuiUser(Base):
+    """WebUI 登录用户（JWT 认证，S-01）"""
+    __tablename__ = "webui_user"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(64), nullable=False, unique=True, index=True)
+    hashed_password = Column(String(256), nullable=False)
+    is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    email = Column(String(128), nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    last_login_at = Column(DateTime, nullable=True)
+
+    api_keys = relationship(
+        "WebuiApiKey",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. WebuiApiKey — 外部调用 API Key（S-02/W-03）
+# ---------------------------------------------------------------------------
+class WebuiApiKey(Base):
+    """外部触发用 API Key（X-API-Key，S-02）"""
+    __tablename__ = "webui_api_key"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), nullable=False)
+    key_prefix = Column(String(8), nullable=False)        # 明文前缀，便于识别
+    key_hash = Column(String(256), nullable=False, unique=True)  # sha256 哈希
+    scope = Column(String(64), nullable=False, default="crawler:trigger")
+    # 支持 scope: crawler:trigger | admin
+
+    owner_id = Column(Integer, ForeignKey("webui_user.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=func.now())
+    expires_at = Column(DateTime, nullable=True)          # None = 永不过期
+    last_used_at = Column(DateTime, nullable=True)
+
+    owner = relationship("WebuiUser", back_populates="api_keys")

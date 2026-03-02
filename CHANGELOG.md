@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint — v1.3 Week 2（2026-03-09）：安全层 MVP
+
+#### Added — S-01 JWT 认证
+- **`database/webui_models.py`**: 新增 `WebuiUser`（id/username/hashed_password/is_active/is_admin/email/timestamps）与 `WebuiApiKey`（id/name/key_prefix/key_hash/scope/owner_id/is_active/timestamps）ORM 模型
+- **`alembic/versions/0002_add_user_api_key_tables.py`**: Alembic 迁移 — 创建 `webui_user` 和 `webui_api_key` 表，支持 upgrade/downgrade
+- **`api/services/auth_service.py`**: JWT HS256 + bcrypt 直接调用（绕过 passlib/bcrypt>=4 兼容问题）；`AuthService` 提供 `ensure_default_admin`、`authenticate_user`、`create_user`、`create_api_key`、`verify_api_key`、`revoke_api_key`；`AUTH_ENABLED=false` 快捷关闭鉴权
+- **`api/routers/auth.py`**: `POST /api/auth/login`、`POST /api/auth/refresh`、`GET /api/auth/me`、`POST /api/auth/api-keys`、`GET /api/auth/api-keys`、`DELETE /api/auth/api-keys/{key_id}` 六个端点
+- **`api/main.py`**: lifespan 启动时调用 `ensure_default_admin`；`_AUTH_SKIP_PREFIXES` 包含 `/api/auth`；注册 `auth_router`
+- **`api/deps.py`**: 新增 `get_current_user`（JWT Bearer 验证）与 `require_admin` 两个 FastAPI 依赖
+- **`tests/test_auth.py`**: 15 个测试用例（密码工具 + JWT + AuthService CRUD + API Key + 端点）
+
+#### Fixed — 依赖与测试基础设施
+- **`pyproject.toml`**: 将 `passlib[bcrypt]` 替换为 `bcrypt>=4.0.0`（直接调用，消除 passlib 1.7.4 + bcrypt>=4.0 的 `__about__` 兼容错误）
+- **`pyproject.toml`**: 新增 `[tool.pytest.ini_options] asyncio_mode = "auto"`，消除 pytest-asyncio strict 模式下异步 fixture 报错
+- **`api/routers/__init__.py`**: 导出 `auth_router`
+
 ### Sprint — v1.3 Week 1（2026-03-02）：基础设施清账
 
 #### Changed — P-01 Legacy 分支清除

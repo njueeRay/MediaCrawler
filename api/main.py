@@ -43,6 +43,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from .routers import (
+    auth_router,
     config_router,
     crawler_router,
     data_router,
@@ -99,6 +100,14 @@ async def lifespan(app: FastAPI):
                 count = await seed_default_mappings(session)
                 if count > 0:
                     print(f"[WebUI] Seeded {count} default field mapping schemes")
+                # S-01: 首次启动种子默认 admin 账户
+                try:
+                    from api.services.auth_service import auth_service as _auth_svc
+                    created = await _auth_svc.ensure_default_admin(session)
+                    if created:
+                        print("[WebUI] Created default admin user (username=admin)")
+                except Exception as _ae:
+                    print(f"[WebUI] Admin seed skipped: {_ae}")
     except Exception as e:
         print(f"[WebUI] Startup seed skipped: {e}")
 
@@ -172,8 +181,8 @@ app.add_middleware(
 # 在 .env 中设置 API_SECRET_KEY=<your-key> 以启用；不设置则不鉴权（开发模式）
 _API_SECRET_KEY: str = os.environ.get("API_SECRET_KEY", "").strip()
 
-# 不鉴权的路径前缀列表（健康检查、WebSocket、静态文件、Swagger）
-_AUTH_SKIP_PREFIXES = ("/api/health", "/ws", "/docs", "/openapi", "/redoc")
+# 不鉴权的路径前缀列表（健康检查、WebSocket、静态文件、Swagger、Auth 登录）
+_AUTH_SKIP_PREFIXES = ("/api/health", "/api/auth", "/ws", "/docs", "/openapi", "/redoc")
 
 
 class _APIKeyMiddleware(BaseHTTPMiddleware):
@@ -211,6 +220,7 @@ app.include_router(data_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
 
 # Register routers — WebUI new
+app.include_router(auth_router, prefix="/api")       # S-01/S-02: JWT + API Key
 app.include_router(config_router, prefix="/api")
 app.include_router(subscription_router, prefix="/api")
 app.include_router(field_mapping_router, prefix="/api")
