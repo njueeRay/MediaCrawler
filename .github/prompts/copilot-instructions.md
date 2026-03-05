@@ -128,11 +128,11 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 当前迭代状态
 
-> 最后更新：2026-03-20（v1.3.0 发版，Week 3 全部完成）
+> 最后更新：2026-03-05（v1.4 Sprint 启动，WECHAT_AUTH_KEY 轮换文档完成）
 
-**当前 Sprint：** v1.3 已结束（tag: v1.3.0），等待 v1.4 Sprint 规划  
-**Sprint 目标：** ✅ F-01/C-01/D-02 全部交付，96 tests passed，ruff F规则归零  
-**团队状态：** v1.3 DoD 100% 达成，待开启下一迭代
+**当前 Sprint：** v1.4 进行中  
+**Sprint 目标：** 运维文档补全 + CI 基础设施验证  
+**团队状态：** WECHAT_AUTH_KEY 轮换文档/脚本已完成；lifespan + CI workflow 已验证存在；Docker 部署移入 backlog
 
 ### 已完成（v1.3 全量）
 - [x] **v1.3 Week 1** `218ee97` — P-01 legacy 分支清除 / P-03 cachetools / P-04 并发锁 / P-09 auto_crawl过滤
@@ -156,13 +156,18 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 #### D-02：步骤文档
 - `docs/reference/pipeline-steps.md`：新增"平台日期过滤实现方式"表，bili/wb 条目，版本升至 v1.3.0
 
+### 已完成（v1.4 当前进度）
+- [x] **WECHAT_AUTH_KEY 轮换文档** — `docs/wechat/auth-key-renewal.md`：完整操作手册含 cron/systemd timer 模板
+- [x] **轮换辅助脚本** — `scripts/renew_wechat_auth.sh`（半自动替换 .env）+ `scripts/check_wechat_auth.sh`（健康检测，适合 cron）
+- [x] **lifespan 验证** — `api/main.py` 已全量使用 `asynccontextmanager lifespan`，无 `@app.on_event` 残留
+- [x] **CI 验证** — `.github/workflows/ci.yml` 已存在（ruff + mypy + pytest + npm build）
+
 ### 待执行（下一迭代）
-- [ ] Sprint v1.4 规划（迁移 `@app.on_event` → `lifespan`，CI 套件建立）
-- [ ] `WECHAT_AUTH_KEY` 轮换机制文档化 + cron 模板
-- [ ] Docker 部署正式验证
+- [ ] v1.4 发版 CHANGELOG [1.4.0] + tag
+- [ ] Docker 部署正式验证（需 Linux 环境，移入 backlog）
 
 ### 已知风险
-- 🔴 `WECHAT_AUTH_KEY` 约 4 天过期 → 微信爬取 100% 失败
+- 🔴 `WECHAT_AUTH_KEY` 约 4 天过期 → 微信爬取 100% 失败（参考 `docs/wechat/auth-key-renewal.md`）
 - 🟡 `SAVE_DATA_OPTION` 未设为 `sqlite` → WebUI DB 功能静默失败
 - 🟡 `FEISHU_TABLE_ID` 与 `TABLE1_ID` 双命名，`.env` 必须同时配置
 

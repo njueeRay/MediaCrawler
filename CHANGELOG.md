@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint — v1.4 进行中（2026-03-05~）：运维文档 + CI 基础设施
+
+#### Added — WECHAT_AUTH_KEY 轮换机制
+- **`docs/wechat/auth-key-renewal.md`**: Auth-Key 轮换完整操作手册——过期信号判断、获取新 Key 流程、手动/脚本轮换步骤、cron/systemd timer 提醒模板、常见问题
+- **`scripts/renew_wechat_auth.sh`**: 半自动轮换脚本——备份 `.env`、替换 Key、写入轮换历史、提示重启命令；支持交互式和 `NEW_AUTH_KEY=<key>` 非交互两种模式
+- **`scripts/check_wechat_auth.sh`**: 健康检测脚本——调用 `/api/health/platforms` 判断 Key 有效性；降级支持 `.env` 直读；适合 cron 定时检测，返回标准退出码（0=有效 1=过期 2=不可用）
+
+#### Verified — 已有基础设施确认完成
+- **`api/main.py`** lifespan 模式：`@app.on_event` 已在 v1.2/v1.3 期间全量迁移为 `asynccontextmanager lifespan`，无残留
+- **`.github/workflows/ci.yml`**: lint（ruff E,W,F,I）+ mypy + pytest + npm build 四 job 已存在，覆盖 dev/main 分支
+
 ---
 
 ## [1.3.0] — 2026-03-20
