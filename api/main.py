@@ -43,6 +43,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from .routers import (
+    ai_router,
     auth_router,
     config_router,
     crawler_router,
@@ -227,6 +228,7 @@ app.include_router(field_mapping_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
 
 _api_logger = logging.getLogger("api")
 

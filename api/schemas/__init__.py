@@ -27,6 +27,17 @@ from .crawler import (
 )
 
 from .common import ApiResponse, PageData, PageResponse, ok, fail, page_ok
+from .ai_stack import (
+    AIStepType,
+    AIStepOutput,
+    AIStepDefinition,
+    AITemplateDefinition,
+    AITemplateValidateRequest,
+    AITemplateValidateResponse,
+    AIRunRequest,
+    AIStepRunResult,
+    AIRunResponse,
+)
 
 __all__ = [
     "PlatformEnum",
@@ -42,4 +53,13 @@ __all__ = [
     "ok",
     "fail",
     "page_ok",
+    "AIStepType",
+    "AIStepOutput",
+    "AIStepDefinition",
+    "AITemplateDefinition",
+    "AITemplateValidateRequest",
+    "AITemplateValidateResponse",
+    "AIRunRequest",
+    "AIStepRunResult",
+    "AIRunResponse",
 ]
