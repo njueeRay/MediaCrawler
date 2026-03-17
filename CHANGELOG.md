@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sprint — v1.5 规划（2026-03-17）：AI Stack 本地化改造启动
+
+#### Added — AI Stack 方案与会议纪要
+- **`docs/ops/meetings/2026-03-17-ai-stack-architecture-review.md`**: brain 召集跨角色评审会，确认“本地 AI 编排栈替代飞书 AI 自动化链路”路线；明确 MVP 范围（文本列/图片列/顺序依赖/data_arrival 自动触发）与 4 周里程碑
+- **`docs/reference/ai-stack-technical-design.md`**: 技术设计草案（模块边界、DSL 规范、DB 表草案、API 草案、幂等与重试策略）
+
+#### Changed — 迭代状态切换
+- **`.github/prompts/copilot-instructions.md`**: 当前迭代切换为 `feat/ai_stack`，新增 AI Stack Roadmap checklist，并固化“会话开场先展示 roadmap”规则
+
 ### Sprint — v1.4 进行中（2026-03-05~）：运维文档 + CI 基础设施
 
 #### Added — WECHAT_AUTH_KEY 轮换机制

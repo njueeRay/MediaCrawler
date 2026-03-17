@@ -128,11 +128,20 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 当前迭代状态
 
-> 最后更新：2026-03-05（v1.4 Sprint 启动，WECHAT_AUTH_KEY 轮换文档完成）
+> 最后更新：2026-03-17（AI Stack 改造方案评审会完成）
 
-**当前 Sprint：** v1.4 进行中  
-**Sprint 目标：** 运维文档补全 + CI 基础设施验证  
-**团队状态：** WECHAT_AUTH_KEY 轮换文档/脚本已完成；lifespan + CI workflow 已验证存在；Docker 部署移入 backlog
+**当前 Sprint：** v1.5 规划中（feat/ai_stack）  
+**Sprint 目标：** 本地 AI 编排栈替代飞书 AI 自动化链路（OpenRouter 驱动）  
+**团队状态：** PM 需求冻结 + brain 架构评审已完成；Docker/Linux 验证移入 backlog
+
+### AI Stack Roadmap（会话起始必展示）
+- [x] 需求收敛（本地替代飞书 AI）
+- [x] PM 输出结构化需求说明（P0/P1/验收/里程碑）
+- [x] brain 召集团队会议并形成统一改造方案
+- [x] 创建分支 `feat/ai_stack`
+- [ ] 详细技术设计落地（模块、DSL、DB 表、API）
+- [ ] MVP 开发与联调（文本列/图片列/顺序依赖/自动触发）
+- [ ] 灰度验收与切换
 
 ### 已完成（v1.3 全量）
 - [x] **v1.3 Week 1** `218ee97` — P-01 legacy 分支清除 / P-03 cachetools / P-04 并发锁 / P-09 auto_crawl过滤
@@ -163,6 +172,8 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 - [x] **CI 验证** — `.github/workflows/ci.yml` 已存在（ruff + mypy + pytest + npm build）
 
 ### 待执行（下一迭代）
+- [ ] AI Stack 技术设计文档（架构 + 数据模型 + DSL + API）
+- [ ] AI Stack MVP 开发（文本分析列 + 图片理解列 + DAG 顺序触发 + data_arrival）
 - [ ] v1.4 发版 CHANGELOG [1.4.0] + tag
 - [ ] Docker 部署正式验证（需 Linux 环境，移入 backlog）
 
@@ -193,6 +204,7 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 - **Commit 规范：** `<type>(<scope>): <subject>`（详见 `docs/team-playbook.md` §4）
 - **Scope 约定：** `crawler` / `store` / `config` / `api` / `webui` / `feishu` / `scheduler` / `wechat` / `docs` / `ci` / `deps`
 - **会话协议：** 每次会话开启读取本文件 + 最新会议纪要；关闭时更新「当前迭代状态」
+- **会话开场要求：** 每次开始执行前，先输出当前 Roadmap checklist（已完成项必须勾选），再推进下一步
 - **变更记录：** 每次实质变更更新 `CHANGELOG.md`
 - **质量门禁：** 迭代收尾前 code-reviewer 必须输出审查报告
 
