@@ -44,6 +44,25 @@ class AITemplateValidateResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class AITemplateRenderPreviewRequest(BaseModel):
+    template: AITemplateDefinition
+    record: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AITemplateRenderPreviewItem(BaseModel):
+    step_id: str
+    step_type: AIStepType
+    prompt_rendered: str
+    input_rendered: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AITemplateRenderPreviewResponse(BaseModel):
+    valid: bool
+    errors: List[str] = Field(default_factory=list)
+    order: List[str] = Field(default_factory=list)
+    preview: List[AITemplateRenderPreviewItem] = Field(default_factory=list)
+
+
 class AIRunRequest(BaseModel):
     template: AITemplateDefinition
     record: Dict[str, Any] = Field(default_factory=dict)

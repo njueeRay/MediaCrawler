@@ -128,5 +128,62 @@ class AIMvpService:
             step_results=step_results,
         )
 
+    async def render_preview(self, template, record: Dict[str, Any]) -> Dict[str, Any]:
+        validation = await self.validate_template(template)
+        if not validation["valid"]:
+            return {
+                "valid": False,
+                "errors": validation["errors"],
+                "order": [],
+                "preview": [],
+            }
+
+        step_map = {s.step_id: s for s in template.steps}
+        order = AITemplateEngine.topo_sort(template)
+        previews = []
+
+        context = {
+            "record": record or {},
+            "steps": {},
+            "system": {"now": int(time.time()), "task_id": "preview-run"},
+        }
+
+        for step_id in order:
+            step = step_map[step_id]
+            rendered_prompt = AITemplateEngine.render_text(step.prompt, context)
+
+            rendered_input: Dict[str, Any] = {}
+            for key, value in (step.input or {}).items():
+                if isinstance(value, list):
+                    rendered_input[key] = [AITemplateEngine.render_text(str(v), context) for v in value]
+                elif isinstance(value, str):
+                    rendered_input[key] = AITemplateEngine.render_text(value, context)
+                else:
+                    rendered_input[key] = value
+
+            previews.append(
+                {
+                    "step_id": step.step_id,
+                    "step_type": step.type,
+                    "prompt_rendered": rendered_prompt,
+                    "input_rendered": rendered_input,
+                }
+            )
+
+            # 预览模式下写入占位输出，便于后续 step 引用链路检查
+            context["steps"][step.step_id] = {
+                "output": {
+                    "content": "[preview-output]",
+                    "summary": "[preview-summary]",
+                }
+            }
+
+        return {
+            "valid": True,
+            "errors": [],
+            "order": order,
+            "preview": previews,
+        }
+
 
 ai_mvp_service = AIMvpService()

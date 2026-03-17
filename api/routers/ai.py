@@ -4,6 +4,7 @@
 from fastapi import APIRouter
 
 from api.schemas.ai_stack import (
+    AITemplateRenderPreviewRequest,
     AITemplateValidateRequest,
     AIRunRequest,
 )
@@ -19,6 +20,14 @@ async def validate_template(req: AITemplateValidateRequest):
     if not result["valid"]:
         return fail(code=400, message="模板校验失败", data=result)
     return ok(result, "模板校验通过")
+
+
+@router.post("/templates/render-preview")
+async def render_template_preview(req: AITemplateRenderPreviewRequest):
+    result = await ai_mvp_service.render_preview(req.template, req.record)
+    if not result["valid"]:
+        return fail(code=400, message="模板预览失败", data=result)
+    return ok(result, "模板预览成功")
 
 
 @router.post("/executions/run")
