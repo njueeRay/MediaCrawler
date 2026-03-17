@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """AI Stack MVP routes."""
 
+import time
+
 from fastapi import APIRouter
 
 from api.schemas.ai_stack import (
+    AIDataArrivalTriggerRequest,
     AITemplateRenderPreviewRequest,
     AITemplateValidateRequest,
     AIRunRequest,
 )
 from api.schemas.common import fail, ok
 from api.services.ai_mvp_service import ai_mvp_service
+from api.services.pipeline_steps import PipelineContext, run_pipeline
 
 router = APIRouter(prefix="/ai", tags=["AI Stack"])
 
@@ -36,6 +40,37 @@ async def run_template(req: AIRunRequest):
     if not result.success:
         return fail(code=500, message="模板执行失败", data=result.model_dump())
     return ok(result.model_dump(), "执行成功")
+
+
+@router.post("/trigger/data-arrival")
+async def trigger_data_arrival(req: AIDataArrivalTriggerRequest):
+    if not req.pipeline:
+        return fail(code=400, message="pipeline 不能为空")
+
+    ctx = PipelineContext(
+        task_id=0,
+        execution_id=int(time.time() * 1000) % 2147483647,
+        platform=req.platform or "",
+    )
+    ctx.vars.update(req.vars or {})
+    ctx.dry_run = bool(req.dry_run)
+
+    logs = []
+
+    async def _log(line: str):
+        logs.append(line)
+
+    await run_pipeline(req.pipeline, ctx, _log)
+    return ok(
+        {
+            "success": not ctx.aborted,
+            "aborted": ctx.aborted,
+            "step_results": ctx.step_results,
+            "vars": ctx.vars,
+            "logs": logs[-200:],
+        },
+        "data_arrival 触发完成",
+    )
 
 
 @router.get("/openrouter/setup-guide")

@@ -48,6 +48,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1207,6 +1208,170 @@ class FeishuUpdateRecordsStep(PipelineStep):
         })
 
 
+def _safe_identifier(name: str) -> str:
+    """校验 SQL 标识符，防止动态表名/列名注入。"""
+    if not name or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+        raise ValueError(f"invalid identifier: {name!r}")
+    return name
+
+
+class LocalDatasetExtractStep(PipelineStep):
+    """
+    本地数据源提取步骤（替代 feishu_pull 作为主入口）。
+
+    config keys:
+      db_type          — sqlite|mysql|postgres（默认 sqlite）
+      source_table     — 源表名（必填）
+      select_columns   — 列名列表或逗号分隔字符串（默认 *）
+      key_column       — 主键列（默认 id），输出到 _record_key
+      filters          — 字段等值过滤 dict（可选）
+      limit            — 提取上限（默认 100）
+      output           — 输出变量名（默认 local_dataset）
+    """
+
+    step_type = "local_dataset_extract"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        from sqlalchemy import text as _text
+
+        from database.db_session import get_async_engine
+
+        cfg = self.config
+        db_type = cfg.get("db_type", "sqlite")
+        source_table = _safe_identifier(str(cfg.get("source_table", "")))
+        key_column = _safe_identifier(str(cfg.get("key_column", "id")))
+        output_key = str(cfg.get("output", "local_dataset"))
+        limit = int(cfg.get("limit", 100) or 100)
+
+        raw_cols = cfg.get("select_columns", [])
+        if isinstance(raw_cols, str):
+            cols = [_safe_identifier(c.strip()) for c in raw_cols.split(",") if c.strip()]
+        elif isinstance(raw_cols, list):
+            cols = [_safe_identifier(str(c).strip()) for c in raw_cols if str(c).strip()]
+        else:
+            cols = []
+
+        filters = cfg.get("filters") or {}
+        if not isinstance(filters, dict):
+            filters = {}
+
+        engine = get_async_engine(db_type)
+        if not engine:
+            ctx.aborted = True
+            await log(f"[local_dataset_extract] ERROR: db_type={db_type} 不可用")
+            return
+
+        select_sql = ", ".join(cols) if cols else "*"
+        sql = f"SELECT {select_sql} FROM {source_table}"
+        params: Dict[str, Any] = {}
+        where_parts: List[str] = []
+        for i, (k, v) in enumerate(filters.items()):
+            col = _safe_identifier(str(k))
+            p = f"p_{i}"
+            where_parts.append(f"{col} = :{p}")
+            params[p] = v
+        if where_parts:
+            sql += " WHERE " + " AND ".join(where_parts)
+        sql += " LIMIT :_limit"
+        params["_limit"] = max(1, limit)
+
+        records: List[Dict[str, Any]] = []
+        async with engine.connect() as conn:
+            rows = (await conn.execute(_text(sql), params)).mappings().all()
+            for idx, row in enumerate(rows):
+                item = dict(row)
+                item["_record_key"] = str(item.get(key_column, f"row_{idx}"))
+                records.append(item)
+
+        ctx.vars[output_key] = records
+        await log(f"[local_dataset_extract] OK rows={len(records)} output={output_key}")
+        ctx.step_results.append(
+            {
+                "step": self.step_type,
+                "status": "ok",
+                "rows": len(records),
+                "output_key": output_key,
+            }
+        )
+
+
+class LocalResultWritebackStep(PipelineStep):
+    """
+    本地结果回写步骤（将 AI 输出写回本地业务表）。
+
+    config keys:
+      db_type            — sqlite|mysql|postgres（默认 sqlite）
+      source_table       — 目标回写表名（必填）
+      key_column         — 主键列（默认 id）
+      source_var         — 数据源变量（默认 local_dataset）
+      source_key_field   — 记录键字段（默认 _record_key）
+      ai_output_var      — AI 输出变量（默认 text_analysis）
+      target_column      — 回写列名（必填）
+      content_field      — 从 AI payload 提取的字段（默认 content）
+    """
+
+    step_type = "local_result_writeback"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        from sqlalchemy import text as _text
+
+        from database.db_session import get_async_engine
+
+        cfg = self.config
+        db_type = cfg.get("db_type", "sqlite")
+        source_table = _safe_identifier(str(cfg.get("source_table", "")))
+        key_column = _safe_identifier(str(cfg.get("key_column", "id")))
+        target_column = _safe_identifier(str(cfg.get("target_column", "")))
+        source_var = str(cfg.get("source_var", "local_dataset"))
+        source_key_field = str(cfg.get("source_key_field", "_record_key"))
+        ai_output_var = str(cfg.get("ai_output_var", "text_analysis"))
+        content_field = str(cfg.get("content_field", "content"))
+
+        records = ctx.vars.get(source_var) or []
+        ai_output = ctx.vars.get(ai_output_var) or {}
+        ai_map = ai_output.get("by_record", {}) if isinstance(ai_output, dict) else {}
+
+        if not records:
+            await log(f"[local_result_writeback] WARN: source_var={source_var} 为空，跳过")
+            ctx.step_results.append({"step": self.step_type, "status": "skipped", "reason": "empty_source"})
+            return
+        if not ai_map:
+            await log(f"[local_result_writeback] WARN: ai_output_var={ai_output_var} 为空，跳过")
+            ctx.step_results.append({"step": self.step_type, "status": "skipped", "reason": "empty_ai_output"})
+            return
+
+        engine = get_async_engine(db_type)
+        if not engine:
+            ctx.aborted = True
+            await log(f"[local_result_writeback] ERROR: db_type={db_type} 不可用")
+            return
+
+        update_sql = _text(
+            f"UPDATE {source_table} SET {target_column} = :v WHERE {key_column} = :k"
+        )
+
+        updated = 0
+        async with engine.begin() as conn:
+            for rec in records:
+                record_key = str(rec.get(source_key_field, ""))
+                if not record_key or record_key not in ai_map:
+                    continue
+                payload = ai_map[record_key] or {}
+                value = payload.get(content_field, "")
+                await conn.execute(update_sql, {"v": value, "k": record_key})
+                updated += 1
+
+        await log(f"[local_result_writeback] OK updated={updated} target={source_table}.{target_column}")
+        ctx.step_results.append(
+            {
+                "step": self.step_type,
+                "status": "ok",
+                "updated": updated,
+                "target": f"{source_table}.{target_column}",
+            }
+        )
+
+
 def _normalize_str_list(value: Any) -> List[str]:
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
@@ -1721,6 +1886,8 @@ STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
     "crawl": CrawlStep,
     "subscription_crawl": SubscriptionCrawlStep,
     "multi_platform_crawl": MultiPlatformCrawlStep,
+    "local_dataset_extract": LocalDatasetExtractStep,
+    "local_result_writeback": LocalResultWritebackStep,
     "feishu_push": FeishuPushStep,
     "feishu_pull": FeishuPullStep,
     "feishu_push_json": FeishuPushJsonStep,

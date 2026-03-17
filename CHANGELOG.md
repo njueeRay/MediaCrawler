@@ -53,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Verified — 幂等回归测试
 - **`tests/test_ai_pipeline_steps.py`**: 新增 `test_ai_text_step_idempotency_hit_skips_second_model_call`，验证同输入二次执行命中幂等缓存后不再调用模型；当前测试结果 `3 passed`
 
+#### Added — 本地替代链路（二期增量）
+- **`api/services/pipeline_steps.py`**: 新增 `local_dataset_extract` 步骤，支持从本地数据库按列提取记录并输出到 pipeline vars
+- **`api/services/pipeline_steps.py`**: 新增 `local_result_writeback` 步骤，支持将 AI 输出按 record_key 回写到本地业务表
+- **`api/routers/ai.py`** + **`api/schemas/ai_stack.py`**: 新增 `POST /api/ai/trigger/data-arrival` 触发入口，可直接提交 pipeline + vars 进行 data_arrival 执行
+- **`webui-src/src/views/TaskScheduler.vue`**: 步骤配置新增“本地数据提取/本地结果回写”并支持序列化
+
+#### Verified — 本地替代链路测试
+- **`tests/test_ai_pipeline_steps.py`**: 新增本地提取+本地回写测试，以及 data_arrival 触发接口测试；当前测试结果 `5 passed`
+
 #### Verified — OpenRouter 免费模型链路验证
 - **`POST /api/ai/executions/run`**: 使用 `google/gemma-3-27b-it:free` 完成 smoke 测试；在 `use_mock_if_no_key=true` 下链路执行成功
 - **配置前置校验**: 在 `use_mock_if_no_key=false` 场景，接口按预期返回 `OPENROUTER_API_KEY 未配置`，确认当前真实推理依赖环境变量注入

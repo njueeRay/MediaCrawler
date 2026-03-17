@@ -86,3 +86,10 @@ class AIRunResponse(BaseModel):
     version: str
     outputs: Dict[str, Any] = Field(default_factory=dict)
     step_results: List[AIStepRunResult] = Field(default_factory=list)
+
+
+class AIDataArrivalTriggerRequest(BaseModel):
+    pipeline: List[Dict[str, Any]] = Field(default_factory=list)
+    vars: Dict[str, Any] = Field(default_factory=dict)
+    platform: str = ""
+    dry_run: bool = False

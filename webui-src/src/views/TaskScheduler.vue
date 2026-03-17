@@ -264,6 +264,30 @@
           </n-form>
         </template>
 
+        <!-- local_dataset_extract 配置 -->
+        <template v-if="step.step === 'local_dataset_extract'">
+          <n-form label-placement="left" label-width="120" size="small">
+            <n-form-item label="数据库类型">
+              <n-select v-model:value="step.db_type" :options="[{ label: 'SQLite', value: 'sqlite' }, { label: 'MySQL', value: 'mysql' }, { label: 'Postgres', value: 'postgres' }]" style="width:180px" />
+            </n-form-item>
+            <n-form-item label="源表名">
+              <n-input v-model:value="step.source_table" placeholder="your_source_table" />
+            </n-form-item>
+            <n-form-item label="选择列">
+              <n-dynamic-tags v-model:value="step.select_columns" />
+            </n-form-item>
+            <n-form-item label="主键列">
+              <n-input v-model:value="step.key_column" placeholder="id" />
+            </n-form-item>
+            <n-form-item label="提取上限">
+              <n-input-number v-model:value="step.limit" :min="1" :max="5000" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="输出变量">
+              <n-input v-model:value="step.output" placeholder="local_dataset" />
+            </n-form-item>
+          </n-form>
+        </template>
+
         <!-- ai_image_understanding 配置 -->
         <template v-if="step.step === 'ai_image_understanding'">
           <n-form label-placement="left" label-width="120" size="small">
@@ -356,6 +380,36 @@
             </n-form-item>
             <n-form-item label="无Key走Mock">
               <n-switch v-model:value="step.use_mock_if_no_key" />
+            </n-form-item>
+          </n-form>
+        </template>
+
+        <!-- local_result_writeback 配置 -->
+        <template v-if="step.step === 'local_result_writeback'">
+          <n-form label-placement="left" label-width="120" size="small">
+            <n-form-item label="数据库类型">
+              <n-select v-model:value="step.db_type" :options="[{ label: 'SQLite', value: 'sqlite' }, { label: 'MySQL', value: 'mysql' }, { label: 'Postgres', value: 'postgres' }]" style="width:180px" />
+            </n-form-item>
+            <n-form-item label="回写表名">
+              <n-input v-model:value="step.source_table" placeholder="your_business_table" />
+            </n-form-item>
+            <n-form-item label="主键列">
+              <n-input v-model:value="step.key_column" placeholder="id" />
+            </n-form-item>
+            <n-form-item label="数据源变量">
+              <n-input v-model:value="step.source_var" placeholder="local_dataset" />
+            </n-form-item>
+            <n-form-item label="记录键字段">
+              <n-input v-model:value="step.source_key_field" placeholder="_record_key" />
+            </n-form-item>
+            <n-form-item label="AI输出变量">
+              <n-input v-model:value="step.ai_output_var" placeholder="text_analysis" />
+            </n-form-item>
+            <n-form-item label="目标列名">
+              <n-input v-model:value="step.target_column" placeholder="ai_text_analysis" />
+            </n-form-item>
+            <n-form-item label="内容字段">
+              <n-input v-model:value="step.content_field" placeholder="content" />
             </n-form-item>
           </n-form>
         </template>
@@ -963,8 +1017,10 @@ const availableStepOptions = [
   { label: '订阅采集', value: 'subscription_crawl' },
   { label: '多平台订阅采集', value: 'multi_platform_crawl' },
   { label: '通用采集', value: 'crawl' },
+  { label: '本地数据提取', value: 'local_dataset_extract' },
   { label: 'AI图片理解', value: 'ai_image_understanding' },
   { label: 'AI文本分析', value: 'ai_text_analysis' },
+  { label: '本地结果回写', value: 'local_result_writeback' },
   { label: '同步到飞书表', value: 'feishu_push' },
   { label: '从飞书表拉取', value: 'feishu_pull' },
   { label: 'JSON展开推送', value: 'feishu_push_json' },
@@ -1142,6 +1198,16 @@ function createDefaultStep(stepType: string, platform?: string): any {
       return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
       return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
+    case 'local_dataset_extract':
+      return {
+        step: 'local_dataset_extract',
+        db_type: 'sqlite',
+        source_table: 'feishu_record_snapshot',
+        select_columns: ['feishu_record_id', 'data'],
+        key_column: 'feishu_record_id',
+        limit: 100,
+        output: 'local_dataset',
+      }
     case 'ai_image_understanding':
       return {
         step: 'ai_image_understanding',
@@ -1177,6 +1243,18 @@ function createDefaultStep(stepType: string, platform?: string): any {
         use_mock_if_no_key: true,
         record_from_var: '',
         prompt: '请结合标题、正文和图片摘要进行文本分析。标题：{{record.title}}\n正文：{{record.content}}\n图片摘要：{{record.image_context}}',
+      }
+    case 'local_result_writeback':
+      return {
+        step: 'local_result_writeback',
+        db_type: 'sqlite',
+        source_table: 'your_business_table',
+        key_column: 'id',
+        source_var: 'local_dataset',
+        source_key_field: '_record_key',
+        ai_output_var: 'text_analysis',
+        target_column: 'ai_text_analysis',
+        content_field: 'content',
       }
     default:
       return { step: stepType }
@@ -1224,8 +1302,10 @@ function stepTagType(stepType: string): string {
     subscription_crawl:   'info',
     crawl:                'info',
     multi_platform_crawl: 'primary',
+    local_dataset_extract: 'primary',
     ai_image_understanding: 'warning',
     ai_text_analysis: 'success',
+    local_result_writeback: 'success',
     feishu_push:          'success',
     feishu_pull:          'warning',
     feishu_push_json:     'error',
@@ -1385,6 +1465,14 @@ function buildTaskConfig(): any {
         }
       }
     }
+    if (s.step === 'local_dataset_extract') {
+      if (s.db_type) clean.db_type = s.db_type
+      if (s.source_table) clean.source_table = s.source_table
+      if (Array.isArray(s.select_columns) && s.select_columns.length) clean.select_columns = s.select_columns
+      if (s.key_column) clean.key_column = s.key_column
+      if (s.limit && Number(s.limit) > 0) clean.limit = Number(s.limit)
+      if (s.output) clean.output = s.output
+    }
     if (s.step === 'feishu_push') {
       if (s.data_type) clean.data_type = s.data_type
       if (s.table_id) clean.table_id = s.table_id
@@ -1481,6 +1569,16 @@ function buildTaskConfig(): any {
       if (s.record_from_var) clean.record_from_var = s.record_from_var
       clean.use_mock_if_no_key = s.use_mock_if_no_key !== false
       clean.prompt = s.prompt || ''
+    }
+    if (s.step === 'local_result_writeback') {
+      if (s.db_type) clean.db_type = s.db_type
+      if (s.source_table) clean.source_table = s.source_table
+      if (s.key_column) clean.key_column = s.key_column
+      if (s.source_var) clean.source_var = s.source_var
+      if (s.source_key_field) clean.source_key_field = s.source_key_field
+      if (s.ai_output_var) clean.ai_output_var = s.ai_output_var
+      if (s.target_column) clean.target_column = s.target_column
+      if (s.content_field) clean.content_field = s.content_field
     }
     return clean
   })

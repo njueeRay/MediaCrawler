@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 
 import csv
+import json
 from pathlib import Path
 
 import pytest
 import api.services.pipeline_steps as pipeline_steps
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from api.services.pipeline_steps import (
     AIImageUnderstandingStep,
+    LocalDatasetExtractStep,
+    LocalResultWritebackStep,
     AITextAnalysisStep,
     PipelineContext,
 )
@@ -198,3 +203,89 @@ async def test_ai_text_step_idempotency_hit_skips_second_model_call(tmp_path: Pa
 
     assert ctx.aborted is False
     assert call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_local_dataset_extract_and_writeback_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "local.sqlite"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE demo_table (id TEXT PRIMARY KEY, title TEXT, ai_text_analysis TEXT)"))
+        await conn.execute(text("INSERT INTO demo_table(id,title,ai_text_analysis) VALUES ('1','A',''),('2','B','')"))
+
+    monkeypatch.setattr("database.db_session.get_async_engine", lambda db_type=None: engine)
+
+    ctx = PipelineContext(task_id=10, execution_id=10, platform="wechat")
+
+    async def _log(_: str):
+        return None
+
+    extract = LocalDatasetExtractStep(
+        {
+            "step": "local_dataset_extract",
+            "db_type": "sqlite",
+            "source_table": "demo_table",
+            "select_columns": ["id", "title"],
+            "key_column": "id",
+            "limit": 10,
+            "output": "local_dataset",
+        }
+    )
+    await extract.run(ctx, _log)
+
+    assert ctx.aborted is False
+    assert len(ctx.vars["local_dataset"]) == 2
+
+    ctx.vars["text_analysis"] = {
+        "by_record": {
+            "1": {"content": "AI-A"},
+            "2": {"content": "AI-B"},
+        }
+    }
+
+    writeback = LocalResultWritebackStep(
+        {
+            "step": "local_result_writeback",
+            "db_type": "sqlite",
+            "source_table": "demo_table",
+            "key_column": "id",
+            "source_var": "local_dataset",
+            "source_key_field": "_record_key",
+            "ai_output_var": "text_analysis",
+            "target_column": "ai_text_analysis",
+            "content_field": "content",
+        }
+    )
+    await writeback.run(ctx, _log)
+
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text("SELECT id, ai_text_analysis FROM demo_table ORDER BY id"))).fetchall()
+        assert rows[0][1] == "AI-A"
+        assert rows[1][1] == "AI-B"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_data_arrival_trigger_runs_pipeline(monkeypatch: pytest.MonkeyPatch):
+    from api.routers.ai import trigger_data_arrival
+    from api.schemas.ai_stack import AIDataArrivalTriggerRequest
+
+    async def _fake_run_pipeline(steps_config, ctx, log):
+        await log("mock pipeline start")
+        ctx.vars["done"] = True
+        ctx.step_results.append({"step": "mock", "status": "ok"})
+
+    monkeypatch.setattr("api.routers.ai.run_pipeline", _fake_run_pipeline)
+
+    req = AIDataArrivalTriggerRequest(
+        pipeline=[{"step": "mock"}],
+        vars={"input": "x"},
+        platform="wechat",
+        dry_run=False,
+    )
+    resp = await trigger_data_arrival(req)
+    payload = resp["data"]
+    assert payload["success"] is True
+    assert payload["vars"].get("done") is True
+    assert payload["step_results"][0]["status"] == "ok"
