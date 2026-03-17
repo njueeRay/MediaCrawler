@@ -325,3 +325,35 @@ class WebuiApiKey(Base):
     last_used_at = Column(DateTime, nullable=True)
 
     owner = relationship("WebuiUser", back_populates="api_keys")
+
+
+# ---------------------------------------------------------------------------
+# 10. AIResult — 本地 AI 行级结果与幂等缓存（AI Stack）
+# ---------------------------------------------------------------------------
+class AIResult(Base):
+    """AI 行级执行结果（本地持久化，支持幂等跳过）"""
+    __tablename__ = "webui_ai_result"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    task_id = Column(Integer, nullable=True, index=True)
+    execution_id = Column(Integer, nullable=True, index=True)
+
+    step_id = Column(String(64), nullable=False, index=True)
+    step_type = Column(String(64), nullable=False, index=True)
+    target_field = Column(String(128), nullable=False)
+    record_key = Column(String(128), nullable=False, index=True)
+
+    idempotency_key = Column(String(128), nullable=False, unique=True, index=True)
+    input_hash = Column(String(64), nullable=False, index=True)
+
+    model_name = Column(String(128), nullable=True)
+    prompt_rendered = Column(Text, default="")
+    output_content = Column(Text, default="")
+    output_payload = Column(JSON, default=dict)
+
+    status = Column(String(20), nullable=False, default="success")
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

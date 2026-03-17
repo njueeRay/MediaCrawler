@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 import pytest
+import api.services.pipeline_steps as pipeline_steps
 
 from api.services.pipeline_steps import (
     AIImageUnderstandingStep,
@@ -132,3 +133,68 @@ async def test_ai_image_step_resolves_local_image_path(tmp_path: Path):
 
     assert ctx.aborted is False
     assert ctx.vars["image_understanding"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ai_text_step_idempotency_hit_skips_second_model_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    csv_path = tmp_path / "records_idem.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["record_id", "title", "content"])
+        writer.writeheader()
+        writer.writerow({"record_id": "r1", "title": "A", "content": "B"})
+
+    ctx = PipelineContext(task_id=3, execution_id=3, platform="wechat")
+    ctx.vars["feishu_pull_result"] = str(csv_path)
+
+    cache_store = {}
+
+    async def _fake_get_cached(idem_key: str):
+        return cache_store.get(idem_key)
+
+    async def _fake_save(payload: dict):
+        cache_store[payload["idempotency_key"]] = {
+            "content": payload.get("output_content", ""),
+            "usage": payload.get("output_payload", {}).get("usage", {}),
+            "latency_ms": payload.get("output_payload", {}).get("latency_ms", 0),
+            "model": payload.get("model_name", ""),
+            "target_field": payload.get("target_field", ""),
+            "idempotency_hit": True,
+        }
+
+    call_count = {"n": 0}
+
+    async def _fake_run_text(*, prompt: str, model=None, use_mock_if_no_key=True):
+        call_count["n"] += 1
+        return {
+            "ok": True,
+            "model": model or "mock-model",
+            "content": f"resp:{prompt}",
+            "latency_ms": 1,
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr(pipeline_steps, "_get_cached_ai_result", _fake_get_cached)
+    monkeypatch.setattr(pipeline_steps, "_save_ai_result_row", _fake_save)
+    monkeypatch.setattr(pipeline_steps.ai_gateway, "run_text", _fake_run_text)
+
+    step_cfg = {
+        "step": "ai_text_analysis",
+        "step_id": "text_analysis",
+        "output_var": "text_analysis",
+        "target_field": "ai_text_analysis",
+        "input_from_var": "feishu_pull_result",
+        "selected_columns": ["record_id", "title", "content"],
+        "row_limit": 10,
+        "enable_idempotency": True,
+        "prompt": "标题={{record.title}} 内容={{record.content}}",
+    }
+
+    async def _log(_: str):
+        return None
+
+    step = AITextAnalysisStep(step_cfg)
+    await step.run(ctx, _log)
+    await step.run(ctx, _log)
+
+    assert ctx.aborted is False
+    assert call_count["n"] == 1

@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Verified — AI 双步骤自动化测试
 - **`tests/test_ai_pipeline_steps.py`**: 新增 2 个用例，覆盖“CSV 选列批量分析（图片→文本）”和“本地图片路径解析”；执行结果 `2 passed`
 
+#### Added — 方案 B 核心能力（本地持久化 + 行级幂等）
+- **`database/webui_models.py`**: 新增 `AIResult`（`webui_ai_result`）模型，用于本地持久化 AI 行级结果（step/record/input_hash/idempotency_key/output）
+- **`alembic/versions/0003_add_webui_ai_result_table.py`**: 新增迁移脚本，创建 `webui_ai_result` 表及索引
+- **`api/services/pipeline_steps.py`**: AI 图片/文本步骤新增行级幂等缓存（idempotency hit 跳过模型调用）、行级重试、结果持久化入库能力
+- **`webui-src/src/views/TaskScheduler.vue`**: AI 步骤新增 `行级幂等` 与 `失败重试` 配置项，并支持序列化到任务配置
+
+#### Verified — 幂等回归测试
+- **`tests/test_ai_pipeline_steps.py`**: 新增 `test_ai_text_step_idempotency_hit_skips_second_model_call`，验证同输入二次执行命中幂等缓存后不再调用模型；当前测试结果 `3 passed`
+
 #### Verified — OpenRouter 免费模型链路验证
 - **`POST /api/ai/executions/run`**: 使用 `google/gemma-3-27b-it:free` 完成 smoke 测试；在 `use_mock_if_no_key=true` 下链路执行成功
 - **配置前置校验**: 在 `use_mock_if_no_key=false` 场景，接口按预期返回 `OPENROUTER_API_KEY 未配置`，确认当前真实推理依赖环境变量注入

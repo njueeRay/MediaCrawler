@@ -288,6 +288,12 @@
             <n-form-item label="批量上限">
               <n-input-number v-model:value="step.row_limit" :min="1" :max="200" style="width:140px" />
             </n-form-item>
+            <n-form-item label="行级幂等">
+              <n-switch v-model:value="step.enable_idempotency" />
+            </n-form-item>
+            <n-form-item label="失败重试">
+              <n-input-number v-model:value="step.retry_count" :min="1" :max="5" style="width:140px" />
+            </n-form-item>
             <n-form-item label="图片根目录">
               <n-input v-model:value="step.image_base_dir" placeholder="image" />
             </n-form-item>
@@ -332,6 +338,12 @@
             </n-form-item>
             <n-form-item label="批量上限">
               <n-input-number v-model:value="step.row_limit" :min="1" :max="200" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="行级幂等">
+              <n-switch v-model:value="step.enable_idempotency" />
+            </n-form-item>
+            <n-form-item label="失败重试">
+              <n-input-number v-model:value="step.retry_count" :min="1" :max="5" style="width:140px" />
             </n-form-item>
             <n-form-item label="记录变量">
               <n-input v-model:value="step.record_from_var" placeholder="可空：从 ctx.vars 读取 record" />
@@ -1141,6 +1153,8 @@ function createDefaultStep(stepType: string, platform?: string): any {
         image_columns: ['cover'],
         row_limit: 20,
         image_base_dir: 'image',
+        enable_idempotency: true,
+        retry_count: 1,
         model: '',
         use_mock_if_no_key: true,
         record_from_var: '',
@@ -1157,6 +1171,8 @@ function createDefaultStep(stepType: string, platform?: string): any {
         selected_columns: ['title', 'content', 'author_name'],
         image_context_from_var: 'image_understanding',
         row_limit: 20,
+        enable_idempotency: true,
+        retry_count: 1,
         model: '',
         use_mock_if_no_key: true,
         record_from_var: '',
@@ -1443,6 +1459,8 @@ function buildTaskConfig(): any {
       if (Array.isArray(s.image_columns) && s.image_columns.length) clean.image_columns = s.image_columns
       if (s.row_limit && Number(s.row_limit) > 0) clean.row_limit = Number(s.row_limit)
       if (s.image_base_dir) clean.image_base_dir = s.image_base_dir
+      clean.enable_idempotency = s.enable_idempotency !== false
+      if (s.retry_count && Number(s.retry_count) > 0) clean.retry_count = Number(s.retry_count)
       if (s.model) clean.model = s.model
       if (s.record_from_var) clean.record_from_var = s.record_from_var
       clean.use_mock_if_no_key = s.use_mock_if_no_key !== false
@@ -1457,6 +1475,8 @@ function buildTaskConfig(): any {
       if (Array.isArray(s.selected_columns) && s.selected_columns.length) clean.selected_columns = s.selected_columns
       if (s.image_context_from_var) clean.image_context_from_var = s.image_context_from_var
       if (s.row_limit && Number(s.row_limit) > 0) clean.row_limit = Number(s.row_limit)
+      clean.enable_idempotency = s.enable_idempotency !== false
+      if (s.retry_count && Number(s.retry_count) > 0) clean.retry_count = Number(s.retry_count)
       if (s.model) clean.model = s.model
       if (s.record_from_var) clean.record_from_var = s.record_from_var
       clean.use_mock_if_no_key = s.use_mock_if_no_key !== false

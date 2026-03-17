@@ -43,6 +43,7 @@ task_config 示例（pipeline 模式）：
 import asyncio
 import base64
 import csv
+import hashlib
 import json
 import logging
 import mimetypes
@@ -1318,6 +1319,59 @@ def _resolve_image_ref(value: str, image_base_dir: str = "") -> str:
     return raw
 
 
+def _build_ai_input_hash(*, record: Dict[str, Any], prompt: str, extras: Optional[Dict[str, Any]] = None) -> str:
+    raw = {
+        "record": record,
+        "prompt": prompt,
+        "extras": extras or {},
+    }
+    data = json.dumps(raw, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+async def _get_cached_ai_result(idempotency_key: str) -> Optional[Dict[str, Any]]:
+    """从本地 AI 结果表读取幂等命中结果。表不存在时降级为无缓存。"""
+    from sqlalchemy import select as _select
+
+    from database.db_session import get_session
+    try:
+        from database.webui_models import AIResult
+        async with get_session() as session:
+            if session is None:
+                return None
+            row = (
+                await session.execute(
+                    _select(AIResult).where(AIResult.idempotency_key == idempotency_key)
+                )
+            ).scalars().first()
+            if not row:
+                return None
+            return {
+                "content": row.output_content or "",
+                "usage": (row.output_payload or {}).get("usage", {}),
+                "latency_ms": (row.output_payload or {}).get("latency_ms", 0),
+                "model": row.model_name or "",
+                "target_field": row.target_field,
+                "idempotency_hit": True,
+            }
+    except Exception:
+        return None
+
+
+async def _save_ai_result_row(payload: Dict[str, Any]) -> None:
+    """写入本地 AI 结果表。表不存在时静默降级，避免阻断主流程。"""
+    from database.db_session import get_session
+    try:
+        from database.webui_models import AIResult
+        async with get_session() as session:
+            if session is None:
+                return
+            row = AIResult(**payload)
+            session.add(row)
+    except Exception:
+        return
+
+
 class AIImageUnderstandingStep(PipelineStep):
     """
     图片理解步骤（OpenRouter Vision）。
@@ -1365,6 +1419,8 @@ class AIImageUnderstandingStep(PipelineStep):
         model = cfg.get("model") or ai_gateway.default_vision_model
         row_outputs: List[Dict[str, Any]] = []
         by_record: Dict[str, Any] = {}
+        idempotency_enabled = bool(cfg.get("enable_idempotency", True))
+        retry_count = int(cfg.get("retry_count", 1) or 1)
 
         for idx, record in enumerate(records[:row_limit]):
             record_key = str(record.get("_record_key") or f"row_{idx}")
@@ -1396,12 +1452,37 @@ class AIImageUnderstandingStep(PipelineStep):
             if not image_urls:
                 continue
 
-            result = await ai_gateway.run_vision(
+            input_hash = _build_ai_input_hash(
+                record=record,
                 prompt=prompt,
-                image_urls=image_urls,
-                model=model,
-                use_mock_if_no_key=use_mock_if_no_key,
+                extras={"image_urls": image_urls, "step": step_id},
             )
+            idempotency_key = f"{step_id}:{record_key}:{input_hash}"
+            if idempotency_enabled:
+                cached = await _get_cached_ai_result(idempotency_key)
+                if cached:
+                    cached_payload = {
+                        **cached,
+                        "record_key": record_key,
+                        "idempotency_key": idempotency_key,
+                    }
+                    row_outputs.append(cached_payload)
+                    by_record[record_key] = cached_payload
+                    await log(f"[ai_image_understanding] SKIP record={record_key} (idempotency hit)")
+                    continue
+
+            result = None
+            for attempt in range(max(1, retry_count)):
+                result = await ai_gateway.run_vision(
+                    prompt=prompt,
+                    image_urls=image_urls,
+                    model=model,
+                    use_mock_if_no_key=use_mock_if_no_key,
+                )
+                if result.get("ok"):
+                    break
+                if attempt + 1 < max(1, retry_count):
+                    await log(f"[ai_image_understanding] retry record={record_key} ({attempt+1}/{retry_count})")
             if not result.get("ok"):
                 await log(f"[ai_image_understanding] WARN record={record_key}: {result.get('error', 'unknown error')}")
                 continue
@@ -1413,9 +1494,28 @@ class AIImageUnderstandingStep(PipelineStep):
                 "latency_ms": result.get("latency_ms", 0),
                 "model": result.get("model", model),
                 "target_field": target_field,
+                "idempotency_key": idempotency_key,
             }
             row_outputs.append(payload)
             by_record[record_key] = payload
+
+            await _save_ai_result_row(
+                {
+                    "task_id": ctx.task_id,
+                    "execution_id": ctx.execution_id,
+                    "step_id": step_id,
+                    "step_type": self.step_type,
+                    "target_field": target_field,
+                    "record_key": record_key,
+                    "idempotency_key": idempotency_key,
+                    "input_hash": input_hash,
+                    "model_name": payload.get("model", ""),
+                    "prompt_rendered": prompt,
+                    "output_content": payload.get("content", ""),
+                    "output_payload": payload,
+                    "status": "success",
+                }
+            )
 
         if not row_outputs:
             ctx.aborted = True
@@ -1495,6 +1595,8 @@ class AITextAnalysisStep(PipelineStep):
         model = cfg.get("model") or ai_gateway.default_text_model
         row_outputs: List[Dict[str, Any]] = []
         by_record: Dict[str, Any] = {}
+        idempotency_enabled = bool(cfg.get("enable_idempotency", True))
+        retry_count = int(cfg.get("retry_count", 1) or 1)
 
         for idx, row in enumerate(records[:row_limit]):
             record = dict(row)
@@ -1516,11 +1618,36 @@ class AITextAnalysisStep(PipelineStep):
             if not prompt:
                 continue
 
-            result = await ai_gateway.run_text(
+            input_hash = _build_ai_input_hash(
+                record=record,
                 prompt=prompt,
-                model=model,
-                use_mock_if_no_key=use_mock_if_no_key,
+                extras={"step": step_id, "image_ctx_key": image_ctx_key},
             )
+            idempotency_key = f"{step_id}:{record_key}:{input_hash}"
+            if idempotency_enabled:
+                cached = await _get_cached_ai_result(idempotency_key)
+                if cached:
+                    cached_payload = {
+                        **cached,
+                        "record_key": record_key,
+                        "idempotency_key": idempotency_key,
+                    }
+                    row_outputs.append(cached_payload)
+                    by_record[record_key] = cached_payload
+                    await log(f"[ai_text_analysis] SKIP record={record_key} (idempotency hit)")
+                    continue
+
+            result = None
+            for attempt in range(max(1, retry_count)):
+                result = await ai_gateway.run_text(
+                    prompt=prompt,
+                    model=model,
+                    use_mock_if_no_key=use_mock_if_no_key,
+                )
+                if result.get("ok"):
+                    break
+                if attempt + 1 < max(1, retry_count):
+                    await log(f"[ai_text_analysis] retry record={record_key} ({attempt+1}/{retry_count})")
             if not result.get("ok"):
                 await log(f"[ai_text_analysis] WARN record={record_key}: {result.get('error', 'unknown error')}")
                 continue
@@ -1532,9 +1659,28 @@ class AITextAnalysisStep(PipelineStep):
                 "latency_ms": result.get("latency_ms", 0),
                 "model": result.get("model", model),
                 "target_field": target_field,
+                "idempotency_key": idempotency_key,
             }
             row_outputs.append(payload)
             by_record[record_key] = payload
+
+            await _save_ai_result_row(
+                {
+                    "task_id": ctx.task_id,
+                    "execution_id": ctx.execution_id,
+                    "step_id": step_id,
+                    "step_type": self.step_type,
+                    "target_field": target_field,
+                    "record_key": record_key,
+                    "idempotency_key": idempotency_key,
+                    "input_hash": input_hash,
+                    "model_name": payload.get("model", ""),
+                    "prompt_rendered": prompt,
+                    "output_content": payload.get("content", ""),
+                    "output_payload": payload,
+                    "status": "success",
+                }
+            )
 
         if not row_outputs:
             ctx.aborted = True
