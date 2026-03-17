@@ -41,9 +41,25 @@ AI Stack Roadmap：
 - [x] PM 输出结构化需求说明（P0/P1/验收/里程碑）
 - [x] brain 完成架构评审
 - [x] 创建分支 `feat/ai_stack`
-- [ ] 详细技术设计落地（模块、DSL、DB 表、API）
+- [x] 详细技术设计落地（模块、DSL、DB 表、API）
 - [ ] MVP 开发联调（文本列/图片列/顺序依赖/自动触发）
 - [ ] 灰度验收与切换
+
+### 4.1 团队编制决议（2026-03-17，brain 主持）
+
+当前核心成员（保留）：
+- `brain` / `pm` / `dev` / `researcher` / `code-reviewer`
+
+当前专项成员（保留，按需激活）：
+- `brand`（对外发布）
+- `profile-designer`（视觉改版）
+
+新增招募（用于 AI Stack 冲刺）：
+- `arch-designer`：负责 AI Stack 模块边界、DSL 约束与架构评审
+- `qa-automation`：负责 API 契约测试、回归用例、执行链路质量门
+
+归档结论：
+- 暂不归档任何成员；`brand` 与 `profile-designer` 进入低频值班态，不参与日常开发流水线。
 
 ## 5. 会话执行协议（MediaCrawler 补充）
 

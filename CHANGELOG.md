@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed — 迭代状态切换
 - **`.github/prompts/copilot-instructions.md`**: 当前迭代切换为 `feat/ai_stack`，新增 AI Stack Roadmap checklist，并固化“会话开场先展示 roadmap”规则
 
+#### Added — 团队演进与执行编制
+- **`docs/meetings/2026-03-17-01-team-evolution-and-ai-stack-next-steps.md`**: brain 主持团队演进会，明确“核心保留 + 专项招募 + 暂不归档”的编制决议
+- **`.github/agents/arch-designer.agent.md`**: 新增架构设计专项角色，覆盖 AI Stack 模块边界与 DSL 约束审阅
+- **`.github/agents/qa-automation.agent.md`**: 新增自动化测试专项角色，覆盖 AI Stack API 契约与回归质量门
+
+#### Changed — 项目上下文团队快照
+- **`.github/copilot-instructions.md`**: 新增 4.1 团队编制决议，定义当前成员状态、新增招募与归档策略
+
+#### Verified — OpenRouter 免费模型链路验证
+- **`POST /api/ai/executions/run`**: 使用 `google/gemma-3-27b-it:free` 完成 smoke 测试；在 `use_mock_if_no_key=true` 下链路执行成功
+- **配置前置校验**: 在 `use_mock_if_no_key=false` 场景，接口按预期返回 `OPENROUTER_API_KEY 未配置`，确认当前真实推理依赖环境变量注入
+
 ### Sprint — v1.4 进行中（2026-03-05~）：运维文档 + CI 基础设施
 
 #### Added — WECHAT_AUTH_KEY 轮换机制
