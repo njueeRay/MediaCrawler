@@ -1,0 +1,11 @@
+{"type":"entity","name":"Ray Huang","entityType":"Person","observations":["GitHub 用户名：njueeray","角色定位：AI-native person，Open Source Programmer / LLM Engineer / Full-Stack Developer","所在地：中国·南京","主要语言：Python, C++, JavaScript, TypeScript","核心信念：人类判断力 × AI 执行力的共生体，不是把 AI 当工具用"]}
+{"type":"entity","name":"用户偏好·语言","entityType":"Preference","observations":["所有原创内容默认中文","代码、路径、命令保持英文","不翻译 commit/Sprint/workflow 等已通用技术词汇","对话风格：直接清晰，不绕弯，不过度使用感叹号"]}
+{"type":"entity","name":"用户偏好·Commit","entityType":"Preference","observations":["语义化前缀：feat/fix/docs/style/chore/refactor/test","Release Notes 使用 emoji 分类：🎉新增 / 🐛修复 / 🔨改进 / 📝文档","每个 commit 末尾附加 Co-authored-by: GitHub Copilot <copilot@github.com>"]}
+{"type":"entity","name":"用户偏好·工作流","entityType":"Preference","observations":["高度授权：Agent 团队对技术路径有优先决定权","不喜欢被列出选项 A/B/C 再等选择，偏好 Agent 直接给推荐方案","破坏性变更前需告知","社交媒体工作流愿景：飞书提需求 → Agent 生成内容 → 发预览链接 → 批准 → 自动发布"]}
+{"type":"entity","name":"项目·njueeray.github.io","entityType":"Project","observations":["Astro 5.18.0 博客站点","当前版本：v5.5.0（成熟里程碑）","博客文章：17 篇（含 2026-03-10 新增团队成长反思会）","E2E 测试：22 个（Playwright）","部署：GitHub Pages，自动 CI/CD"]}
+{"type":"entity","name":"项目·OpenProfile","entityType":"Project","observations":["AI-native 工作流开源示范项目","包含 7 个 Agent 角色定义、Playbook v2.2、USER.md","GitHub 仓库：njueeRay/OpenProfile"]}
+{"type":"entity","name":"团队·Agent 角色","entityType":"Team","observations":["brain：战略协调中枢，用户唯一汇报窗口","pm：Sprint 规划、DoD 执行、版本发布","dev：全栈实现（Python/TS/Astro/YAML/Shell/Markdown）","researcher：技术调研，输出浓缩结论（不修改文件）","code-reviewer：七维度质量门禁（不修改文件）","profile-designer：GitHub Profile 视觉规划（按需启用）","brand：品牌运营、Build in Public、内容发布策略"]}
+{"type":"entity","name":"技术决策·设计风格","entityType":"Decision","observations":["整体色调：GitHub Dark (#0d1117) + 蓝色强调 (#58a6ff)","Header：capsule-render waving 暗色渐变","统计组件：github-readme-stats github_dark_dimmed 主题","技术栈展示：skill-icons 深色版 20 图标","暗色主题优先，兼容 GitHub 浅色主题"]}
+{"type":"relation","from":"Ray Huang","to":"项目·njueeray.github.io","relationType":"owns"}
+{"type":"relation","from":"Ray Huang","to":"项目·OpenProfile","relationType":"owns"}
+{"type":"relation","from":"团队·Agent 角色","to":"项目·njueeray.github.io","relationType":"builds"}

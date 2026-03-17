@@ -88,7 +88,7 @@ cd webui-src && npm run dev
 | 规则 | 说明 |
 |------|------|
 | **即时归档** | 每次会议结束后会议纪要在同一次提交中落地 |
-| **命名规范** | `YYYY-MM-DD-{主题关键词}.md`，存放于 `docs/ops/meetings/` |
+| **命名规范** | `YYYY-MM-DD-{主题关键词}.md`，存放于 `docs/meetings/` |
 | **必填字段** | 日期、类型、主持、参与者、议题、背景（见本文件头部表格） |
 | **决议格式** | 每项决议需明确：是/否/待定 + 负责人 + 截止时间 |
 
@@ -110,7 +110,7 @@ cd webui-src && npm run dev
 | `refactor(module):` | 代码重构（不改变行为） |
 | `chore:` | 工具/配置/依赖变更 |
 
-> 完整规范见 [docs/ops/team-playbook.md](../ops/team-playbook.md)
+> 完整规范见 [docs/governance/team-playbook.md](../governance/team-playbook.md)
 
 ---
 
@@ -133,7 +133,7 @@ cd webui-src && npm run dev
 | **P0** | 启动后端：`uv run uvicorn api.main:app --host 0.0.0.0 --port 8080` | 本次执行 |
 | **P0** | 构建并启动前端：`cd webui-src && npm install && npm run build && cd ..` | 本次执行 |
 | **P0** | 验证 `http://localhost:8080` 可访问 WebUI | 用户验收 |
-| **P1** | 将规范化协作制度（§3）写入 `docs/ops/team-playbook.md` | 下次 Sprint |
+| **P1** | 将规范化协作制度（§3）写入 `docs/governance/team-playbook.md` | 下次 Sprint |
 | **P1** | 验证 `docs/guide/automation.md` 内容完整性 | 下次 Sprint |
 
 ---

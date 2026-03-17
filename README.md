@@ -229,7 +229,7 @@ tasks:
 - [ ] 多租户 SaaS 模式
 - [ ] 实时数据可视化看板
 
-详细规划参见：[Feishu Backlog](docs/ops/feishu-backlog.md)
+详细规划参见：[Feishu Backlog](docs/reference/feishu-backlog.md)
 
 ## 📚 文档索引
 
@@ -257,8 +257,8 @@ tasks:
 
 ### 🎯 快速导航
 - **新用户** → [快速开始](#1-环境准备) → [飞书配置](docs/feishu/dev-notes.md)
-- **开发者** → [技术参考](docs/reference/) → [WebUI开发文档](docs/dev/webui/)
-- **运营团队** → [Team Playbook](docs/ops/team-playbook.md) → [飞书功能概览](docs/feishu/README.md)
+- **开发者** → [技术参考](docs/reference/) → [WebUI API 文档](docs/reference/06-WebUI-API与可视化系统.md)
+- **运营团队** → [Team Playbook](docs/governance/team-playbook.md) → [会议纪要](docs/meetings/)
 
 ## 🤝 贡献指南
 

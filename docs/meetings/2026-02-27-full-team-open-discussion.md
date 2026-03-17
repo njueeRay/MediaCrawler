@@ -229,4 +229,4 @@
 
 ---
 
-*纪要由 Brain 整理归档于 `docs/ops/meetings/`*
+*纪要由 Brain 整理归档于 `docs/meetings/`*

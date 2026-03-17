@@ -3,7 +3,7 @@
 > 本文件记录了本项目是如何利用 GitHub Copilot Agent 团队进行协作开发的。
 > 适合想将 AI-Native 工作流引入自己项目的开发者参考。
 >
-> **最后更新：** 2026-02-25（复盘会议 #003，反映 V2.0 团队架构）
+> **最后更新：** 2026-03-10（全体优化会议 #07，反映 V5.x 七角色团队架构）
 
 ---
 
@@ -65,6 +65,28 @@ pm（拆分 tasks）  dev（逐 task 实现）  code-reviewer（审查）  brain
 
 Brain 直接调度 dev 修改 + 推送，跳过完整流程。
 
+### 模式四：治理会议（方法论 & 团队演进）
+
+当团队自身的工作方式需要优化时：
+
+```
+brain  召集全体发言（每役角色发言，Brain 综合）
+     pm：版本积压 / Sprint 节奏问题
+     researcher：技术方法论 / 信息源评估
+     dev：实现质量 / 工具层改进
+     code-reviewer：质量门现状 / 规则覆盖缺口
+     brand：内容触达反馈 / 外部信号
+     profile-designer：按需参与
+         
+brain：综合报告 → 治理文档更新（Playbook / agent 文件 / 健康检查表）
+```
+
+**会议纪要：** `docs/meetings/YYYY-MM-DD-NN-<type>.md`
+
+### 模式五：工具层调用（Hooks / Skills / MCP）
+
+`.github/settings.json` 中配置了自动触发逻辑（SessionStart / TaskCompleted / TeammateIdle），无需手动调用。专项能力通过 `.github/skills/*/SKILL.md` 加载。
+
 ---
 
 ## Agent 团队
@@ -104,12 +126,20 @@ Brain 直接调度 dev 修改 + 推送，跳过完整流程。
 - **输出：** 结构化审查报告（APPROVED / APPROVED_WITH_SUGGESTIONS / REQUEST_CHANGES）
 - **启用场景：** 每次迭代完成后，发布前必做
 
-### profile-designer（专项：视觉规划）
+### profile-designer（专项：视觉规划，按需启用）
 - **职责：** GitHub Profile / 个人站点的视觉架构规划和组件选型
 - **权限：** 只读 + 技术路径优先决定权
 - **工具：** fetch（调研参考主页）、search、codebase
 - **输出：** 设计方案文档，不直接修改文件
-- **启用场景：** 每次大改版前（按项目需要启用）
+- **启用场景：** 每次大改版前（按项目需要启用，处于低活跃状态属正常）
+
+### brand（品牌运营）
+- **职责：** Build in Public 内容策略、GitHub Discussions 发布、外部传播节奏管理
+- **权限：** 读写（内容）+ 品牌决策
+- **工具：** editFiles、fetch、GitHub API
+- **输出：** Discussion 帖子草稿/发布、内容矩阵规划、品牌博文
+- **启用场景：** 里程碑发布后对外传播、内容发布周期节点
+- **自主权限：** 符合 `docs/strategy/brand-content-checklist.md` 的内容，Brand 可无需确认直接发布
 
 ---
 
@@ -184,8 +214,8 @@ Brain 在每次会话结束前：
 | `CHANGELOG.md` | 本次新增/变更/修复 |
 | `.github/copilot-instructions.md`  已决定的设计选择 | 新决策 |
 | `.github/copilot-instructions.md`  当前迭代状态 | 进度 |
-| `docs/design-decisions.md` | 每个决策的 what/why/when |
-| `docs/component-guide.md` | 新增组件的参数和用法 |
+| `docs/governance/design-decisions.md` | 每个决策的 what/why/when |
+| `docs/guides/component-guide.md` | 新增组件的参数和用法 |
 | `docs/meetings/` | 会议纪要（如有） |
 
 **这不是可选步骤，而是迭代的收尾条件。**
@@ -198,10 +228,14 @@ Brain 在每次会话结束前：
 |------|------|
 | `.github/copilot-instructions.md` | 全局项目指令，每次会话自动生效（项目大脑） |
 | `.github/agents/*.agent.md` | 各 Agent 的角色定义、工具权限、handoff 规则 |
-| `docs/team-playbook.md` | 团队方法论手册（commit 规范、发布规则、DoD 清单） |
+| `docs/governance/team-playbook.md` | 团队方法论手册（commit 规范、发布规则、DoD 清单） |
 | `.vscode/toolsets.jsonc` | 工具集分组（readonly/writer/runner） |
 | `.vscode/mcp.json` | MCP 服务器连接（GitHub API、fetch）|
+| `.github/settings.json` | Agent Hooks 配置（SessionStart / TaskCompleted 等自动治理触发）|
+| `.github/skills/*/SKILL.md` | 7 个 Agent 的可发现技能模块（triggers / examples / constraints）|
+| `.github/hooks/lint-markdown.ps1` | PostToolUse Hook：Write/Edit 后自动 markdownlint |
 | `.vscode/settings.json` | 终端自动批准规则 |
+| `.vscode/mcp.json` | MCP 服务器连接（Memory MCP / agent-skill-loader 等）|}
 
 ---
 
@@ -210,8 +244,9 @@ Brain 在每次会话结束前：
 1. Fork 本仓库
 2. 修改 `.github/copilot-instructions.md` 中的个人信息
 3. 按需调整 `.github/agents/` 中的 Agent 配置
-4. 阅读 `docs/team-playbook.md` 了解完整协作规范
+4. 阅读 `docs/governance/team-playbook.md` 了解完整协作规范
 5. 在 VS Code 中使用 GitHub Copilot Chat（Agent 模式），即可使用同一套工作流
 
-> 详细组件说明见 [docs/component-guide.md](component-guide.md)
-> 团队协作规范见 [docs/team-playbook.md](team-playbook.md)
+> 详细组件说明见 [docs/guides/component-guide.md](component-guide.md)
+> 团队协作规范见 [docs/governance/team-playbook.md](team-playbook.md)
+

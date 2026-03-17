@@ -261,7 +261,7 @@ python feishu_sync_simple.py --file your_file.json --limit 1
 
 ### 📚 核心文档
 - **[开发配置说明](dev-notes.md)** - OpenAPI 快速入门 + 完整技术实现
-- **[功能路线图](../ops/feishu-backlog.md)** - 项目后续规划
+- **[功能路线图](../reference/feishu-backlog.md)** - 项目后续规划
 - **[主项目文档](../../README.md)** - 完整项目概览
 
 ### 🎯 进阶使用

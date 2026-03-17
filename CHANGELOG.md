@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Sprint — v1.5 规划（2026-03-17）：AI Stack 本地化改造启动
 
 #### Added — AI Stack 方案与会议纪要
-- **`docs/ops/meetings/2026-03-17-ai-stack-architecture-review.md`**: brain 召集跨角色评审会，确认“本地 AI 编排栈替代飞书 AI 自动化链路”路线；明确 MVP 范围（文本列/图片列/顺序依赖/data_arrival 自动触发）与 4 周里程碑
+- **`docs/meetings/2026-03-17-ai-stack-architecture-review.md`**: brain 召集跨角色评审会，确认“本地 AI 编排栈替代飞书 AI 自动化链路”路线；明确 MVP 范围（文本列/图片列/顺序依赖/data_arrival 自动触发）与 4 周里程碑
 - **`docs/reference/ai-stack-technical-design.md`**: 技术设计草案（模块边界、DSL 规范、DB 表草案、API 草案、幂等与重试策略）
 
 #### Changed — 迭代状态切换
@@ -101,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard 健康面板：各平台状态可视化（🟢/🟡/🔴）+ Onboarding 提示
 - GitHub Actions CI：ruff lint + mypy type-check + npm build + pytest
 - PR 合并前检查清单模板（`.github/pull_request_template.md`）
-- Roadmap v1 规划（`docs/ops/meetings/2026-02-27-roadmap-v1-planning.md`）
+- Roadmap v1 规划（`docs/meetings/2026-02-27-roadmap-v1-planning.md`）
 
 ### Sprint #002+ — 验收复查 Bug 修复
 

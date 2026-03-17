@@ -14,8 +14,8 @@
 
 ### 反馈 1：文档归档混乱
 上一轮将会议纪要错误创建到 `docs/dev/WebUI/meetings/`，违反统一归档原则。
-- **处置**: 已移动到 `docs/ops/meetings/`，删除空目录
-- **铁律确立**: 所有会议纪要只存放 `docs/ops/meetings/`，命名 `YYYY-MM-DD-<topic>.md`
+- **处置**: 已移动到 `docs/meetings/`，删除空目录
+- **铁律确立**: 所有会议纪要只存放 `docs/meetings/`，命名 `YYYY-MM-DD-<topic>.md`
 
 ### 反馈 2：两个 P0 功能 Bug
 
@@ -64,7 +64,7 @@
 
 | # | 决策 | 理由 |
 |---|------|------|
-| D-011 | 会议纪要统一归档到 `docs/ops/meetings/` | 用户明确要求，避免散落 |
+| D-011 | 会议纪要统一归档到 `docs/meetings/` | 用户明确要求，避免散落 |
 | D-012 | 搜索功能配置读取优先从 `.env` 文件，fallback config 模块 | 与测试连接保持一致，避免热重载失败导致不一致 |
 | D-013 | Docker 骨架先输出，Sprint #003 正式验证 | 不阻塞当前本地验证流程，但提前准备 |
 
@@ -100,4 +100,4 @@
 ---
 
 *会议纪要由 GitHub Copilot 记录 | Brain 主持 | 2026-02-27*
-*归档位置: docs/ops/meetings/（铁律）*
+*归档位置: docs/meetings/（铁律）*

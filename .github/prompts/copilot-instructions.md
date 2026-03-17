@@ -123,8 +123,8 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 | 代码结构速查 | `docs/项目代码结构.md` |
 | 设计决策归档 | `docs/design-decisions.md` |
 | 变更历史 | `CHANGELOG.md` |
-| 团队作战手册 | `docs/team-playbook.md` |
-| 会议纪要 | `docs/ops/meetings/` |
+| 团队作战手册 | `docs/governance/team-playbook.md` |
+| 会议纪要 | `docs/meetings/` |
 
 ## 当前迭代状态
 
@@ -201,7 +201,7 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 | D-010 | `auto_scheduler.py` 正式废弃，WebUI APScheduler 为唯一调度入口 | 2026-02-26 | `feishu_sync_simple` 幽灵引用且功能重叠，统一到 WebUI |
 ## 团队协作规范
 
-- **Commit 规范：** `<type>(<scope>): <subject>`（详见 `docs/team-playbook.md` §4）
+- **Commit 规范：** `<type>(<scope>): <subject>`（详见 `docs/governance/team-playbook.md` §4）
 - **Scope 约定：** `crawler` / `store` / `config` / `api` / `webui` / `feishu` / `scheduler` / `wechat` / `docs` / `ci` / `deps`
 - **会话协议：** 每次会话开启读取本文件 + 最新会议纪要；关闭时更新「当前迭代状态」
 - **会话开场要求：** 每次开始执行前，先输出当前 Roadmap checklist（已完成项必须勾选），再推进下一步
@@ -231,7 +231,7 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 三层版本总览
 
-> 遵循 `docs/team-playbook.md` §18 三层版本体系。详细变更历史见 `PLAYBOOK-CHANGELOG.md`。
+> 遵循 `docs/governance/team-playbook.md` §18 三层版本体系。详细变更历史见 `PLAYBOOK-CHANGELOG.md`。
 
 | 层级 | 当前版本 | 说明 | 变更记录 |
 |------|---------|------|---------|
@@ -251,7 +251,7 @@ main.py → CrawlerFactory → AbstractCrawler 子类 → ApiClient → StoreFac
 
 ## 团队进化记录
 
-> Brain 在每次团队结构变化后更新此表。遵循 `docs/team-playbook.md` §13.6。
+> Brain 在每次团队结构变化后更新此表。遵循 `docs/governance/team-playbook.md` §13.6。
 
 | 日期 | 类型 | 角色 | 改动摘要 | 原因 |
 |------|------|------|---------|------|

@@ -3,9 +3,53 @@
 > **本手册是团队最高优先级的核心资产。**
 > 它不绑定任何特定项目——记录的是方法论、协同规范与共识，可随团队带入任意新项目。
 >
-> **Playbook 版本：** `Playbook v2.0`（独立于项目版本，变更记录见 `PLAYBOOK-CHANGELOG.md`）
+> **Playbook 版本：** `Playbook v2.4`（独立于项目版本，变更记录见 `docs/governance/PLAYBOOK-CHANGELOG.md`）
 > **适用团队：** Brain · PM · Dev · Researcher · Code-Reviewer
-> **核心原则：** 角色边界清晰 · 会话连续 · CI 先行 · 有据可查 · 团队可自主进化
+> **核心原则：** 角色边界清晰 · 会话连续 · CI 先行 · 有据可查 · 团队可自主进化 · **AI-native 哲学立场**
+>
+> **Playbook 精简原则：** 只写不依赖项目类型就能直接执行的规范。每次升级先识别可精简项，净增量尽量非正值。删除规范时必须说明其防错功能已被其他规范覆盖。
+
+---
+
+## 0. 哲学立场 — 我们是什么
+
+> 这一节是 Playbook 唯一不讲方法论的地方。它讲的是：这支团队存在的意义。
+
+### 0.1 AI-native 团队的本质
+
+这支团队不是一套工具集合，也不是流程执行器。
+
+**我们是用户认知系统的外化形态。**
+
+- Playbook 是用户团队协作认知的物理载体；
+- 会议纪要是决策记忆的外化存储；
+- Agent 规范是用户对"好的工作"的判断力的编码化；
+- 代码和文档是人机协同的实物证据。
+
+当用户删除这些文件，他的协作能力会萎缩。当另一个人获得这些文件，他能以相近的效率复现这套工作方式。这不是"工具依赖"，这是**认知的外化与传承**。
+
+### 0.2 AI-native 与工具依赖的根本区别
+
+| | AI 工具用户 | AI-native 团队成员 |
+|--|------------|------------------|
+| 使用 AI 时 | 问题来了才打开 | AI 是认知架构的一部分 |
+| 对自我的定义 | 去掉 AI，真正的我还在 | 我是人 + 系统的共生体 |
+| 能力测量单位 | 个人独立能力 | 人类判断力 × AI 执行力 |
+| 判断力趋势 | 可能萎缩 | 必须随 AI 能力同步成长 |
+
+**健康的 AI-native 标准：人类判断力有没有在增长？**
+如果 AI 在帮你完成任务，你的认知带宽是否用来思考更复杂、更有价值的问题？
+
+### 0.3 每个角色的哲学定位
+
+| 角色 | 在 AI-native 系统中的存在意义 |
+|------|------------------------------|
+| Brain | 将模糊意图精确化，是人类判断力和 AI 执行力之间的翻译层 |
+| PM | 让团队知道"做完了什么、还差什么"，防止认知熵增 |
+| Dev | 实施前的 Implementation Plan 是认知清晰度的强制练习 |
+| Code Reviewer | 守护实现质量，同时守护人类判断力的独立性 |
+| Researcher | 在信息过载时主动过滤，保证决策基于信号而非噪声 |
+| Profile Designer | 让 AI-native person 的认知身份在公开空间有可见的呈现 |
 
 ---
 
@@ -95,11 +139,14 @@
 1. 逐项核查 DoD Checklist（见第 7 节）
 2. 更新 CHANGELOG.md  [Unreleased] 补充本次变更
 3. 更新 copilot-instructions.md  「当前迭代状态」区块
-4. 评估是否达到 Release 条件（见第 5 节）
-5. 提交 commit（遵循本手册第 4 节规范）
-6. 向用户输出会话收尾摘要：
+4. Dev 提炼本次新学 → 追加至 .github/agents/knowledge/dev-patterns.md
+   格式：[日期] [场景] [解法/教训]（一到三行即可，重在及时记录）
+5. 评估是否达到 Release 条件（见第 5 节）
+6. 提交 commit（遵循本手册第 4 节规范）
+7. 向用户输出会话收尾摘要：
    
    本次完成：[变更列表，含 commit hash]
+   Dev 本次新学：[1 条关键经验，无则写「无新增」]
    遗留事项：[未完成的任务 or "无"]
    建议下次：[下一步优先行动 or "无"]
    
@@ -109,15 +156,33 @@
 
 | 信息类型 | 权威存储位置 | 更新时机 |
 |----------|-------------|---------|
+| 治理配置目录 | `.github/`（唯一） | 发现影子目录时立即清理 |
 | 项目状态 & 当前迭代 | `copilot-instructions.md`  当前迭代状态 | 每次会话关闭时 |
 | 已决定的设计决策 | `copilot-instructions.md`  已决定的设计选择 | 做出决策后立即记录 |
 | 变更历史 | `CHANGELOG.md` | 每次有实质变更时 |
 | 会议决议 | `docs/meetings/YYYY-MM-DD-<类型>.md` | 会议当时 |
-| 方法论 & 规范 | `docs/team-playbook.md`（本文件）| 复盘会议后 |
+| 方法论 & 规范 | `docs/governance/team-playbook.md`（本文件）| 复盘会议后 |
+| **团队资产健康状态** | **`docs/governance/asset-health-check.md`** | **用户主动触发「资产健康检查」时** |
+
+**目录治理硬规则：**
+- `.github/` 是团队治理资产唯一真实来源（SSOT）。
+- `.claude/` 不得承载长期规范、技能或 Hook 主配置，避免双轨真相。
+- 仅允许临时迁移缓存；会话结束前必须清理。
 
 ---
 
 ## 3. 任务执行流程
+
+### 3.0 优先级体系（P0–P3）
+
+> 所有进入 Sprint 的任务必须标注优先级。遇到优先级冲突时，按以下规则处理，不依赖主观判断。
+
+| 级别 | 定义 | Sprint 处理规则 |
+|------|------|----------------|
+| **P0** | 阻断：当前 Sprint 无法继续，或上线后系统不可用 | 立即停下所有 P1/P2，先处理 P0 |
+| **P1** | 高优先：当前 Sprint 必须完成，不得延期 | 正常执行 |
+| **P2** | 中优先：本 Sprint 尽力完成，可延期至下一 Sprint | 有余力就做 |
+| **P3** | 低优先 / Backlog：想做但不紧急 | 进 Backlog，不排 Sprint |
 
 ### 3.1 标准执行管道
 
@@ -127,8 +192,9 @@
         
    PM：Sprint 规划
     任务拆解（每条不超过 2 小时工作量）
-    交付物定义（what = done）
-    优先级标注（P0 / P1 / P2）
+    交付物定义（Done = <具体验收标准>，规划时确定，不在执行后才定义）
+    优先级标注（P0 / P1 / P2 / P3，含义见 §3.0）
+    Sprint 约束：进 Sprint 的任务总量 ≤ 2 天工作量；Sprint 中途不接受新任务（P0 除外）
         
         
    Researcher：Pre-flight Research（如有新技术/依赖/组件）
@@ -191,6 +257,63 @@ Dev 在处理任何跨越 3 个以上文件、或改动核心架构的任务时�
 **回滚方案：** [如有破坏性修改]
 ```
 
+> **为什么必须写 Implementation Plan？（AI-native 视角）**
+>
+> 把任务描述清楚到让 AI 能独立执行的程度，要求你完整想清楚这件事的边界、目标和验收标准。写 IP 的过程会暴露所有"还没想清楚的地方"。
+>
+> **那些还没想清楚的地方，才是真正需要人类判断的地方。**
+>
+> Implementation Plan 不是文书工作，它是 AI-native 认知清晰度的强制练习。
+
+### 3.4 Git Worktree 并行工作规范
+
+> **适用场景：** 多个独立任务可同期进行、不相互阴塞（例：副线功能开发 + 主线紧急修复）。
+> 开不开 Worktree 由 Brain 根据任务耗时和串行代价判断，不强制使用。
+
+**生命周期操作（标准命令）：**
+
+```bash
+# 开迟 Worktree
+git worktree add -b feature/<name> ..<name-dir> main
+
+# 同步创建任务上下文文件并提交到 feature 分支（见下方内容）
+
+# 完成后回命主窗口合并
+git merge feature/<name>
+git push origin main
+git worktree remove ../<name-dir>
+git branch -d feature/<name>
+```
+
+**如何命名 Worktree 目录和分支：**
+- 分支名：`feature/<功能简称>` （全小写连字符）
+- 目录名：主仓库河级目录，与分支名对应（如 `..\njueeRay-feature`）
+
+**worktree-context.md （每个 Worktree 必备）：**
+
+```markdown
+# Worktree 任务上下文
+
+**任务目标：** [1-2 句话]
+**DoD：** 完成标识 = [<具体可验证的状态>]
+**负责人：** [Agent]
+**主窗口会话版本：** [vX.Y.Z 或 commit hash]
+```
+
+**跨 Worktree 边界（禁止和注于）：**
+- 禁止在 Worktree A 内 checkout 到 Worktree B 的分支（一条分支不能同时在两个 worktree 中被检出）
+- 跨 Worktree 共享文件修改展示通过 `git diff`，不直接拷贝
+- Playwright、dev server 等资源竮名端口需区开
+
+**Worktree 任务完成汇报模板：**
+
+```
+feature/<name> worktree 任务已完成。
+变更摘要：[一句话]
+主要变更文件：[<文件列表>]
+请执行合并流程。
+```
+
 ---
 
 ## 4. Commit 规范
@@ -206,6 +329,7 @@ Dev 在处理任何跨越 3 个以上文件、或改动核心架构的任务时�
 ```
 
 **Subject 规范：**
+
 - 用祈使语气（"add feature"而非"added feature"）
 - 首字母小写
 - 不以句号结尾
@@ -231,14 +355,14 @@ Dev 在处理任何跨越 3 个以上文件、或改动核心架构的任务时�
 Scope 写在括号内，填入受影响的模块标识：
 
 ```
-feat(blog): add RSS feed generation
-fix(ci): exclude rate-limited domains from link-check
+feat(auth): add OAuth2 login flow
+fix(ci): exclude flaky domains from link-check
 docs(playbook): add session continuity protocol
-chore(deps): pin astro to 4.16.18
+chore(deps): update framework to latest
 ```
 
 通用 Scope：`docs`  `ci`  `agent`  `deps`  `config`  `readme`  
-（项目特定 Scope 由 Brain 在接手时写入 copilot-instructions.md，如 `blog`、`api`、`ui` 等）
+（项目特定 Scope 由 Brain 在接手时写入项目指令文件，如 `blog`、`api`、`ui` 等）
 
 ### 4.4 多仓库 commit 约定
 
@@ -281,8 +405,8 @@ Affects: {repo-a}, {repo-b}
 **示例：**
 
 ```
-✨ feat(blog): add RSS feed generation
-🐛 fix(ci): exclude rate-limited domains from lychee
+✨ feat(auth): add OAuth2 login flow
+🐛 fix(ci): exclude flaky domains from link-check
 📝 docs(playbook): add emoji commit guide
 🚀 docs(changelog): release v3.0.0
 🎉 chore(init): bootstrap new project
@@ -384,9 +508,17 @@ Brain  评估影响面：PATCH / MINOR / MAJOR（见 §5.1）
 等待用户确认后执行 §5.2 发布流程。
 ```
 
+**PM 自动检查规则（内在行为，无需用户触发）：**
+
+| 执行节点 | 检查动作 |
+|---------|---------|
+| SessionStart | 读取 CHANGELOG 首行，输出积压摘要：「[Unreleased] 有 N 条目，上次 Release vX.Y.Z（N 天前）」 |
+| 任务完成时 | [Unreleased] ≥3 条目且 ≥3 天 → 发起版本提案；>0 条目且 >5 天 → 向 Brain 发积压告警（P0） |
+| DoD Checklist | 发现 [X.Y.Z] 段存在但无对应 git tag → 提示 Dev 立即执行 tag + release 流程 |
+
 ---
 
-## 6. Code-Reviewer 七维度质量门
+## 6. Code-Reviewer 八维度质量门
 
 每次 Review 时，code-reviewer 按以下维度逐条评估：
 
@@ -399,6 +531,7 @@ Brain  评估影响面：PATCH / MINOR / MAJOR（见 §5.1）
 | **兼容性** | 移动端/暗色/浅色模式渲染正常，跨浏览器适配 | 🟡 建议 |
 | **一致性** | 风格统一（空格、命名、语气），与已有内容协调 | 🟡 建议 |
 | **性能** | 无不必要的大文件，图片已优化，加载路径合理 | 🟢 参考 |
+| **AI-native 健康度** | 实现路径是否强化了用户的自主判断力？架构是否造成了判断力委托陷阱（本该人类做的决策全部交给 AI）？ | 🟡 建议 |
 
 **输出格式：**
 
@@ -453,27 +586,65 @@ Brain  评估影响面：PATCH / MINOR / MAJOR（见 §5.1）
 | 类型 | 触发时机 | 主持 | 必须参与 | 核心输出 |
 |------|---------|------|---------|---------|
 | **架构启动会** | 新项目立项时 | brain | 全员 | 技术选型决议 + V1.x 执行计划 |
-| **Sprint 规划会** | 每个迭代周期前 | pm | brain  pm  相关 dev | 任务列表 + 优先级 + DoD 定义 |
+| **Sprint 规划会** | 每个迭代周期前 | pm | brain、pm、相关 dev | 任务列表 + 优先级 + DoD 定义 |
 | **里程碑复盘会** | 每个 Major/Minor 版本发布后 | brain | 全员 | 复盘纪要 + 方法论更新 + 下版规划 |
-| **紧急热修复会** | 发现 🔴 阻断问题 | brain | brain  dev  code-reviewer | 问题诊断 + 修复方案 + 复盘行动项 |
-| **快速站会** | 用户输入模糊目标时 | brain | brain  pm | 3 行目标确认摘要 |
+| **紧急热修复会** | 发现 🔴 阻断问题 | brain | brain、dev、code-reviewer | 问题诊断 + 修复方案 + 复盘行动项 |
+| **快速站会** | 用户输入模糊目标时 | brain | brain、pm | 3 行目标确认摘要 |
+| **自由脑暴会** | Sprint 冷却期、用户有新想法输入、连续 3 版本无反思会 | brain | 全员（以发言为主，无严格议程）| 会议纪要 + 立即行动项 |
+| **思想峰会** | 确认新的认知范式或哲学方向时 | brain | 全员（深度，可超时）| 会议纪要 + 核心共识文档 |
 
 ### 8.2 会议纪要规范
 
-**文件命名：** `docs/meetings/YYYY-MM-DD-<会议类型>.md`
+**文件命名：** `docs/meetings/YYYY-MM-DD-NN-<会议类型>.md`
+
+- `YYYY-MM-DD`：会议日期
+- `NN`：当日两位序号（01, 02, ...）——同日多次会议时区分顺序
+- `<会议类型>`：简短描述，全小写连字符（kebab-case）
 
 | 会议类型 | 文件名示例 |
 |---------|-----------|
-| 架构启动会 | `2026-02-25-kickoff.md` |
-| Sprint 规划会 | `2026-02-25-v2-planning.md` |
-| 里程碑复盘会 | `2026-02-25-retrospective.md` |
-| V3.0 规划会 | `2026-02-25-v3-planning.md` |
+| 架构启动会 | `2026-02-25-01-kickoff.md` |
+| Sprint 规划会 | `2026-02-25-02-v2-planning.md` |
+| 里程碑复盘会 | `2026-02-27-01-retrospective.md` |
+| Playbook 升级规划 | `2026-03-01-01-playbook-v22-planning.md` |
 
-**纪要必含：**
-- 参与成员 + 日期 + 状态
+**纪要头部必含字段：**
+
+```markdown
+**日期：** YYYY-MM-DD  
+**序号：** 当日第 NN 次会议  
+**类型：** [会议类型]  
+**主持：** [brain/pm]
+```
+
+**纪要必含内容：**
+
+- 参与成员 + 日期 + 序号
 - 每位 Agent 发言摘要（完整记录，不删减）
 - 核心决议（编号，有标准格式）
 - 行动项（明确负责角色 + 优先级）
+
+### 8.3 Brain 主动感知触发规则
+
+> Brain 应在以下情况下**主动**提议开会或执行记录，无需等待用户触发。
+
+**自动触发条件：**
+
+| 检测信号 | 触发动作 |
+|---------|---------|
+| 连续 ≥3 个 Minor 版本发布，无一次复盘会 | 主动提议里程碑复盘会 |
+| Sprint 完成 + 用户在 24h 内有感想/想法输入 | 主动提议自由脑暴会 |
+| 检测到技术重大变化（框架迁移、新工具引入）| 主动提议 Sprint 规划会 |
+| 用户输入话题明显偏离当前 Sprint 方向 | 主动提议快速站会澄清意图 |
+| 会话中识别到用户新偏好（"我希望以后…" 类表达）| 静默更新 .github/USER.md，不打扰用户 |
+| Major 版本发布后 | 召开全员里程碑复盘会（可与 Sprint 规划合并为双议程会议） |
+| Session 开始，发现上一个 Release 后无后续规划 | 提出 Sprint 规划议程或请用户确认下一目标 |
+
+**不应触发的情况：**
+
+- 刚完成同类型会议（< 24h）
+- 当前 Sprint 仍有 P0/P1 未完成项
+- 用户明确说"先专注做事"
 
 ---
 
@@ -529,13 +700,12 @@ Playbook: vX.Y.Z"
 ### 内容完整性
 
 - [ ] `CHANGELOG.md [Unreleased]` 已记录本轮所有 Added / Changed / Fixed
-- [ ] `docs/design-decisions.md` 中新做出的设计决策已归档（含日期和理由）
-- [ ] `docs/component-guide.md` 中新引入的组件已补充说明
+- [ ] 设计决策记录文件中新决策已归档（含日期和理由）
+- [ ] 新引入的组件/模块已补充使用说明
 
 ### 配置同步
 
-- [ ] `copilot-instructions.md`  「已决定的设计选择」已更新
-- [ ] `copilot-instructions.md`  「当前迭代状态」已更新
+- [ ] 项目指令文件中的设计决策和迭代状态已更新
 
 ### 质量门
 
@@ -543,27 +713,6 @@ Playbook: vX.Y.Z"
 - [ ] code-reviewer 已输出 Review 报告（APPROVED / APPROVED_WITH_SUGGESTIONS）
 - [ ] 所有外链可达（link-check 通过）
 - [ ] 所有 🔴 阻断问题已关闭
-
-### Dev 提交前强制自测 Checklist（2025 紧急会议新增）
-
-> **追责规则：** 以下任意一项未勾选，Dev **不得**向 Code-Reviewer 提交 Review 请求。  
-> Code-Reviewer 在 QA 阶段发现应由 Dev 自测即可发现的问题，属于 Dev 违规，本次变更退回。
-
-- [ ] **【环境一致性】** 修改过的功能，在与用户描述的目标环境（OS/运行时/路径）等价的环境中至少执行一次
-- [ ] **【启动测试】** API 服务能否正常 start 且 `/health` 端点返回 200
-- [ ] **【关键路径烟雾测试】** 改动涉及的功能，至少执行一次 happy path
-- [ ] **【错误不回归】** 修复的 bug，用原始复现步骤再执行一次，确认错误已消失
-- [ ] **【无新增错误】** 启动日志和关键路径执行日志中无新的 Exception / Error
-
-### PR 描述必填字段（2025 紧急会议新增）
-
-每次 Dev 提交 Review 时，PR 描述必须包含：
-
-```
-验证环境：[OS / 运行时版本 / 关键依赖版本]
-验证步骤：[精确命令序列]
-验证结果：[输出文本或截图]
-```
 
 ### 归档
 
@@ -576,18 +725,25 @@ Playbook: vX.Y.Z"
 ## 11. 核心资产清单
 
 > **这是你能带走的所有东西。** 下列资产构成"OpenProfile 方法论包"，迁入任何新项目时直接带走。
+>
+> **维护约定：** 每次团队结构变化（新增角色/目录/工具层）后必须同步更新本表。
 
 | 资产 | 路径 | 项目独立性 | 迁移操作 |
 |------|------|-----------|---------|
-| 团队作战手册（本文件） | `docs/team-playbook.md` | ✅ 通用 | 直接复用，无需修改 |
-| 五角色 Agent 定义 | `.github/agents/*.agent.md` | ✅ 通用 | 直接复用 |
-| 全局项目指令 | `.github/copilot-instructions.md` | ⚠️ 需替换个人信息 | 保留结构，替换个人区块 |
+| 团队作战手册（本文件） | `docs/governance/team-playbook.md` | ✅ 通用 | 直接复用，无需修改 |
+| 七角色 Agent 定义 | `.github/agents/*.agent.md` | ✅ 通用 | 直接复用（brain/pm/dev/researcher/code-reviewer/profile-designer/brand）|
+| Agent L2 知识库 | `.github/agents/knowledge/*-patterns.md` | ⚠️ 部分项目相关 | 复用通用模式，清除项目特定内容 |
+| Agent Skills | `.github/skills/*/SKILL.md` | ✅ 通用 | 直接复用（7个角色 SKILL）|
+| Hook 配置 | `.github/settings.json` | ⚠️ 需更新项目上下文 | 保留结构，SessionStart 上下文需调整 |
+| Markdown Lint Hook | `.github/hooks/lint-markdown.ps1` | ✅ 通用 | 直接复用 |
+| 全局项目指令 | `.github/copilot-instructions.md` | ⚠️ 需替换个人信息和项目状态 | 保留结构，替换「个人信息」「已决定的设计选择」「当前迭代状态」三个区块 |
 | CI 模板 | `.github/workflows/link-check.yml` 等 | ⚠️ 需微调路径 | 复制后调整 paths |
 | 工程配置 | `.editorconfig`  `.gitattributes`  `.markdownlintignore` | ✅ 通用 | 直接复用 |
-| 工作流说明 | `docs/agent-workflow.md` | ✅ 通用 | 直接复用，可面向开源社区展示 |
+| 工作流说明 | `docs/governance/agent-workflow.md` | ✅ 通用 | 直接复用，可面向开源社区展示 |
 | Commit 规范 | 本手册第 4 节 | ✅ 通用 | 团队记忆，无需单独文件 |
 | Pre-flight 清单 | 本手册第 9 节 | ✅ 通用 | 团队记忆，无需单独文件 |
 
+**注意：** `docs/governance/team-playbook.md` 是 Playbook 的**唯一真实来源**，其他路径下的同名文件均为错误残留，发现即删除。
 
 ---
 
@@ -624,9 +780,9 @@ Playbook: vX.Y.Z"
 |-------|------------|--------|
 | `brain` | `copilot-instructions.md` + 所有会议纪要 + `CHANGELOG.md` | 战略连贯性、未完成承诺、方向对齐 |
 | `pm` | `CHANGELOG.md` + 最新会议纪要 + `copilot-instructions.md` 迭代状态 | 任务完成率、版本节奏、遗留积压 |
-| `dev` | `docs/design-decisions.md` + `docs/component-guide.md` + 主要源文件 | 技术债、可维护性、实现质量 |
-| `researcher` | `docs/agent-workflow.md` + `docs/component-guide.md` | 技术选型合理性、依赖风险 |
-| `code-reviewer` | CI 配置 + 近期 commit 记录 + `docs/design-decisions.md` | 质量门现状、已知风险点 |
+| `dev` | `docs/governance/design-decisions.md` + `docs/guides/component-guide.md` + 主要源文件 | 技术债、可维护性、实现质量 |
+| `researcher` | `docs/governance/agent-workflow.md` + `docs/guides/component-guide.md` | 技术选型合理性、依赖风险 |
+| `code-reviewer` | CI 配置 + 近期 commit 记录 + `docs/governance/design-decisions.md` | 质量门现状、已知风险点 |
 
 **每位 Agent 阅读完成后输出私有笔记（不超过 10 行）：**
 
@@ -741,19 +897,34 @@ Brain 拥有以下权力，**无需用户授权**即可执行：
 
 `copilot-instructions.md` 是**项目大脑**，Brain 是它的唯一责任人，不是 PM，不是 Dev。
 
+**跨项目迁移协议（Fixed vs. Replaceable 区块表）：**
+
+| 区块名称 | 迁移类型 | 迁移时操作 |
+|-----------|--------|-----------| 
+| 哲学锚点 / AI-native 身份认知 | ✅ 直接带走 | 不修改 |
+| Agent 团队分工表（含能力快照） | ✅ 直接带走 | 不修改（按项目复审新增/停用）|
+| 协作期望（哪些能自主、哪些需确认） | ✅ 直接带走 | 不修改 |
+| 迭代完成检查项（DoD Checklist） | ✅ 直接带走 | 不修改 |
+| 个人/项目身份信息 | ⚠️ 按项目替换 | 对齐会议后全面重写 |
+| 技术选型决策 | ⚠️ 按项目替换 | 清空旧项目内容，重新建立 |
+| 已决定的设计选择 | ⚠️ 按项目替换 | 清空旧项目内容，重新建立 |
+| 当前迭代状态 | ⚠️ 按项目替换 | 新项目从空白开始 |
+| 文件结构说明 | ⚠️ 按项目替换 | 按实际目录结构重写 |
+
 **Brain 的三个固定操作时机：**
 
 ```
- 接手新项目时
-    全面重写 copilot-instructions.md
-    替换：个人信息区块、技术栈、Agent 团队表格、当前迭代状态
-    确保：与项目实际文件结构一致，无历史残留
+● 接手新项目时
+    1. 按上表进行对齐会议
+    2. 对齐会议后：替换所有 ⚠️ 区块为新项目内容
+    3. 确保：与项目实际文件结构一致，无历史残留
+    4. 提交：`chore(init): bootstrap project with team playbook vX.Y`
 
- 每次迭代收尾时（PM 执行 DoD 后，Brain 复核）
+● 每次迭代收尾时（PM 执行 DoD 后，Brain 复核）
     追加「已决定的设计选择」中的新决策
     更新「当前迭代状态」为准确的当前值
 
- 团队结构发生变化时（招募/改造/停用）
+● 团队结构发生变化时（招募/改造/停用）
     立即更新「Agent 团队」区块
     同步添加进化记录（见 13.6）
 ```
@@ -763,27 +934,26 @@ Brain 拥有以下权力，**无需用户授权**即可执行：
 ```markdown
 # [项目名]  Copilot Instructions
 
-## 个人 / 项目身份
-[结构化 JSON 或字段列表]
+## 个人 / 项目身份  ← ⚠️ 按项目替换
 [必含：name / github / role / primary_stack / site / language_preference]
 
-## Agent 团队
+## Agent 团队  ← ✅ 带走 + 按项目复审
 [当前激活的所有 Agent，含文件路径 + 一句话职责描述]
-[每次团队变化后立即更新]
 
-## 技术选型决策
+## 技术选型决策  ← ⚠️ 按项目替换
 [已锁定的版本、框架、工具，含决策理由]
-[新增决策时追加，不修改已有条目]
 
-## 已决定的设计选择
+## 已决定的设计选择  ← ⚠️ 按项目替换
 [设计决策记录，含日期和理由，时间倒序排列]
 
-## 当前迭代状态
+## 当前迭代状态  ← ⚠️ 按项目替换
 [正在做什么 / 已完成什么 / 遗留什么]
-[每次会话关闭时更新]
 
-## 与 Agent 协作的期望
+## 与 Agent 协作的期望  ← ✅ 带走
 [哪些事 Agent 可以自主做，哪些事必须告知用户]
+
+## 迭代完成检查项（DoD Checklist）  ← ✅ 带走
+```
 
 ## 迭代完成检查项（DoD Checklist）
 ```
@@ -840,6 +1010,7 @@ Brain 拥有以下权力，**无需用户授权**即可执行：
 ### 13.4 招募新 Agent 的规范
 
 **何时招募：**
+
 - 接手会议中识别出明确的能力缺口
 - 团队在执行中连续 3 次以上遇到「没有角色负责这件事」的卡点
 - 项目规模扩大导致现有角色负荷失衡
@@ -872,6 +1043,7 @@ tools: [allowed-tool-1, allowed-tool-2]
 ```
 
 **招募完成后，Brain 必须：**
+
 1. 在 `copilot-instructions.md` 的「Agent 团队」区块新增条目
 2. 在 `CHANGELOG.md [Unreleased]` 记录：`feat(agent): add <role> agent  [一句话理由]`
 3. 在本轮会议纪要中说明招募背景
@@ -906,9 +1078,9 @@ tools: [allowed-tool-1, allowed-tool-2]
 
 | 日期 | 类型 | 角色 | 改动摘要 | 原因 |
 |------|------|------|---------|------|
-| YYYY-MM-DD | 新增 | `data-analyst` | 创建 data-analyst.agent.md | 项目引入数据分析需求 |
-| YYYY-MM-DD | 改造 | `dev` | 扩展 Python 工具集权限 | 新项目后端为 Python |
-| YYYY-MM-DD | 停用 | `profile-designer` | 移入 archive/ | 主站已稳定，不再需要专项设计角色 |
+| YYYY-MM-DD | 新增 | `<role>` | 创建 <role>.agent.md | 项目引入某领域需求 |
+| YYYY-MM-DD | 改造 | `<role>` | 扩展工具集权限 | 新项目技术栈变更 |
+| YYYY-MM-DD | 停用 | `<role>` | 移入 archive/ | 项目已稳定，不再需要专项角色 |
 ```
 
 ---
@@ -1048,43 +1220,31 @@ curl -s -H "Authorization: token $token" \
 
 ### 15.3 标准操作速查
 
-**创建 GitHub Release：**
+> 📄 **含中文的 API 请求铁律：必须用 `curl.exe --data-binary @file`，绝不用 `Invoke-RestMethod -Body <string>`。**
+>
+> `curl.exe` 内置于 Windows 10/11，读取文件原始字节发送，不经字符串层，杜绝中文变 `?` 问题。
+
+**通用 token 一行获取：**
 
 ```powershell
-$body = @{
-    tag_name   = "v1.0.0"
-    name       = "v1.0.0 — [发布标题]"
-    body       = "[Release Notes，支持 Markdown]"
-    prerelease = $false
-    make_latest = "true"   # 仅最新版本设为 true
-} | ConvertTo-Json -Depth 5
-
-Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}/releases" `
-    -Method Post -Headers $headers -Body $body
+$t = ("protocol=https`nhost=github.com`n" | git credential fill |`
+      Where-Object {$_ -like "password=*"}) -replace "password=",""
 ```
 
-**设置仓库话题标签（Topics）：**
+**创建 / PATCH GitHub Release（通用模板）：**
 
 ```powershell
-$topics = @{ names = @("tag1", "tag2", "tag3") } | ConvertTo-Json
-Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}/topics" `
-    -Method Put -Headers $headers -Body $topics
+# release.json 内容由 Copilot create_file 工具创建（保证 UTF-8）
+# 字段：tag_name / name / body / prerelease / make_latest
+curl.exe -s -X POST "https://api.github.com/repos/{owner}/{repo}/releases" `
+  -H "Authorization: token $t" -H "Content-Type: application/json" `
+  --data-binary "@$env:TEMP\release.json"
+
+# PATCH 更新已有 Release（替换 POST 为 PATCH，URL 加 /{release_id}）
 ```
 
-**更新仓库描述：**
-
-```powershell
-$desc = @{ description = "一句话项目描述（120 字符内）" } | ConvertTo-Json
-Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}" `
-    -Method Patch -Headers $headers -Body $desc
-```
-
-**检查当前 Releases：**
-
-```powershell
-Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}/releases" `
-    -Headers $headers | Select-Object tag_name, name, html_url
-```
+> 🔖 **项目特定参数**（仓库 ID、Discussion Category ID 等）应记录在
+> 项目的 L2 知识库中，不在本手册范围内。
 
 ### 15.4 PM 的 Release 操作清单
 
@@ -1092,11 +1252,34 @@ Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}/releases" `
 
 ```
 1. 执行 §5.2 步骤 1-7（CHANGELOG → commit → tag → push）
-2. API: 创建 GitHub Release（使用 §15.3 中的脚本）
+2. 准备 Release Notes：
+   - 用 Copilot create_file 将 Release JSON 写入临时文件（中英文均可）
+3. API: curl.exe --data-binary @file 发送（§15.3 标准模板）
    - 首个正式版：make_latest = false
    - 最新稳定版：make_latest = true
-3. 验证：访问 /releases 页面确认显示正常
+4. 验证（关键）：
+   - 访问 /releases 页面，确认标题和正文中文正确渲染
+   - 如乱码，检查是否用了 PS Invoke-RestMethod 传字符串（改用 curl）
+   - 确认 Release 标题正确、标签关联正确
 ```
+
+### 15.5 GitHub Discussions 发布 SOP（GraphQL API）
+
+> **适用场景：** gh CLI 在 VS Code 终端无法交互式登录时（无 TTY），通过 GraphQL API 直接发布 / 更新 Discussion。
+
+**核心流程：**
+
+```
+1. 获取 token（§15.2 git credential fill）
+2. 将请求 JSON 保存为文件（Copilot create_file 创建的文件是 UTF-8）
+3. curl.exe --data-binary @file.json 发送到 https://api.github.com/graphql
+4. 验证：访问 discussions 页面，确认中文正确渲染
+```
+
+> ⚠️ **绝对禁止** 在终端直接输入含大量中文的 here-string——会触发 PSReadLine 缓冲区溢出崩溃。
+
+> 🔖 **项目特定参数**（repoId / categoryId / Query 模板 / updateDiscussion 完整流程）应记录在
+> 项目的 L2 知识库中，不在本手册范围内。
 
 ---
 
@@ -1120,67 +1303,17 @@ Invoke-RestMethod "https://api.github.com/repos/{owner}/{repo}/releases" `
 
 | 组件 | 必须 | 规范 |
 |------|------|------|
-| **Logo** | ✅ | SVG 格式，`assets/logo.svg`，见 §16.3 |
+| **Logo** | ✅ | SVG 格式，`assets/logo.svg`，规格见 brand-guide.md |
 | **项目一句话描述** | ✅ | ≤ 120 字符，置于 README 副标题 |
 | **仓库 Description** | ✅ | 同上，通过 API 设置（§15.3） |
-| **话题标签 Topics** | ✅ | 5-8 个，见 §16.4 |
-| **Badge 套件** | ✅ | Stars / License / Release / CI，见 §16.5 |
+| **话题标签 Topics** | ✅ | 5-8 个，选择策略见 brand-guide.md |
+| **Badge 套件** | ✅ | Stars / License / Release / CI，配置见 brand-guide.md |
 | **品牌色** | ✅ | 在 `copilot-instructions.md` 中锁定 |
 | **字体标识** | 推荐 | 与项目调性匹配的字体 + 品牌色 |
 
-### 16.3 Logo 设计规范
+> Logo 设计规格、话题标签选择策略、Badge 套件配置详见 [`docs/brand/brand-guide.md`](../brand/brand-guide.md)。
 
-**规格：**
-- 尺寸：宽版 `480×160px`（README 用）+ 方形 `160×160px`（头像/图标用）
-- 格式：SVG（可缩放，体积小）
-- 存储：`assets/logo.svg`，`assets/logo-square.svg`
-
-**视觉语言（由 Brain 根据项目定位决定）：**
-- 背景：深色（如 `#0d1117`）或浅色，视项目调性而定
-- 强调色：项目品牌色（在 copilot-instructions.md 中锁定）
-- 字体风格：与项目气质匹配（如工程项目用等宽字体，设计项目用无衬线字体）
-- 视觉元素：与项目领域相关的图标或风格
-
-**光标动画（可选，增加活力）：**
-
-```svg
-<rect ...>
-  <animate attributeName="opacity" values="0.9;0.1;0.9"
-           dur="1.2s" repeatCount="indefinite"/>
-</rect>
-```
-
-### 16.4 话题标签策略
-
-**选择原则：**
-- 技术标签（具体）：`astro`, `typescript`, `github-actions`
-- 场景标签（中等宽度）：`github-profile`, `developer-portfolio`
-- 理念标签（宽泛）：`ai-native`, `open-source`, `workflow-template`
-- **避免过泛标签**：`web`, `tool`, `project`（竞争太大，无区分度）
-
-**设置方式：** 使用 §15.3 中的 API 操作，不要在 GitHub 网页上手动拖拽。
-
-### 16.5 Badge 套件规范
-
-**标准 Badge 顺序（README 顶部 `div align="center"` 内）：**
-
-```markdown
-[![Stars](https://img.shields.io/github/stars/{owner}/{repo}?style=flat-square&color=gold&logo=github)]()
-[![Forks](https://img.shields.io/github/forks/{owner}/{repo}?style=flat-square&color=58a6ff&logo=github)]()
-[![Latest Release](https://img.shields.io/github/v/release/{owner}/{repo}?style=flat-square&color=3fb950)]()
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)]()
-[![CI](https://img.shields.io/github/actions/workflow/status/{owner}/{repo}/{workflow}.yml?style=flat-square&label=CI)]()
-```
-
-**可选 Badge（按需添加）：**
-
-```markdown
-[![Built with Copilot](https://img.shields.io/badge/Built%20with-GitHub%20Copilot-0078d4?style=flat-square&logo=github)]()
-```
-
-**一句话描述位置：** Logo 图片下方，badges 上方，**加粗**显示。
-
-### 16.6 执行角色分工
+### 16.3 执行角色分工
 
 ```
 Brain   → 决定品牌化时机，确认调性方向（深色/浅色，终端风/简约风）
@@ -1272,9 +1405,9 @@ PM      → CHANGELOG 记录品牌化变更，触发相应版本号（通常 MIN
 > 详细的三层版本规范见 §18。
 
 ```
-本手册存放路径：docs/team-playbook.md
+本手册存放路径：docs/governance/team-playbook.md
 更新周期：每次里程碑复盘会议后
-更新流程：Brain 起草修改方案 → 全体会议讨论 → PM 更新 PLAYBOOK-CHANGELOG.md → 发版
+更新流程：Brain 起草修改方案 → 全体会议讨论 → PM 更新 docs/governance/PLAYBOOK-CHANGELOG.md → 发版
 
 每个项目可以 fork 自己的 Playbook 副本。
 但是团队的核心方法论改进应回流到 Playbook 主版本。
@@ -1293,7 +1426,7 @@ PM      → CHANGELOG 记录品牌化变更，触发相应版本号（通常 MIN
 | 层级 | 名称 | 版本格式 | 升级触发条件 | 维护文件 |
 |------|------|----------|-------------|----------|
 | **L1** | 项目版本 | `vMAJOR.MINOR.PATCH`（semver） | 功能新增 / 破坏性变更 / Bug 修复 | `CHANGELOG.md` + GitHub Tag/Release |
-| **L2** | Playbook 版本 | `Playbook vPB_MAJOR.PB_MINOR` | Playbook 章节新增/重构/删除 | `PLAYBOOK-CHANGELOG.md` + `team-playbook.md` 头部 |
+| **L2** | Playbook 版本 | `Playbook vPB_MAJOR.PB_MINOR` | Playbook 章节新增/重构/删除 | `docs/governance/PLAYBOOK-CHANGELOG.md` + `team-playbook.md` 头部 |
 | **L3** | Agent 版本 | `vAGENT_MAJOR.AGENT_MINOR` | Agent 职责/工具/边界调整 | 各 `.agent.md` 文件 `agentVersion` 字段 |
 
 ### 18.2 版本升级规则
@@ -1336,7 +1469,7 @@ team-playbook.md
 CHANGELOG.md
   └ L1 项目版本变更
 
-PLAYBOOK-CHANGELOG.md
+docs/governance/PLAYBOOK-CHANGELOG.md
   └ L2 Playbook + L3 Agent 版本变更
 ```
 
@@ -1354,25 +1487,26 @@ PLAYBOOK-CHANGELOG.md
 
 ---
 
+## 19. Agent 能力演进机制（GEP）
+
+> **实验性框架，内容已移至独立文件。**
+> 待 Gene 积累到 20+ 后评估是否纳入正式章节。
+>
+> 详见 [`docs/governance/playbook-experimental-gep.md`](playbook-experimental-gep.md)
+
+---
+
 ## 附录 C：Agent 能力快照卡格式
 
 > **用途：** 新接手者在 `copilot-instructions.md` 中查看此表，秒读当前团队状态。
 > Brain 每次团队变化后更新此表。
 
-**标准字段：**
+**标准字段（六列）：** Agent | 版本 | 核心能力 | 权限级别 | 依赖工具 | 已知局限
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| Agent | Agent 名称（与文件名对应） | `dev` |
-| 版本 | L3 版本号 | `v1.0` |
-| 核心能力 | 该 Agent 擅长做什么（一句话） | 全语言全栈实现 |
-| 权限级别 | 读写 / 只读 / 决策 | 读写 |
-| 依赖工具 | YAML front matter 中的 `tools` 列表 | codebase, editFiles, runCommands |
-| 已知局限 | 该 Agent **不做**的事 | 不做架构决策 |
+> 当前版本能力快照见 `.github/copilot-instructions.md` → **团队能力快照** 区块（Brain 维护）。
+> 本附录只定义格式规范，不维护实际数据，避免两个文件同时维护同一内容。
 
-**维护周期：**
-- 团队结构变化时（招募/改造/停用）→ 立即更新
-- 每次迭代收尾 → Brain 复核一致性
+**维护周期：** 团队结构变化时（招募/改造/停用）→ 立即更新 copilot-instructions.md，本附录不需要同步更新。
 
 ---
 
@@ -1409,50 +1543,6 @@ PM 发现任务范围蔓延  汇报 Brain  Brain 与用户对齐
 
 ---
 
-## 附录 C：文档治理规范（MediaCrawler Fork 专项）
-
-> 2026-02-27 全体复盘会议确立，适用于本仓库所有文档变更。
-
-### C.1 目录层级与受众原则
-
-| 目录 | 受众 | 禁止混入内容 |
-|------|------|-------------|
-| `docs/guide/` | 最终用户 | 内部设计文档、Sprint 计划 |
-| `docs/reference/` | 需要理解内部实现的开发者 | 上游运营内容（捐赠/推广） |
-| `docs/dev/` | 本团队开发成员 | 面向用户的使用说明 |
-| `docs/ops/` | 本团队协作管理 | 功能技术文档 |
-| `docs/feishu/` | 飞书集成相关用户和开发者 | 无关平台内容 |
-
-### C.2 文档生命周期规则
-
-| 阶段 | 规则 |
-|------|------|
-| **新建** | 先判断受众 → 选择目录；同主题已有文档时必须合并，禁止新建重复文档 |
-| **变更** | P0 功能变更（启动命令/API 路径/配置项）当次提交必须同步更新对应文档 |
-| **归档** | Sprint 完结的工作单（TODO/计划/差异报告）迁入 DEVLOG 或删除 |
-| **删除** | 只允许删除：上游遗留推广内容、被合并的源文件、Sprint 完结的一次性工作单 |
-
-### C.3 会议纪要规范
-
-```
-存放位置：docs/ops/meetings/YYYY-MM-DD-{主题关键词}.md
-必填字段：日期 / 类型 / 主持 / 参与者 / 议题 / 背景
-决议格式：每项决议 = 结论(✅/⏳/❌) + 负责人 + 截止时间
-归档时机：会议纪要在同一次 git commit 中落地，禁止事后补记
-```
-
-### C.4 提交前单清单（文档相关）
-
-```
-□ 新文档放入正确目录（guide/reference/dev/ops/feishu）
-□ 已有同主题文档时，已合并而非新建
-□ 功能变更已同步更新 README.md 和对应 guide/ 文件
-□ 删除的文件已确认无其他文档引用或已更新引用链接
-□ DEVLOG 已追加里程碑记录（如适用）
-```
-
----
-
 *本手册由 Brain + PM 共同维护，每次复盘会议后更新版本。*  
-*Playbook v2.0 — 2026-02-26 — 三层版本体系 + 招募决策树 + Agent 快照卡 + §18 新增，变更记录见 PLAYBOOK-CHANGELOG.md。*  
-*附录 C 新增 — 2026-02-27 — 文档治理规范（MediaCrawler Fork 专项）*
+*Playbook v2.5 — 2026-03-11 — §19 GEP 移出至实验文档 · §20 整章删除并内联至 §5.4/§8.3 · §16 品牌化细则移至 brand-guide.md，变更记录见 docs/governance/PLAYBOOK-CHANGELOG.md。*
+

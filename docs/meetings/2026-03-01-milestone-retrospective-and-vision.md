@@ -363,7 +363,7 @@ v1.2+（长期）
 ---
 
 *纪要记录人：Brain*  
-*归档路径：`docs/ops/meetings/2026-03-01-milestone-retrospective-and-vision.md`*  
+*归档路径：`docs/meetings/2026-03-01-milestone-retrospective-and-vision.md`*  
 *下次会议触发条件：v1.0 正式部署完成 + 首周运行稳定性报告*
 
 ---

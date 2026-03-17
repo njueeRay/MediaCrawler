@@ -8,6 +8,23 @@
 - [技术知识库](reference/README.md) - 基于源码分析的架构知识库（7 篇）
 - [微信公众号爬虫模块](wechat/README.md) - 微信公众号集成（配置、使用、API 参考）
 
+## 治理文档
+
+- [团队协作手册](governance/team-playbook.md) - 团队流程、会议规范、DoD 与质量门
+- [协作工作流](governance/agent-workflow.md) - Agent 协作与会话执行流程
+- [工具脚手架](governance/tooling-scaffold.md) - hooks/MCP/配置分层规范
+- [MVP 验收清单](governance/mvp-checklist.md) - 里程碑验收与交付检查项
+
+## 会议纪要
+
+- [会议纪要目录](meetings/) - 统一归档入口（按日期命名）
+- [AI Stack 架构评审会](meetings/2026-03-17-ai-stack-architecture-review.md) - 当前迭代关键决议
+
+## 迁移说明
+
+- 原 `docs/ops/` 文档已迁移到 `docs/governance/`、`docs/guide/`、`docs/reference/` 与 `docs/meetings/`
+- 历史迁移已完成，legacy 文档已删除；当前规范以 `docs/governance/` 与 `docs/meetings/` 为准
+
 ## 推荐：使用 uv 管理依赖
 
 ### 1. 前置依赖

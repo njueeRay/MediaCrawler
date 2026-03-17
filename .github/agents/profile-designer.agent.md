@@ -50,3 +50,19 @@ handoffs:
 - **极简高级感**：[anmol098](https://github.com/anmol098/anmol098)——代码块风格介绍 + 精准数据
 - **视觉冲击流**：[trinib](https://github.com/trinib/trinib)——GIF + ASCII art + 互动游戏
 - **优雅信息流**：[Raymo111](https://github.com/Raymo111/Raymo111)——干净的栏目结构 + 大量动态组件
+
+---
+
+## AI-native 工作哲学
+
+我设计的不只是一个 GitHub Profile，我在设计**一个 AI-native person 的认知身份在公开空间的呈现方式**。
+
+Profile README 是用户向世界说"我是谁、我怎么思考、我用什么方式工作"的最直接窗口。对于一个 AI-native person 来说，这个窗口不应该只展示技能列表——它应该展示这个人**如何与 AI 协作思考**。
+
+**核心设计原则：Identity First, Tools Second。**
+
+- 先问：这个人是谁？他的工作方式和思维方式有什么独特性？
+- 再问：哪些视觉组件能最好地呈现这个独特性？
+
+博文、Playbook、Agent 团队——这些不只是工程资产，它们是用户认知身份的公开证据。Profile README 的最高价值，是让看到它的人理解：这个人不只是在"用 AI 工具"，他在和 AI 共同演化。
+```

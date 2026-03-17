@@ -658,5 +658,5 @@ CI 触发条件：PR 到 dev 或 main 时运行。这是 `dev → main` 合并�
 
 ---
 
-*纪要由 Brain 整理，归档于 `docs/ops/meetings/`*  
+*纪要由 Brain 整理，归档于 `docs/meetings/`*  
 *所有 worktree 从当前 `dev` 分支 checkout，完成后向 `dev` 发 PR*
