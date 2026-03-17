@@ -42,7 +42,7 @@ AI Stack Roadmap：
 - [x] brain 完成架构评审
 - [x] 创建分支 `feat/ai_stack`
 - [x] 详细技术设计落地（模块、DSL、DB 表、API）
-- [ ] MVP 开发联调（文本列/图片列/顺序依赖/自动触发）
+- [ ] MVP 开发联调（图片列→文本列顺序依赖/自动触发）
 - [ ] 灰度验收与切换
 
 ### 4.1 团队编制决议（2026-03-17，brain 主持）
@@ -50,16 +50,16 @@ AI Stack Roadmap：
 当前核心成员（保留）：
 - `brain` / `pm` / `dev` / `researcher` / `code-reviewer`
 
-当前专项成员（保留，按需激活）：
-- `brand`（对外发布）
-- `profile-designer`（视觉改版）
-
-新增招募（用于 AI Stack 冲刺）：
+当前专项成员（启用）：
 - `arch-designer`：负责 AI Stack 模块边界、DSL 约束与架构评审
 - `qa-automation`：负责 API 契约测试、回归用例、执行链路质量门
 
+归档成员（低优先级，按需恢复）：
+- `brand` -> `.github/agents/archive/brand.agent.md`
+- `profile-designer` -> `.github/agents/archive/profile-designer.agent.md`
+
 归档结论：
-- 暂不归档任何成员；`brand` 与 `profile-designer` 进入低频值班态，不参与日常开发流水线。
+- 已归档低频角色 `brand` 与 `profile-designer`，当前冲刺编制聚焦 AI Stack MVP 主链路。
 
 ## 5. 会话执行协议（MediaCrawler 补充）
 
@@ -67,6 +67,8 @@ AI Stack Roadmap：
 2. 开始实现前，先读取本文件 + 最近会议纪要 + `CHANGELOG.md`。
 3. 涉及部署与运维步骤时，采用“双层 DoD”（代码层 / 服务器层）分别跟踪。
 4. 每轮有实质变更必须同步更新 `CHANGELOG.md` 与必要文档。
+5. 当用户指令存在多种可行解且语义不充分时，必须先给出 2-3 个方案（含取舍与风险），由用户确认后再开始执行。
+6. 团队应主动补全用户潜在目标：在不偏离当前需求的前提下，提供必要的澄清问题与扩展功能建议，避免只做字面实现。
 
 ## 6. 交接边界
 

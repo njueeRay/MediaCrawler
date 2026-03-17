@@ -264,6 +264,90 @@
           </n-form>
         </template>
 
+        <!-- ai_image_understanding 配置 -->
+        <template v-if="step.step === 'ai_image_understanding'">
+          <n-form label-placement="left" label-width="120" size="small">
+            <n-form-item label="步骤ID">
+              <n-input v-model:value="step.step_id" placeholder="image_understanding" />
+            </n-form-item>
+            <n-form-item label="目标字段">
+              <n-input v-model:value="step.target_field" placeholder="ai_image_understanding" />
+            </n-form-item>
+            <n-form-item label="输出变量名">
+              <n-input v-model:value="step.output_var" placeholder="image_understanding" />
+            </n-form-item>
+            <n-form-item label="输入数据变量">
+              <n-input v-model:value="step.input_from_var" placeholder="feishu_pull_result" />
+            </n-form-item>
+            <n-form-item label="分析列">
+              <n-dynamic-tags v-model:value="step.selected_columns" />
+            </n-form-item>
+            <n-form-item label="图片列">
+              <n-dynamic-tags v-model:value="step.image_columns" />
+            </n-form-item>
+            <n-form-item label="批量上限">
+              <n-input-number v-model:value="step.row_limit" :min="1" :max="200" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="图片根目录">
+              <n-input v-model:value="step.image_base_dir" placeholder="image" />
+            </n-form-item>
+            <n-form-item label="记录变量">
+              <n-input v-model:value="step.record_from_var" placeholder="可空：从 ctx.vars 读取 record" />
+            </n-form-item>
+            <n-form-item label="模型覆盖">
+              <n-input v-model:value="step.model" placeholder="可空：走默认视觉模型" />
+            </n-form-item>
+            <n-form-item label="图片URL模板">
+              <n-dynamic-input v-model:value="step.images" :on-create="() => ''" />
+            </n-form-item>
+            <n-form-item label="提示词模板">
+              <n-input v-model:value="step.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" />
+            </n-form-item>
+            <n-form-item label="无Key走Mock">
+              <n-switch v-model:value="step.use_mock_if_no_key" />
+            </n-form-item>
+          </n-form>
+        </template>
+
+        <!-- ai_text_analysis 配置 -->
+        <template v-if="step.step === 'ai_text_analysis'">
+          <n-form label-placement="left" label-width="120" size="small">
+            <n-form-item label="步骤ID">
+              <n-input v-model:value="step.step_id" placeholder="text_analysis" />
+            </n-form-item>
+            <n-form-item label="目标字段">
+              <n-input v-model:value="step.target_field" placeholder="ai_text_analysis" />
+            </n-form-item>
+            <n-form-item label="输出变量名">
+              <n-input v-model:value="step.output_var" placeholder="text_analysis" />
+            </n-form-item>
+            <n-form-item label="输入数据变量">
+              <n-input v-model:value="step.input_from_var" placeholder="feishu_pull_result" />
+            </n-form-item>
+            <n-form-item label="分析列">
+              <n-dynamic-tags v-model:value="step.selected_columns" />
+            </n-form-item>
+            <n-form-item label="图片上下文变量">
+              <n-input v-model:value="step.image_context_from_var" placeholder="image_understanding" />
+            </n-form-item>
+            <n-form-item label="批量上限">
+              <n-input-number v-model:value="step.row_limit" :min="1" :max="200" style="width:140px" />
+            </n-form-item>
+            <n-form-item label="记录变量">
+              <n-input v-model:value="step.record_from_var" placeholder="可空：从 ctx.vars 读取 record" />
+            </n-form-item>
+            <n-form-item label="模型覆盖">
+              <n-input v-model:value="step.model" placeholder="可空：走默认文本模型" />
+            </n-form-item>
+            <n-form-item label="提示词模板">
+              <n-input v-model:value="step.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 10 }" />
+            </n-form-item>
+            <n-form-item label="无Key走Mock">
+              <n-switch v-model:value="step.use_mock_if_no_key" />
+            </n-form-item>
+          </n-form>
+        </template>
+
         <!-- feishu_push 配置 -->
         <template v-if="step.step === 'feishu_push'">
           <n-form label-placement="left" label-width="110" size="small">
@@ -858,6 +942,7 @@ const taskTypeOptions = [
   { label: '仅采集（订阅）', value: 'subscription_crawl' },
   { label: '仅采集（搜索/指定）', value: 'crawl' },
   { label: '多平台订阅采集', value: 'multi_platform_crawl' },
+  { label: 'AI分析（图片→文本）', value: 'ai_analysis_pipeline' },
   { label: '仅同步到飞书', value: 'sync' },
   { label: '全流程（采集+同步）', value: 'subscription_combo' },
 ]
@@ -866,6 +951,8 @@ const availableStepOptions = [
   { label: '订阅采集', value: 'subscription_crawl' },
   { label: '多平台订阅采集', value: 'multi_platform_crawl' },
   { label: '通用采集', value: 'crawl' },
+  { label: 'AI图片理解', value: 'ai_image_understanding' },
+  { label: 'AI文本分析', value: 'ai_text_analysis' },
   { label: '同步到飞书表', value: 'feishu_push' },
   { label: '从飞书表拉取', value: 'feishu_pull' },
   { label: 'JSON展开推送', value: 'feishu_push_json' },
@@ -1043,6 +1130,38 @@ function createDefaultStep(stepType: string, platform?: string): any {
       return { step: 'feishu_update_records', table_id: '', input: 'feishu_pull_result', _kv_pairs: [{ key: '已入库', value: 'true' }, { key: '入库时间', value: 'now' }], skip_on_error: true, dry_run: false }
     case 'multi_platform_crawl':
       return { step: 'multi_platform_crawl', platforms: ['wechat', 'xhs'], limit_per_platform: 0, stop_on_failure: false }
+    case 'ai_image_understanding':
+      return {
+        step: 'ai_image_understanding',
+        step_id: 'image_understanding',
+        target_field: 'ai_image_understanding',
+        output_var: 'image_understanding',
+        input_from_var: 'feishu_pull_result',
+        selected_columns: ['title', 'content', 'cover'],
+        image_columns: ['cover'],
+        row_limit: 20,
+        image_base_dir: 'image',
+        model: '',
+        use_mock_if_no_key: true,
+        record_from_var: '',
+        images: ['{{record.cover}}'],
+        prompt: '请先提取图片中的主体、场景、关键信息，并输出简洁摘要。',
+      }
+    case 'ai_text_analysis':
+      return {
+        step: 'ai_text_analysis',
+        step_id: 'text_analysis',
+        target_field: 'ai_text_analysis',
+        output_var: 'text_analysis',
+        input_from_var: 'feishu_pull_result',
+        selected_columns: ['title', 'content', 'author_name'],
+        image_context_from_var: 'image_understanding',
+        row_limit: 20,
+        model: '',
+        use_mock_if_no_key: true,
+        record_from_var: '',
+        prompt: '请结合标题、正文和图片摘要进行文本分析。标题：{{record.title}}\n正文：{{record.content}}\n图片摘要：{{record.image_context}}',
+      }
     default:
       return { step: stepType }
   }
@@ -1069,6 +1188,11 @@ function getDefaultPipeline(taskType: string, platform?: string): any[] {
         createDefaultStep('multi_platform_crawl', p),
         createDefaultStep('feishu_push', p),
       ]
+    case 'ai_analysis_pipeline':
+      return [
+        createDefaultStep('ai_image_understanding', p),
+        createDefaultStep('ai_text_analysis', p),
+      ]
     case 'pull_update':
       return [
         createDefaultStep('feishu_pull', p),
@@ -1084,6 +1208,8 @@ function stepTagType(stepType: string): string {
     subscription_crawl:   'info',
     crawl:                'info',
     multi_platform_crawl: 'primary',
+    ai_image_understanding: 'warning',
+    ai_text_analysis: 'success',
     feishu_push:          'success',
     feishu_pull:          'warning',
     feishu_push_json:     'error',
@@ -1308,6 +1434,34 @@ function buildTaskConfig(): any {
       clean.skip_on_error = s.skip_on_error !== false
       if (s.dry_run) clean.dry_run = true
     }
+    if (s.step === 'ai_image_understanding') {
+      if (s.step_id) clean.step_id = s.step_id
+      if (s.target_field) clean.target_field = s.target_field
+      if (s.output_var) clean.output_var = s.output_var
+      if (s.input_from_var) clean.input_from_var = s.input_from_var
+      if (Array.isArray(s.selected_columns) && s.selected_columns.length) clean.selected_columns = s.selected_columns
+      if (Array.isArray(s.image_columns) && s.image_columns.length) clean.image_columns = s.image_columns
+      if (s.row_limit && Number(s.row_limit) > 0) clean.row_limit = Number(s.row_limit)
+      if (s.image_base_dir) clean.image_base_dir = s.image_base_dir
+      if (s.model) clean.model = s.model
+      if (s.record_from_var) clean.record_from_var = s.record_from_var
+      clean.use_mock_if_no_key = s.use_mock_if_no_key !== false
+      clean.prompt = s.prompt || ''
+      clean.input = { images: Array.isArray(s.images) ? s.images.filter((x: string) => !!x) : [] }
+    }
+    if (s.step === 'ai_text_analysis') {
+      if (s.step_id) clean.step_id = s.step_id
+      if (s.target_field) clean.target_field = s.target_field
+      if (s.output_var) clean.output_var = s.output_var
+      if (s.input_from_var) clean.input_from_var = s.input_from_var
+      if (Array.isArray(s.selected_columns) && s.selected_columns.length) clean.selected_columns = s.selected_columns
+      if (s.image_context_from_var) clean.image_context_from_var = s.image_context_from_var
+      if (s.row_limit && Number(s.row_limit) > 0) clean.row_limit = Number(s.row_limit)
+      if (s.model) clean.model = s.model
+      if (s.record_from_var) clean.record_from_var = s.record_from_var
+      clean.use_mock_if_no_key = s.use_mock_if_no_key !== false
+      clean.prompt = s.prompt || ''
+    }
     return clean
   })
   return { pipeline: steps }
@@ -1351,6 +1505,7 @@ const columns: DataTableColumn[] = [
         crawl:                '采集',
         sync:                 '同步',
         multi_platform_crawl: '多平台',
+        ai_analysis_pipeline: 'AI分析',
         subscription_combo:   '全流程',
         combo: '采集+同步', cleanup: '清理',
       }

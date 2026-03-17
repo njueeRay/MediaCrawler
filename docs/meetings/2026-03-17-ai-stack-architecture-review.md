@@ -20,8 +20,8 @@
 1. 主链路改造方向确定：
    本地入库 -> Trigger -> Pipeline Orchestrator -> Template Engine -> OpenRouter Gateway -> Result Writer -> 审计日志。
 2. MVP 必做能力确定：
-   - AI 文本分析列（多字段上下文模板）
    - 图片理解列
+   - AI 文本分析列（引用图片理解输出作为上下文）
    - 多列顺序触发（依赖前置输出）
    - 新数据自动触发（data_arrival）
 3. 约束确认：
@@ -54,7 +54,7 @@
 ## MVP 里程碑（4 周）
 
 - Week 1：OpenRouter 网关 + 模板解析最小闭环 + 执行记录入库
-- Week 2：DAG 执行 + data_arrival 触发 + 幂等/断点续跑
+- Week 2：DAG 执行（图片 step → 文本 step）+ data_arrival 触发 + 幂等/断点续跑
 - Week 3：模板版本化 + 输入输出快照 + 成本/耗时看板
 - Week 4：联调验收 + 灰度切换 + 回退开关
 
@@ -69,5 +69,5 @@
 
 - [ ] 设计文档完成并过评审
 - [ ] schema 与 migration 草案完成
-- [ ] 第一个端到端样例（文本列 + 图片列 + 顺序依赖）跑通
+- [ ] 第一个端到端样例（图片列 + 文本列 + 顺序依赖）跑通
 - [ ] 执行日志可追溯到模板版本与 step 级输入输出

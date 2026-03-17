@@ -41,8 +41,11 @@ task_config 示例（pipeline 模式）：
 """
 
 import asyncio
+import base64
+import csv
 import json
 import logging
+import mimetypes
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -50,6 +53,8 @@ from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Type
 
 import config as _global_config
+from api.services.ai_gateway import ai_gateway
+from api.services.ai_template_engine import AITemplateEngine
 
 logger = logging.getLogger(__name__)
 
@@ -1201,6 +1206,369 @@ class FeishuUpdateRecordsStep(PipelineStep):
         })
 
 
+def _normalize_str_list(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return []
+
+
+async def _load_ai_records_from_input(
+    ctx: PipelineContext,
+    cfg: Dict[str, Any],
+    *,
+    default_input_key: str,
+) -> List[Dict[str, Any]]:
+    """从输入引用加载记录列表，支持 sqlite 快照（dict）和 csv 路径（str）。"""
+    input_key = cfg.get("input_from_var") or default_input_key
+    input_ref = cfg.get("input_ref") or ctx.vars.get(input_key)
+    selected_columns = _normalize_str_list(cfg.get("selected_columns"))
+
+    if not input_ref:
+        return []
+
+    records: List[Dict[str, Any]] = []
+
+    if isinstance(input_ref, dict) and input_ref.get("dataset"):
+        from sqlalchemy import text as _text
+
+        from database.db_session import get_async_engine
+
+        dataset_name = str(input_ref.get("dataset"))
+        _engine = get_async_engine("sqlite")
+        if not _engine:
+            return []
+        async with _engine.connect() as _conn:
+            _rows = await _conn.execute(
+                _text(
+                    "SELECT feishu_record_id, data FROM feishu_record_snapshot "
+                    "WHERE dataset_name=:ds"
+                ),
+                {"ds": dataset_name},
+            )
+            for idx, row in enumerate(_rows.fetchall()):
+                feishu_record_id = row[0]
+                data = row[1]
+                try:
+                    payload = data if isinstance(data, dict) else json.loads(data or "{}")
+                except Exception:
+                    payload = {}
+
+                if selected_columns:
+                    filtered = {k: payload.get(k, "") for k in selected_columns}
+                else:
+                    filtered = payload
+                filtered["_record_key"] = feishu_record_id or f"row_{idx}"
+                records.append(filtered)
+        return records
+
+    if isinstance(input_ref, str):
+        p = Path(input_ref)
+        if not p.is_absolute():
+            p = (PROJECT_ROOT / p).resolve()
+        if not p.exists():
+            return []
+        with p.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for idx, row in enumerate(reader):
+                payload = dict(row)
+                if selected_columns:
+                    filtered = {k: payload.get(k, "") for k in selected_columns}
+                else:
+                    filtered = payload
+                filtered["_record_key"] = payload.get("记录ID") or payload.get("record_id") or f"row_{idx}"
+                records.append(filtered)
+        return records
+
+    if isinstance(input_ref, list):
+        for idx, row in enumerate(input_ref):
+            payload = row if isinstance(row, dict) else {"value": row}
+            if selected_columns:
+                payload = {k: payload.get(k, "") for k in selected_columns}
+            payload["_record_key"] = payload.get("_record_key") or f"row_{idx}"
+            records.append(payload)
+        return records
+
+    return []
+
+
+def _resolve_image_ref(value: str, image_base_dir: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://") or raw.startswith("data:"):
+        return raw
+
+    candidate = Path(raw)
+    search_paths: List[Path] = []
+    if candidate.is_absolute():
+        search_paths.append(candidate)
+    else:
+        if image_base_dir:
+            search_paths.append((PROJECT_ROOT / image_base_dir / candidate).resolve())
+        search_paths.append((PROJECT_ROOT / candidate).resolve())
+
+    for p in search_paths:
+        if p.exists() and p.is_file():
+            mime, _ = mimetypes.guess_type(str(p))
+            mime = mime or "application/octet-stream"
+            data = base64.b64encode(p.read_bytes()).decode("ascii")
+            return f"data:{mime};base64,{data}"
+    return raw
+
+
+class AIImageUnderstandingStep(PipelineStep):
+    """
+    图片理解步骤（OpenRouter Vision）。
+
+    config keys:
+      step_id             — AI 步骤 ID（用于依赖引用）
+      prompt              — 提示词模板（支持 {{record.*}} / {{steps.*}}）
+      input.images        — 图片 URL 模板数组
+      model               — 可选模型覆盖
+      target_field        — 输出字段名（默认 ai_image_understanding）
+      output_var          — 将本步骤输出写入 ctx.vars 的变量名
+    input_from_var      — 从 ctx.vars 读取输入数据集（默认 feishu_pull_result）
+    selected_columns    — 参与上下文渲染的列名（逗号分隔或数组）
+    image_columns       — 图片列名（逗号分隔或数组）
+    row_limit           — 批处理上限（默认 20）
+    image_base_dir      — 本地图片相对根目录（例如 image）
+    record              — 记录上下文（dict，单记录模式）
+      record_from_var     — 从 ctx.vars 读取 record 的变量名（优先）
+      use_mock_if_no_key  — 无 key 时是否走 mock（默认 true）
+    """
+
+    step_type = "ai_image_understanding"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        cfg = self.config
+        step_id = cfg.get("step_id") or self.step_type
+        target_field = cfg.get("target_field") or "ai_image_understanding"
+        output_var = cfg.get("output_var") or step_id
+        use_mock_if_no_key = bool(cfg.get("use_mock_if_no_key", True))
+
+        ai_steps = ctx.vars.setdefault("_ai_steps", {})
+        records = await _load_ai_records_from_input(ctx, cfg, default_input_key="feishu_pull_result")
+        row_limit = int(cfg.get("row_limit", 20) or 20)
+        image_columns = _normalize_str_list(cfg.get("image_columns"))
+        image_base_dir = str(cfg.get("image_base_dir", "") or "")
+
+        if not records:
+            record = cfg.get("record") or {}
+            record_from_var = cfg.get("record_from_var")
+            if record_from_var:
+                record = ctx.vars.get(record_from_var) or {}
+            records = [dict(record)]
+
+        raw_images_templates = (cfg.get("input") or {}).get("images", [])
+        model = cfg.get("model") or ai_gateway.default_vision_model
+        row_outputs: List[Dict[str, Any]] = []
+        by_record: Dict[str, Any] = {}
+
+        for idx, record in enumerate(records[:row_limit]):
+            record_key = str(record.get("_record_key") or f"row_{idx}")
+            render_ctx = {
+                "record": record,
+                "steps": ai_steps,
+                "system": {
+                    "task_id": ctx.task_id,
+                    "execution_id": ctx.execution_id,
+                    "now": int(datetime.now().timestamp()),
+                },
+            }
+
+            prompt = AITemplateEngine.render_text(str(cfg.get("prompt", "")), render_ctx)
+            if not prompt:
+                continue
+
+            image_urls: List[str] = []
+            for item in raw_images_templates:
+                rendered = AITemplateEngine.render_text(str(item), render_ctx)
+                if rendered:
+                    image_urls.append(_resolve_image_ref(rendered, image_base_dir))
+            for col in image_columns:
+                col_val = str(record.get(col, "") or "").strip()
+                if col_val:
+                    image_urls.append(_resolve_image_ref(col_val, image_base_dir))
+
+            image_urls = [u for u in image_urls if u]
+            if not image_urls:
+                continue
+
+            result = await ai_gateway.run_vision(
+                prompt=prompt,
+                image_urls=image_urls,
+                model=model,
+                use_mock_if_no_key=use_mock_if_no_key,
+            )
+            if not result.get("ok"):
+                await log(f"[ai_image_understanding] WARN record={record_key}: {result.get('error', 'unknown error')}")
+                continue
+
+            payload = {
+                "record_key": record_key,
+                "content": result.get("content", ""),
+                "usage": result.get("usage", {}),
+                "latency_ms": result.get("latency_ms", 0),
+                "model": result.get("model", model),
+                "target_field": target_field,
+            }
+            row_outputs.append(payload)
+            by_record[record_key] = payload
+
+        if not row_outputs:
+            ctx.aborted = True
+            await log("[ai_image_understanding] ERROR: 无可用图片记录或全部调用失败")
+            ctx.step_results.append({
+                "step": self.step_type,
+                "step_id": step_id,
+                "status": "failed",
+                "error": "无可用图片记录或全部调用失败",
+            })
+            return
+
+        summary_payload = {
+            "rows": row_outputs,
+            "by_record": by_record,
+            "count": len(row_outputs),
+            "target_field": target_field,
+            "model": row_outputs[0].get("model", model),
+        }
+        ai_steps[step_id] = {"output": summary_payload}
+        ctx.vars[output_var] = summary_payload
+        ctx.vars.setdefault("ai_outputs", {})[target_field] = summary_payload
+
+        await log(f"[ai_image_understanding] OK rows={len(row_outputs)} target={target_field}")
+        ctx.step_results.append({
+            "step": self.step_type,
+            "step_id": step_id,
+            "status": "ok",
+            "target_field": target_field,
+            "output_var": output_var,
+            "count": len(row_outputs),
+        })
+
+
+class AITextAnalysisStep(PipelineStep):
+    """
+    文本分析步骤（OpenRouter Text）。
+
+    config keys:
+      step_id             — AI 步骤 ID（用于依赖引用）
+      prompt              — 提示词模板（支持 {{record.*}} / {{steps.*}}）
+      model               — 可选模型覆盖
+      target_field        — 输出字段名（默认 ai_text_analysis）
+      output_var          — 将本步骤输出写入 ctx.vars 的变量名
+    input_from_var      — 从 ctx.vars 读取输入数据集（默认 feishu_pull_result）
+    selected_columns    — 文本分析参与的列名（逗号分隔或数组）
+    image_context_from_var — 读取图片分析输出变量（默认 image_understanding）
+    row_limit           — 批处理上限（默认 20）
+    record              — 记录上下文（dict，单记录模式）
+      record_from_var     — 从 ctx.vars 读取 record 的变量名（优先）
+      use_mock_if_no_key  — 无 key 时是否走 mock（默认 true）
+    """
+
+    step_type = "ai_text_analysis"
+
+    async def run(self, ctx: PipelineContext, log: Callable) -> None:
+        cfg = self.config
+        step_id = cfg.get("step_id") or self.step_type
+        target_field = cfg.get("target_field") or "ai_text_analysis"
+        output_var = cfg.get("output_var") or step_id
+        use_mock_if_no_key = bool(cfg.get("use_mock_if_no_key", True))
+
+        ai_steps = ctx.vars.setdefault("_ai_steps", {})
+        records = await _load_ai_records_from_input(ctx, cfg, default_input_key="feishu_pull_result")
+        row_limit = int(cfg.get("row_limit", 20) or 20)
+        image_ctx_key = cfg.get("image_context_from_var", "image_understanding")
+        image_ctx = ctx.vars.get(image_ctx_key) or {}
+        image_map = image_ctx.get("by_record", {}) if isinstance(image_ctx, dict) else {}
+
+        if not records:
+            record = cfg.get("record") or {}
+            record_from_var = cfg.get("record_from_var")
+            if record_from_var:
+                record = ctx.vars.get(record_from_var) or {}
+            records = [dict(record)]
+
+        model = cfg.get("model") or ai_gateway.default_text_model
+        row_outputs: List[Dict[str, Any]] = []
+        by_record: Dict[str, Any] = {}
+
+        for idx, row in enumerate(records[:row_limit]):
+            record = dict(row)
+            record_key = str(record.get("_record_key") or f"row_{idx}")
+            if record_key in image_map:
+                record["image_context"] = image_map[record_key].get("content", "")
+
+            render_ctx = {
+                "record": record,
+                "steps": ai_steps,
+                "system": {
+                    "task_id": ctx.task_id,
+                    "execution_id": ctx.execution_id,
+                    "now": int(datetime.now().timestamp()),
+                },
+            }
+
+            prompt = AITemplateEngine.render_text(str(cfg.get("prompt", "")), render_ctx)
+            if not prompt:
+                continue
+
+            result = await ai_gateway.run_text(
+                prompt=prompt,
+                model=model,
+                use_mock_if_no_key=use_mock_if_no_key,
+            )
+            if not result.get("ok"):
+                await log(f"[ai_text_analysis] WARN record={record_key}: {result.get('error', 'unknown error')}")
+                continue
+
+            payload = {
+                "record_key": record_key,
+                "content": result.get("content", ""),
+                "usage": result.get("usage", {}),
+                "latency_ms": result.get("latency_ms", 0),
+                "model": result.get("model", model),
+                "target_field": target_field,
+            }
+            row_outputs.append(payload)
+            by_record[record_key] = payload
+
+        if not row_outputs:
+            ctx.aborted = True
+            await log("[ai_text_analysis] ERROR: 无可用文本记录或全部调用失败")
+            ctx.step_results.append({
+                "step": self.step_type,
+                "step_id": step_id,
+                "status": "failed",
+                "error": "无可用文本记录或全部调用失败",
+            })
+            return
+
+        summary_payload = {
+            "rows": row_outputs,
+            "by_record": by_record,
+            "count": len(row_outputs),
+            "target_field": target_field,
+            "model": row_outputs[0].get("model", model),
+        }
+        ai_steps[step_id] = {"output": summary_payload}
+        ctx.vars[output_var] = summary_payload
+        ctx.vars.setdefault("ai_outputs", {})[target_field] = summary_payload
+
+        await log(f"[ai_text_analysis] OK rows={len(row_outputs)} target={target_field}")
+        ctx.step_results.append({
+            "step": self.step_type,
+            "step_id": step_id,
+            "status": "ok",
+            "target_field": target_field,
+            "output_var": output_var,
+            "count": len(row_outputs),
+        })
+
+
 # ─── 步骤注册表 ───────────────────────────────────────────────────────────────
 
 STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
@@ -1211,6 +1579,8 @@ STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {
     "feishu_pull": FeishuPullStep,
     "feishu_push_json": FeishuPushJsonStep,
     "feishu_update_records": FeishuUpdateRecordsStep,
+    "ai_image_understanding": AIImageUnderstandingStep,
+    "ai_text_analysis": AITextAnalysisStep,
 }
 
 

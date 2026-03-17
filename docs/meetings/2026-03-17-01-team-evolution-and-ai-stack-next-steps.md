@@ -49,7 +49,7 @@
 |---|---|---|
 | D-TS-001 | 团队编制策略 | 核心成员保持不变，专项成员按需激活 |
 | D-TS-002 | 招募策略 | 新增 `arch-designer`、`qa-automation` 两个专项角色 |
-| D-TS-003 | 归档策略 | 暂不归档任何成员；`brand`、`profile-designer` 进入低频值班态 |
+| D-TS-003 | 归档策略 | 归档 `brand`、`profile-designer` 至 `.github/agents/archive/`，按需恢复 |
 | D-TS-004 | 模型测试策略 | 先以 OpenRouter 免费模型打通链路，再候选付费模型由用户确认 |
 
 ## 行动项
@@ -64,7 +64,7 @@
 
 ## 下阶段执行顺序
 
-1. 免费模型连通性测试（文本 step）
+1. 免费模型连通性测试（图片 step）
 2. 失败路径回归（无 key / 模板错误 / 网关异常）
 3. 用户确认后切换高性能付费模型
-4. 进入 MVP 联调（文本列 + 图片列 + 顺序依赖 + data_arrival）
+4. 进入 MVP 联调（图片列 + 文本列 + 顺序依赖 + data_arrival）

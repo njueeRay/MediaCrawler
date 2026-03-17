@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed — 项目上下文团队快照
 - **`.github/copilot-instructions.md`**: 新增 4.1 团队编制决议，定义当前成员状态、新增招募与归档策略
 
+#### Changed — AI MVP 顺序与组织编制调整（2026-03-17）
+- **`docs/meetings/2026-03-17-ai-stack-architecture-review.md`**: MVP 顺序调整为“图片理解 -> 文本分析”，文本 step 明确引用图片 step 输出
+- **`docs/reference/ai-stack-technical-design.md`**: DSL 示例依赖方向改为 `image_understanding -> text_analysis`
+- **`.github/copilot-instructions.md`**: Roadmap 联调项改为“图片列→文本列顺序依赖”，团队快照更新为已归档 `brand` / `profile-designer`
+- **`.github/agents/archive/brand.agent.md`**: 归档冗余角色（保留历史）
+- **`.github/agents/archive/profile-designer.agent.md`**: 归档冗余角色（保留历史）
+- **`docs/governance/team-playbook.md`**: 新增“模糊需求处理协议（强制）”，要求先给 2-3 方案并由用户选择后实施，同时主动补全扩展点
+
+#### Added — Pipeline AI 双步骤落地（里程碑：文本分析 + 图片分析）
+- **`api/services/pipeline_steps.py`**: 新增 `ai_image_understanding` 与 `ai_text_analysis` 执行步骤并注册到 `STEP_REGISTRY`，支持模板渲染、OpenRouter 调用、步骤输出共享
+- **`webui-src/src/views/TaskScheduler.vue`**: 新增“AI分析（图片→文本）”任务类型、AI 步骤配置表单与序列化逻辑，可在调度界面直接配置并执行 AI 双 step
+
+#### Changed — 数据列驱动分析与本地图片路径支持
+- **`api/services/pipeline_steps.py`**: AI 步骤支持 `input_from_var + selected_columns + row_limit` 批量分析；支持从 `feishu_pull_result`（SQLite 快照 / CSV）读取记录并按选定列构造上下文
+- **`api/services/pipeline_steps.py`**: 图片步骤新增本地路径解析，支持将 `image/` 等本地文件编码为 data URL 后送入视觉模型
+- **`webui-src/src/views/TaskScheduler.vue`**: AI 步骤表单新增“输入数据变量 / 分析列 / 图片列 / 图片根目录 / 批量上限 / 图片上下文变量”，满足“选列分析+图片解析”目标
+
+#### Verified — AI 双步骤自动化测试
+- **`tests/test_ai_pipeline_steps.py`**: 新增 2 个用例，覆盖“CSV 选列批量分析（图片→文本）”和“本地图片路径解析”；执行结果 `2 passed`
+
 #### Verified — OpenRouter 免费模型链路验证
 - **`POST /api/ai/executions/run`**: 使用 `google/gemma-3-27b-it:free` 完成 smoke 测试；在 `use_mock_if_no_key=true` 下链路执行成功
 - **配置前置校验**: 在 `use_mock_if_no_key=false` 场景，接口按预期返回 `OPENROUTER_API_KEY 未配置`，确认当前真实推理依赖环境变量注入

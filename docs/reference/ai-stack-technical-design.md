@@ -114,31 +114,30 @@ class AIGateway:
   "version": "1.0.0",
   "steps": [
     {
-      "step_id": "text_analysis",
-      "type": "ai_text_analysis",
+      "step_id": "image_understanding",
+      "type": "ai_image_understanding",
       "input": {
-        "context": ["{{record.title}}", "{{record.content}}", "{{record.author_name}}"]
+        "images": ["{{record.cover}}"]
       },
-      "prompt": "请基于以下内容生成摘要、观点、风险点，输出 JSON。\n{{input.context}}",
+      "prompt": "请提取图片中的主体、场景和关键信息，输出 JSON。",
       "model": "openai/gpt-4o-mini",
       "output": {
-        "target_field": "ai_text_analysis",
+        "target_field": "ai_image_understanding",
         "format": "json"
       },
       "retry": 1
     },
     {
-      "step_id": "image_understanding",
-      "type": "ai_image_understanding",
-      "depends_on": ["text_analysis"],
+      "step_id": "text_analysis",
+      "type": "ai_text_analysis",
+      "depends_on": ["image_understanding"],
       "input": {
-        "images": ["{{record.cover}}"],
-        "hint": "{{steps.text_analysis.output.summary}}"
+        "context": ["{{record.title}}", "{{record.content}}", "{{record.author_name}}", "{{steps.image_understanding.output.content}}"]
       },
-      "prompt": "结合文本摘要和图片，输出图文一致性评分（0-100）及理由。",
+      "prompt": "请基于以下内容生成摘要、观点、风险点，输出 JSON。\n{{input.context}}",
       "model": "openai/gpt-4o-mini",
       "output": {
-        "target_field": "ai_image_understanding",
+        "target_field": "ai_text_analysis",
         "format": "json"
       },
       "retry": 1

@@ -40,3 +40,4 @@
 {"date":"2026-03-17","trigger":"ai-stack-team-evolution-planning","agent":"brain","type":"new-role","patternId":"P-BR-005","description":"新增专项角色 arch-designer（AI Stack 架构边界与 DSL 约束）并落地 .github/agents/arch-designer.agent.md"}
 {"date":"2026-03-17","trigger":"ai-stack-team-evolution-planning","agent":"brain","type":"new-role","patternId":"P-BR-006","description":"新增专项角色 qa-automation（AI Stack API 契约与回归质量门）并落地 .github/agents/qa-automation.agent.md"}
 {"date":"2026-03-17","trigger":"ai-stack-team-evolution-planning","agent":"brain","type":"decision","patternId":"P-BR-007","description":"归档策略：暂不归档任何成员，brand/profile-designer 进入低频值班态"}
+{"date":"2026-03-17","trigger":"ai-stack-milestone-refocus","agent":"brain","type":"decision-update","patternId":"P-BR-008","description":"根据用户指令将冗余成员 brand/profile-designer 正式归档到 .github/agents/archive，并将 AI MVP 顺序调整为图片分析先于文本分析"}
